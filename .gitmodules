@@ -1,4 +1,0 @@
-[submodule "external/stormAD"]
-	path = external/stormAD
-	url = https://github.com/DiellorBasha/stormAD.git
-	branch = master
