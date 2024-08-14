@@ -6,5 +6,8 @@ java/brainstorm.jar
 defaults/anatomy/*
 # Compiled Brainstorm
 bin/*/brainstorm3.jar
+
 # macOS desktop service store files
-.DS_Store
+
+# MATLAB project files
+/resources
