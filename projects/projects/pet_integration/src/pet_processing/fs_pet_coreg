@@ -1,0 +1,42 @@
+
+
+subjectsDir = '/export02/export01/data/toolboxes/freesurfer/subjects';
+sourceSubject = 'sub-MTL0005';
+sourceDirectory  = fullfile (sourceSubject, 'pet', 'derivatives', 'vlpp', 'ses-01');
+
+targetSubject = sprintf([subject 'a']);
+targetDirectory  = fullfile (targetSubject, 'pet', 'coreg');
+
+  % List all files in the anat folder
+    pet_files = dir(fullfile(sourceDirectory, '*.nii.gz'));
+
+     % Check for multiple T1-weighted runs
+    suvr_files = {};
+    for j = 1:length(pet_files)
+        if contains(pet_files(j).name, '_suvr')
+            suvr_files{end+1} = pet_files(j).name;
+        end
+    end
+
+
+relativePaths = extractRelativePaths(suvr_files, 'trc-');
+
+for jj=1:length(relativePaths)
+
+path2petNifti = fullfile(sourceDirectory, suvr_files{jj});
+
+[a,b,c] = fileparts(relativePaths{jj});
+[a,outputDirectory,c] = fileparts(b);
+
+path2outputFolder = fullfile(subjectsDir, targetDirectory, outputDirectory);
+mkdir(path2outputFolder)
+path2fsoutput = fullfile(targetDirectory, outputDirectory, 'template.reg.lta');
+
+cmd = ['mri_coreg --s ' targetSubject ' --mov $SUBJECTS_DIR/' path2petNifti ' --reg $SUBJECTS_DIR/' path2fsoutput ' --threads 7'];
+full_cmd = sprintf(cmd);
+
+    system(full_cmd);
+
+
+end
+
