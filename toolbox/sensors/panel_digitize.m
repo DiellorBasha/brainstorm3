@@ -40,6 +40,14 @@ end
 
 %% ===== START =====
 function Start() %#ok<DEFNU>
+    % Get Digitize options
+    DigitizeOptions = bst_get('DigitizeOptions');
+    % Check if using new version
+    if isfield(DigitizeOptions, 'Version') && strcmpi(DigitizeOptions.Version, '2024')
+        bst_call(@panel_digitize_2024, 'Start');
+        return;
+    end
+
     global Digitize;
     % ===== PREPARE DATABASE =====
     % If no protocol: exit
@@ -61,10 +69,8 @@ function Start() %#ok<DEFNU>
     end
     
     % ===== PATIENT ID =====
-    % Get Digitize options
-    DigitizeOptions = bst_get('DigitizeOptions');
     % Ask for subject id
-    PatientId = java_dialog('input', 'Please, enter subject name or id:', 'Digitize', [], DigitizeOptions.PatientId);
+    PatientId = java_dialog('input', 'Please, enter subject ID:', 'Digitize', [], DigitizeOptions.PatientId);
     if isempty(PatientId)
         return;
     end
@@ -171,25 +177,40 @@ function [bstPanelNew, panelName] = CreatePanel() %#ok<DEFNU>
     fontSize      = round(11 * bst_get('InterfaceScaling') / 100);
     
     % ===== MENU BAR =====
+    jPanelMenu = gui_component('panel');
     jMenuBar = java_create('javax.swing.JMenuBar');
-    jPanelNew.add(jMenuBar, BorderLayout.NORTH);
+    jPanelMenu.add(jMenuBar, BorderLayout.NORTH);
+    jLabelNews = gui_component('label', jPanelMenu, BorderLayout.CENTER, ...
+                               ['<HTML><div align="center"><b>Digitize version: "legacy"</b></div>' ...
+                                '&bull Try the new Digitize version: <i>File > Switch to Digitize "2024"</i> &#8198&#8198' ...
+                                '&bull More details: <i>Help > Digitize tutorial</i>'], [], [], [], fontSize);
+    jLabelNews.setHorizontalAlignment(SwingConstants.CENTER);
+    jLabelNews.setOpaque(true);
+    jLabelNews.setBackground(java.awt.Color.yellow);
+
     % File menu
     jMenu = gui_component('Menu', jMenuBar, [], 'File', [], [], [], []);
     gui_component('MenuItem', jMenu, [], 'Start over', IconLoader.ICON_RELOAD, [], @(h,ev)bst_call(@ResetDataCollection, 1), []);
     gui_component('MenuItem', jMenu, [], 'Save as...', IconLoader.ICON_SAVE, [], @(h,ev)bst_call(@Save_Callback), []);
     jMenu.addSeparator();
     gui_component('MenuItem', jMenu, [], 'Edit settings...',    IconLoader.ICON_EDIT, [], @(h,ev)bst_call(@EditSettings), []);
+    gui_component('MenuItem', jMenu, [], 'Switch to Digitize "2024"', [], [], @(h,ev)bst_call(@SwitchVersion), []);
     gui_component('MenuItem', jMenu, [], 'Reset serial connection', IconLoader.ICON_FLIP, [], @(h,ev)bst_call(@CreateSerialConnection), []);
     jMenu.addSeparator();
-    if exist('bst_headtracking')
-        gui_component('MenuItem', jMenu, [], 'Start head tracking',     IconLoader.ICON_ALIGN_CHANNELS, [], @(h,ev)bst_call(@(h,ev)bst_headtracking([],1,1)), []);
+    if exist('bst_headtracking', 'file')
+        gui_component('MenuItem', jMenu, [], 'Start head tracking', IconLoader.ICON_ALIGN_CHANNELS, [], @(h,ev)bst_call(@(h,ev)bst_headtracking([],1,1)), []);
         jMenu.addSeparator();
     end
     gui_component('MenuItem', jMenu, [], 'Save and exit', IconLoader.ICON_RESET, [], @(h,ev)bst_call(@Close_Callback), []);
     % EEG Montage menu
     jMenuEeg = gui_component('Menu', jMenuBar, [], 'EEG montage', [], [], [], []);    
     CreateMontageMenu(jMenuEeg);
+    % Help menu
+    jMenuHelp = gui_component('Menu', jMenuBar, [], 'Help', [], [], [], []);
+    gui_component('MenuItem', jMenuHelp, [], 'Digitize tutorial', [], [], @(h,ev)web('https://neuroimage.usc.edu/brainstorm/Tutorials/TutDigitizeLegacy', '-browser'), []);
     
+    jPanelNew.add(jPanelMenu, BorderLayout.NORTH);
+
     % ===== Control Panel =====
     jPanelControl = java_create('javax.swing.JPanel');
     jPanelControl.setLayout(BoxLayout(jPanelControl, BoxLayout.Y_AXIS));
@@ -290,7 +311,7 @@ function [bstPanelNew, panelName] = CreatePanel() %#ok<DEFNU>
         jListCoord = JList(largeFontSize);
         jListCoord.setCellRenderer(BstStringListRenderer(fontSize));
         % Size
-        jPanelScrollList = JScrollPane();
+        jPanelScrollList = JScrollPane(jListCoord);
         jPanelScrollList.getLayout.getViewport.setView(jListCoord);
         jPanelScrollList.setHorizontalScrollBarPolicy(jPanelScrollList.HORIZONTAL_SCROLLBAR_NEVER);
         jPanelScrollList.setVerticalScrollBarPolicy(jPanelScrollList.VERTICAL_SCROLLBAR_ALWAYS);
@@ -317,6 +338,22 @@ function [bstPanelNew, panelName] = CreatePanel() %#ok<DEFNU>
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
+
+%% ===== SWITCH to 2024 version =====
+function SwitchVersion()
+    % Always confirm this switch.
+    if ~java_dialog('confirm', ['<HTML>Switch to new (2024) version of the Digitize panel?<BR>', ...
+            'See Digitize tutorial (Digitize panel > Help menu).<BR>', ...
+            '<B>This will close the window. Any unsaved points will be lost.</B>'], 'Digitize version')
+        return;
+    end
+    % Close this panel
+    Close_Callback();
+    % Save the preferred version. Must be after closing
+    DigitizeOptions = bst_get('DigitizeOptions');
+    DigitizeOptions.Version = '2024';
+    bst_set('DigitizeOptions', DigitizeOptions);
+end
 
 %% ===== CLOSE =====
 function Close_Callback()
@@ -345,6 +382,17 @@ function isAccepted = PanelHidingCallback() %#ok<DEFNU>
     % Else: reload to get access to the EEG type of sensors
     else
         db_reload_studies(iStudy);
+    end
+    % Close serial connection, to allow switching Digitize version, and to avoid further callbacks if stylus is pressed.
+    if ~isempty(Digitize.SerialConnection)
+        fclose(Digitize.SerialConnection);
+        delete(Digitize.SerialConnection);
+    end
+    % Check for any remaining open connection
+    s = instrfind('status','open');
+    if ~isempty(s)
+        fclose(s);
+        delete(s);
     end
     % Unload everything
     bst_memory('UnloadAll', 'Forced');
@@ -684,12 +732,13 @@ function UpdateList()
     ctrl.jListCoord.setModel(listModel);
     ctrl.jListCoord.repaint();
     drawnow;
-    % Scroll down
+    % Scroll to last collected point (non-empty Loc), +1 if more points listed.
     lastIndex = min(listModel.getSize(), 12 + nRecEEG + nHeadShape);
-    selRect = ctrl.jListCoord.getCellBounds(lastIndex-1, lastIndex-1);
-    %ctrl.jListCoord.scrollRectToVisible(selRect);
-    ctrl.jListCoord.repaint();
-    ctrl.jListCoord.getParent().getParent().repaint();
+    if listModel.getSize() > lastIndex
+        ctrl.jListCoord.ensureIndexIsVisible(lastIndex); % 0-indexed
+    else
+        ctrl.jListCoord.ensureIndexIsVisible(lastIndex-1); % 0-indexed, -1 works even if 0
+    end
 end
 
 

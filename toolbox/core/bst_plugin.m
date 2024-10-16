@@ -221,7 +221,7 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
     PlugDesc(end).URLinfo        = 'https://github.com/sampsapursiainen/zeffiro_interface';
     PlugDesc(end).TestFile       = 'zeffiro_downloader.m';
     PlugDesc(end).ReadmeFile     = 'README.md';
-    PlugDesc(end).CompiledStatus = 2;
+    PlugDesc(end).CompiledStatus = 0;
     PlugDesc(end).LoadFolders    = {'*'};
     PlugDesc(end).DeleteFiles    = {'.gitignore'};
 
@@ -605,24 +605,24 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
     
     % === fNIRS: MCXLAB CUDA ===
     PlugDesc(end+1)              = GetStruct('mcxlab-cuda');
-    PlugDesc(end).Version        = '2021.12.04';
+    PlugDesc(end).Version        = '2024.07.23';
     PlugDesc(end).Category       = 'fNIRS';
     PlugDesc(end).AutoUpdate     = 1;
-    PlugDesc(end).URLzip         = 'http://mcx.space/nightly/release/v2020/lite/mcxlab-allinone-x86_64-v2020.zip';
+    PlugDesc(end).URLzip         = 'https://mcx.space/nightly/release/git20240723/mcxlab-allinone-git20240723.zip';
     PlugDesc(end).TestFile       = 'mcxlab.m';
-    PlugDesc(end).URLinfo        = 'http://mcx.space/wiki/';
+    PlugDesc(end).URLinfo        = 'https://mcx.space/wiki/';
     PlugDesc(end).CompiledStatus = 0;
     PlugDesc(end).LoadFolders    = {'*'};
     PlugDesc(end).UnloadPlugs    = {'mcxlab-cl'};
 
     % === fNIRS: MCXLAB CL ===
     PlugDesc(end+1)              = GetStruct('mcxlab-cl');
-    PlugDesc(end).Version        = '2020';
+    PlugDesc(end).Version        = '2024.07.23';
     PlugDesc(end).Category       = 'fNIRS';
     PlugDesc(end).AutoUpdate     = 0;
-    PlugDesc(end).URLzip         = 'http://mcx.space/nightly/release/v2020/lite/mcxlabcl-allinone-x86_64-v2020.zip';
+    PlugDesc(end).URLzip         = 'https://mcx.space/nightly/release/git20240723/mcxlabcl-allinone-git20240723.zip';
     PlugDesc(end).TestFile       = 'mcxlabcl.m';
-    PlugDesc(end).URLinfo        = 'http://mcx.space/wiki/';
+    PlugDesc(end).URLinfo        = 'https://mcx.space/wiki/';
     PlugDesc(end).CompiledStatus = 2;
     PlugDesc(end).LoadFolders    = {'*'};
     PlugDesc(end).UnloadPlugs    = {'mcxlab-cuda'};
@@ -656,6 +656,7 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
     PlugDesc(end).GetVersionFcn  = 'ft_version';
     PlugDesc(end).LoadedFcn      = ['global ft_default; ' ...
                                     'ft_default = []; ' ...
+                                    'clear ft_defaults; ' ...
                                     'if exist(''filtfilt'', ''file''), ft_default.toolbox.signal=''matlab''; end; ' ...
                                     'if exist(''nansum'', ''file''), ft_default.toolbox.stats=''matlab''; end; ' ...
                                     'if exist(''rgb2hsv'', ''file''), ft_default.toolbox.images=''matlab''; end; ' ...
@@ -1373,10 +1374,11 @@ function TestFilePath = GetTestFilePath(PlugDesc)
                 if ~isempty(p) && ~isempty(strfind(TestFilePath, bst_fileparts(p)))
                     TestFilePath = [];
                 end
-            % SPM12: Ignore if found embedded in ROAST
+            % SPM12: Ignore if found embedded in ROAST or in FieldTrip
             elseif strcmpi(PlugDesc.Name, 'spm12')
                 p = which('roast.m');
-                if ~isempty(p) && ~isempty(strfind(TestFilePath, bst_fileparts(p)))
+                q = which('ft_defaults.m');
+                if (~isempty(p) && ~isempty(strfind(TestFilePath, bst_fileparts(p)))) || (~isempty(q) && ~isempty(strfind(TestFilePath, bst_fileparts(q))))
                     TestFilePath = [];
                 end
             % Iso2mesh: Ignore if found embedded in ROAST
@@ -2579,10 +2581,12 @@ end
 
 
 %% ===== MENUS: CREATE =====
-function j = MenuCreate(jMenu, jPlugsPrev, fontSize)
+function j = MenuCreate(jMenu, jPlugsPrev, PlugDesc, fontSize)
     import org.brainstorm.icon.*;
     % Get all the supported plugins
-    PlugDesc = GetSupported();
+    if isempty(PlugDesc)
+        PlugDesc = GetSupported();
+    end
     % Get Matlab version
     MatlabVersion = bst_get('MatlabVersion');
     isCompiled = bst_iscompiled();
@@ -2735,10 +2739,14 @@ end
 %% ===== MENUS: UPDATE =====
 function MenuUpdate(jMenu, fontSize)
     import org.brainstorm.icon.*;
-    % Regenerate plugin menu to look for new plugins
     global GlobalData
+    % Get installed and supported plugins
+    [PlugsInstalled, PlugsSupported]= GetInstalled();
+    % Get previous menu entries
     jPlugs = GlobalData.Program.GUI.pluginMenus;
-    jPlugs = MenuCreate(jMenu, jPlugs, fontSize);
+    % Regenerate plugin menu to look for new plugins
+    jPlugs = MenuCreate(jMenu, jPlugs, PlugsSupported, fontSize);
+    % Update menu entries
     GlobalData.Program.GUI.pluginMenus = jPlugs;
     % If compiled: disable most menus
     isCompiled = bst_iscompiled();
@@ -2748,9 +2756,9 @@ function MenuUpdate(jMenu, fontSize)
     for iPlug = 1:length(jPlugs)
         j = jPlugs(iPlug);
         PlugName = j.name;
+        Plug    = PlugsInstalled(ismember({PlugsInstalled.Name}, PlugName));
+        PlugRef = PlugsSupported(ismember({PlugsSupported.Name}, PlugName));
         % Is installed?
-        PlugRef = GetSupported(PlugName);
-        Plug = GetInstalled(PlugName);
         if ~isempty(Plug)
             isInstalled = 1;
         elseif ~isempty(PlugRef)
@@ -3198,5 +3206,5 @@ end
 %% ===== NOT SUPPORTED APPLE SILICON =====
 % Return list of plugins not supported on Apple silicon
 function pluginNames = PluginsNotSupportAppleSilicon()
-    pluginNames = {'brain2mesh', 'duneuro', 'iso2mesh', 'mcxlab-cl', 'mcxlab-cuda', 'xdf'};
+    pluginNames = {'brain2mesh', 'duneuro', 'iso2mesh','mcxlab-cuda', 'xdf'};
 end
