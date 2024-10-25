@@ -112,6 +112,8 @@ sPet.Cube    = data;
 sPet.Voxsize = Voxsize;
 sPet.Comment = 'PET';
 sPet.Header  = hdr;
+sPet.Tracer=baseName;
+sPet.Frames=hdr.dim.dim(1);
 
 % ===== NIFTI ORIENTATION =====
 % Apply orientation to the volume

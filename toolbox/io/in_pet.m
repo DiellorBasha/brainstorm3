@@ -105,11 +105,10 @@ isAtlas = ismember(FileFormat, {'ALL-ATLAS', 'ALL-MNI-ATLAS', 'SPM-TPM'});
 if ismember(FileFormat, {'ALL', 'ALL-ATLAS', 'ALL-MNI', 'ALL-MNI-ATLAS'})
     % Switch between file extensions
     switch (lower(fExt))
-        case {'.ima', '.dim'},        FileFormat = 'GIS';
+        % case {'.ima', '.dim'},        FileFormat = 'GIS';
         case {'.img','.hdr','.nii'},  FileFormat = 'Nifti1';
-        case '.fif',                  FileFormat = 'Neuromag';
-        case {'.mgz','.mgh'},         FileFormat = 'MGH';
-        case {'.mnc','.mni'},         FileFormat = 'MINC';
+        % case {'.mgz','.mgh'},         FileFormat = 'MGH';
+        % case {'.mnc','.mni'},         FileFormat = 'MINC';
         case '.mat',                  FileFormat = 'BST';
         otherwise,                    error('File format could not be detected, please specify a file format.');
     end
@@ -118,10 +117,8 @@ end
 % ===== LOAD PET =====
 % Switch between file formats
 switch (FileFormat)   
-    case 'CTF'
-        PET = in_pet_ctf(PetFile);  % Auto-detect file format
-    case 'GIS'
-        PET = in_pet_gis(PetFile, ByteOrder);
+    % case 'GIS'
+    %     PET = in_pet_gis(PetFile, ByteOrder);
     case {'Nifti1', 'Analyze'}
         if isInteractive
             [PET, vox2ras, tReorient] = in_pet_nii(PetFile, 1, [], []);
@@ -140,21 +137,16 @@ switch (FileFormat)
                 [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 1, 0);
             end
         end
-    case 'KIT'
-        error('Not supported yet');
-    case 'Neuromag'
-        error('Not supported yet');
     case 'MINC'
-        PET = in_pet_mnc(PetFile);
-    case 'FT-PET'
-        PET = in_pet_fieldtrip(PetFile);
+        error('Not supported yet');
     case 'BST'
         % Check that the filename contains the 'subjectimage' tag
         if ~isempty(strfind(lower(fBase), 'subjectimage'))
             PET = load(PetFile);
         end
     case 'SPM-TPM'
-        PET = in_pet_tpm(PetFile);
+        error('Not supported yet');
+        %PET = in_pet_tpm(PetFile);
     otherwise
         error(['Unknown format: ' FileFormat]);
 end

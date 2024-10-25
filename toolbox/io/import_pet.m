@@ -122,6 +122,7 @@ else
     % Use filename as comment
     [tmp__, importedBaseName] = bst_fileparts(PetFile);
     importedBaseName = strrep(importedBaseName, '.nii', '');
+    importedBaseName=importedBaseName{1};
 end
 
 % Get subject subdirectory
