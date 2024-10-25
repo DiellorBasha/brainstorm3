@@ -1,9 +1,9 @@
 function [PET, vox2ras, tReorient] = in_pet(PetFile, FileFormat, isInteractive, isNormalize)
 % IN_pet: Detect file format and load PET file.
 % 
-% USAGE:  in_pet(petFile, FileFormat='ALL', isInteractive=1, isNormalize=0)
+% USAGE:  in_pet(PetFile, FileFormat='ALL', isInteractive=1, isNormalize=0)
 % INPUT:
-%     - petFile       : full path to a PET file
+%     - PetFile       : full path to a PET file
 %     - FileFormat    : Format of the input file (default = 'ALL')
 %     - isInteractive : 0 or 1
 %     - isNormalize   : If 1, converts values to uint8 and scales between 0 and 1
@@ -72,9 +72,9 @@ tReorient = [];
 
 % ===== GUNZIP FILE =====
 TmpDir = [];
-if ~iscell(petFile)
+if ~iscell(PetFile)
     % Get file extension
-    [fPath, fBase, fExt] = bst_fileparts(petFile);
+    [fPath, fBase, fExt] = bst_fileparts(PetFile);
     % If file is gzipped
     if strcmpi(fExt, '.gz')
         % Get temporary folder
@@ -82,13 +82,13 @@ if ~iscell(petFile)
         % Target file
         gunzippedFile = bst_fullfile(TmpDir, fBase);
         % Unzip file
-        res = org.brainstorm.file.Unpack.gunzip(petFile, gunzippedFile);
+        res = org.brainstorm.file.Unpack.gunzip(PetFile, gunzippedFile);
         if ~res
-            error(['Could not gunzip file "' petFile '" to:' 10 gunzippedFile ]);
+            error(['Could not gunzip file "' PetFile '" to:' 10 gunzippedFile ]);
         end
         % Import gunzipped file
-        petFile = gunzippedFile;
-        [fPathTmp, fBase, fExt] = bst_fileparts(petFile);
+        PetFile = gunzippedFile;
+        [fPathTmp, fBase, fExt] = bst_fileparts(PetFile);
     end
     % Default comment
     Comment = fBase;
@@ -119,25 +119,25 @@ end
 % Switch between file formats
 switch (FileFormat)   
     case 'CTF'
-        PET = in_pet_ctf(petFile);  % Auto-detect file format
+        PET = in_pet_ctf(PetFile);  % Auto-detect file format
     case 'GIS'
-        PET = in_pet_gis(petFile, ByteOrder);
+        PET = in_pet_gis(PetFile, ByteOrder);
     case {'Nifti1', 'Analyze'}
         if isInteractive
-            [PET, vox2ras, tReorient] = in_pet_nii(petFile, 1, [], []);
+            [PET, vox2ras, tReorient] = in_pet_nii(PetFile, 1, [], []);
         else
-            [PET, vox2ras, tReorient] = in_pet_nii(petFile, 1, 1, 0);
+            [PET, vox2ras, tReorient] = in_pet_nii(PetFile, 1, 1, 0);
         end
     case 'MGH'
         if isInteractive
-            [PET, vox2ras, tReorient] = in_pet_mgh(petFile, [], []);
+            [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, [], []);
         else
-            petDir = bst_fileparts(petFile);
+            petDir = bst_fileparts(PetFile);
             isReconAllClinical = ~isempty(file_find(petDir, 'synthSR.mgz', 2));
             if isReconAllClinical
-                [PET, vox2ras, tReorient] = in_pet_mgh(petFile, 0, 1);
+                [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 0, 1);
             else
-                [PET, vox2ras, tReorient] = in_pet_mgh(petFile, 1, 0);
+                [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 1, 0);
             end
         end
     case 'KIT'
@@ -145,16 +145,16 @@ switch (FileFormat)
     case 'Neuromag'
         error('Not supported yet');
     case 'MINC'
-        PET = in_pet_mnc(petFile);
+        PET = in_pet_mnc(PetFile);
     case 'FT-PET'
-        PET = in_pet_fieldtrip(petFile);
+        PET = in_pet_fieldtrip(PetFile);
     case 'BST'
         % Check that the filename contains the 'subjectimage' tag
         if ~isempty(strfind(lower(fBase), 'subjectimage'))
-            PET = load(petFile);
+            PET = load(PetFile);
         end
     case 'SPM-TPM'
-        PET = in_pet_tpm(petFile);
+        PET = in_pet_tpm(PetFile);
     otherwise
         error(['Unknown format: ' FileFormat]);
 end

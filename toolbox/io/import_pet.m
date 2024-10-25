@@ -98,7 +98,7 @@ end
 
 % Load PET
 isNormalize = 0;
-sPet = in_pet(PetFile, FileFormat, isInteractive, isNormalize);
+sPet = in_pet(PetFile{1}, FileFormat, isInteractive, isNormalize);
 if isempty(sPet)
     bst_progress('stop');
     return
