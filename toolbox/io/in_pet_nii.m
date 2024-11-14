@@ -74,7 +74,7 @@ switch(lower(extension))
         else
             isScale = 0;
         end
-        % Read image (3D matrix)
+        % Read image (3D matrix)d
         fseek(fid, double(hdr.dim.vox_offset), 'bof');
         data = nifti_read_img(fid, hdr, isScale);
         fclose(fid);
@@ -122,9 +122,6 @@ if ~isempty(hdr.nifti) && ~isempty(hdr.nifti.vox2ras)
 end
 
 end
-
-
-
 
 %% =================================================================================================
 %  ====== HELPER FUNCTIONS =========================================================================
