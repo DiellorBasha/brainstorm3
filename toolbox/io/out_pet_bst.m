@@ -14,8 +14,10 @@ function PET = out_pet_bst( PET, PetFile, Version)
 %
 % NOTES:
 %     - PET structure:
-%         |- Voxsize:   [x y z], size of each PET voxel, in millimeters
 %         |- Cube:      PET volume 
+%         |- Voxsize:   [x y z], size of each PET voxel, in millimeters'
+%         |- Tracer:    The name of the PET tracer
+%         |- Frames:    The total number of PET frames in the volume
 %         |- SCS:       Subject Coordinate System definition
 %         |    |- NAS:    [x y z] coordinates of the nasion, in voxels
 %         |    |- LPA:    [x y z] coordinates of the left pre-auricular point, in voxels
