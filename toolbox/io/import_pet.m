@@ -49,6 +49,7 @@ if (iSubject == 0)
 else
     sSubject = ProtocolSubjects.Subject(iSubject);
 end
+
 % Volume type
 volType = 'PET';
 if ~isempty(strfind(Comment, 'Import'))
@@ -90,6 +91,9 @@ if isempty(PetFile)
     bst_set('DefaultFormats',  DefaultFormats);
 end
 
+
+%% ===== DICOM CONVERTER =====
+
 %% ===== LOAD PET FILE =====
 isProgress = bst_progress('isVisible');
 if ~isProgress
@@ -98,7 +102,7 @@ end
 
 % Load PET
 isNormalize = 0;
-sPet = in_pet(PetFile{1}, FileFormat, isInteractive, isNormalize);
+sPet = in_pet(PetFile, FileFormat, isInteractive, isNormalize);
 if isempty(sPet)
     bst_progress('stop');
     return
@@ -136,9 +140,9 @@ sPet = out_pet_bst(sPet, BstPetFile);
 
 %% ===== REFERENCE NEW PET IN DATABASE ======
 % New anatomy structure
-sSubject.Anatomy(end + 1) = db_template('Anatomy');
-sSubject.Anatomy(end).FileName = file_short(BstPetFile);
-sSubject.Anatomy(end).Comment  = sPet.Comment;
+sSubject.PET(end + 1) = db_template('pet');
+sSubject.PET(end).FileName = file_short(BstPetFile);
+sSubject.PET(end).Comment  = sPet.Comment;
 % Default anatomy: do not change
 if isempty(sSubject.iAnatomy)
     sSubject.iAnatomy = length(sSubject.Anatomy);
@@ -152,7 +156,7 @@ else
 end
 bst_set('ProtocolSubjects', ProtocolSubjects);
 % Save first PET as permanent default
-if (length(sSubject.Anatomy) == 1)
+if (length(sSubject.PET) == 1)
     db_surface_default(iSubject, 'Anatomy', length(sSubject.Anatomy), 0);
 end
 
