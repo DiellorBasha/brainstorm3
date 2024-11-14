@@ -125,28 +125,28 @@ switch (FileFormat)
         else
             [PET, vox2ras, tReorient] = in_pet_nii(PetFile, 1, 1, 0);
         end
-    case 'MGH'
-        if isInteractive
-            [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, [], []);
-        else
-            petDir = bst_fileparts(PetFile);
-            isReconAllClinical = ~isempty(file_find(petDir, 'synthSR.mgz', 2));
-            if isReconAllClinical
-                [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 0, 1);
-            else
-                [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 1, 0);
-            end
-        end
-    case 'MINC'
-        error('Not supported yet');
-    case 'BST'
-        % Check that the filename contains the 'subjectimage' tag
-        if ~isempty(strfind(lower(fBase), 'subjectimage'))
-            PET = load(PetFile);
-        end
-    case 'SPM-TPM'
-        error('Not supported yet');
-        %PET = in_pet_tpm(PetFile);
+    % case 'MGH'
+    %     if isInteractive
+    %         [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, [], []);
+    %     else
+    %         petDir = bst_fileparts(PetFile);
+    %         isReconAllClinical = ~isempty(file_find(petDir, 'synthSR.mgz', 2));
+    %         if isReconAllClinical
+    %             [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 0, 1);
+    %         else
+    %             [PET, vox2ras, tReorient] = in_pet_mgh(PetFile, 1, 0);
+    %         end
+    %     end
+    % case 'MINC'
+    %     error('Not supported yet');
+    % case 'BST'
+    %     % Check that the filename contains the 'subjectimage' tag
+    %     if ~isempty(strfind(lower(fBase), 'subjectimage'))
+    %         PET = load(PetFile);
+    %     end
+    % case 'SPM-TPM'
+    %     error('Not supported yet');
+    %     %PET = in_pet_tpm(PetFile);
     otherwise
         error(['Unknown format: ' FileFormat]);
 end
@@ -325,6 +325,11 @@ if isMni && ~isempty(vox2ras) && (~isfield(PET, 'NCS') || ~isfield(PET.NCS, 'R')
     % Compute default fiducials positions based on MNI coordinates
     PET = pet_set_default_fid(PET);
 end
+
+%% ====ALIGN PET FRAMES====
+
+
+%%====REGISTER PET to SUBJECT MRI===
 
 
 %% ===== DELETE TEMPORARY FILE =====
