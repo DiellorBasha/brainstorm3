@@ -75,6 +75,9 @@ volType = 'MRI';
 if ~isempty(strfind(Comment, 'CT'))
     volType = 'CT';
 end
+if ~isempty(strfind(Comment, 'PET'))
+    volType = 'PET';
+end
 % Get node comment from filename
 if ~isempty(strfind(Comment, 'Import'))
     Comment = [];
@@ -157,9 +160,13 @@ end
 isMni   = ismember(FileFormat, {'ALL-MNI', 'ALL-MNI-ATLAS'});
 isAtlas = ismember(FileFormat, {'ALL-ATLAS', 'ALL-MNI-ATLAS', 'SPM-TPM'});
 isCt    = strcmpi(volType, 'CT');
+isPet   =strcmpi(volType,'PET');
 % Tag for CT volume
 if isCt
     tagVolType = '_volct';
+    isAtlas = 0;
+elseif isPet
+    tagVolType = '_volpet';
     isAtlas = 0;
 else
     tagVolType = '';
@@ -188,7 +195,7 @@ end
 
 %% ===== GET ATLAS LABELS =====
 % Try to get associated labels
-if isempty(Labels) && ~iscell(MriFile) && ~isCt
+if isempty(Labels) && ~iscell(MriFile) && ~isCt && ~isPet
     Labels = mri_getlabels(MriFile, sMri, isAtlas);
 end
 % Save labels in the file structure
@@ -277,6 +284,9 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
                 strOptions = [strOptions, '<BR>- <U><B>CT2MRI</B></U>:&nbsp;&nbsp;&nbsp;Coregister using USC ct2mrireg plugin.'];
                 cellOptions{end+1} = 'CT2MRI';
             end
+            if isPet
+            RegMethod = 'PET2MRI';
+            end
             % Skip registration
             strOptions = [strOptions, '<BR>- <U><B>Ignore</B></U>:&nbsp;&nbsp;&nbsp;The two volumes are already registered.'];
             cellOptions{end+1} = 'Ignore';
@@ -338,6 +348,19 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
                     '<BR><BR></HTML>'], 'Import CT');
                 % Register the CT to excisting MRI using USC's ct2mrireg plugin
                 [sMri, errMsg, fileTag] = mri_coregister(sMri, sMriRef, 'ct2mri', isReslice, 0, isMask);
+            case 'PET2MRI'
+                nFrames = size(sMri.Cube, 4);
+                kernel = fspecial3("gaussian", 5 ,2);
+
+                % Apply smoothing to each PET frame
+                for k = 1:nFrames
+                    sMri.Cube(:,:,:,k)=convn(sMri.Cube(:,:,:,k), kernel , "same");
+                end
+
+                sPet = sMri; sPet.Cube = sum (sMri.Cube, 4);
+                [sPet, errMsg, fileTag] = mri_coregister(sPet, sMriRef, 'spm', 1, 0);
+                fileTag='PET';
+                sMri = sPet; sMri.Comment = 'PET';
             case 'Ignore'
                 if isReslice
                     % Register the new MRI on the existing one using the transformation in the input files (files already registered)
@@ -405,6 +428,10 @@ else
             sMri.Comment = [sMri.Comment ' (MNI)'];
         end
     end
+
+            if isPet 
+            sMri.Comment = [sMri.Comment '_PET_volpet'];
+            end
     % Get imported base name
     [tmp__, importedBaseName] = bst_fileparts(MriFile);
     importedBaseName = strrep(importedBaseName, 'subjectimage_', '');
@@ -428,6 +455,7 @@ sMri = out_mri_bst(sMri, BstMriFile);
 sSubject.Anatomy(iAnatomy) = db_template('Anatomy');
 sSubject.Anatomy(iAnatomy).FileName = file_short(BstMriFile);
 sSubject.Anatomy(iAnatomy).Comment  = sMri.Comment;
+
 % Default anatomy: do not change
 if isempty(sSubject.iAnatomy)
     sSubject.iAnatomy = iAnatomy;

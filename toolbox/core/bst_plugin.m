@@ -683,20 +683,6 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
     PlugDesc(end).GetVersionFcn  = 'bst_getoutvar(2, @spm, ''Ver'')';
     PlugDesc(end).LoadedFcn      = 'spm(''defaults'',''EEG'');';
 
-    %     % === stormAD ===
-    % PlugDesc(end+1)              = GetStruct('stormAD');
-    % PlugDesc(end).Version        = 'github-master';
-    % PlugDesc(end).AutoUpdate     = 0;
-    % PlugDesc(end).AutoLoad       = 1;
-    % PlugDesc(end).CompiledStatus = 2;
-    % PlugDesc(end).URLzip         = 'https://github.com/DiellorBasha/stormAD/archive/refs/heads/master.zip';
-    % PlugDesc(end).URLinfo        = 'https://github.com/DiellorBasha/stormAD/tree/master';
-    % PlugDesc(end).ReadmeFile     = 'README.md'; 
-    % PlugDesc(end).MinMatlabVer   = 803;   % 2014a
-    % PlugDesc(end).LoadFolders    = {'*'};
-    % PlugDesc(end).TestFile       = 'app/bst_load_plugin.m';
-    % PlugDesc(end).ExtraMenus     = {'Start MIA', 'mia', 'loaded'};
-
     % === USER DEFINED PLUGINS ===
     plugJsonFiles    = dir(fullfile(bst_get('UserPluginsDir'), 'plugin_*.json'));
     badJsonFiles     = {};
