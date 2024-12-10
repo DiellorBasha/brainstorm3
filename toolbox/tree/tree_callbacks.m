@@ -68,7 +68,7 @@ nodeType = char(bstNodes(1).getType());
 filenameRelative = char(bstNodes(1).getFileName());
 % Build full filename (depends on the file type)
 switch lower(nodeType)
-    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct'}
+    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct', 'volpet'}
         filenameFull = bst_fullfile(ProtocolInfo.SUBJECTS, filenameRelative);
     case {'study', 'condition', 'rawcondition', 'channel', 'headmodel', 'data','rawdata', 'datalist', 'results', 'kernel', 'pdata', 'presults', 'ptimefreq', 'pspectrum', 'image', 'video', 'videolink', 'noisecov', 'ndatacov', 'dipoles','timefreq', 'spectrum', 'matrix', 'matrixlist', 'pmatrix', 'spike'}
         filenameFull = bst_fullfile(ProtocolInfo.STUDIES, filenameRelative);
@@ -166,8 +166,8 @@ switch (lower(action))
                 % MRI: Display in MRI viewer
                 view_mri(filenameRelative);
                 
-            % ===== VOLUME ATLAS AND VOLUME CT=====
-            case {'volatlas', 'volct'}
+            % ===== VOLUME ATLAS, CT AND PET=====
+            case {'volatlas', 'volct', 'volpet'}
                 % Get subject
                 iSubject = bstNodes(1).getStudyIndex();
                 iAnatomy = bstNodes(1).getItemIndex();
@@ -572,10 +572,14 @@ switch (lower(action))
                 if ~bst_get('ReadOnly') && ((iSubject == 0) || ~sSubject.UseDefaultAnat)
                     AddSeparator(jPopup);
                     % === IMPORT ===
-                    gui_component('MenuItem', jPopup, [], 'Import anatomy folder', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 0));
-                    gui_component('MenuItem', jPopup, [], 'Import anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
-                    gui_component('MenuItem', jPopup, [], 'Import MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
-                    gui_component('MenuItem', jPopup, [], 'Import CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'Import CT'));
+                    jMenuImportAnat = gui_component('Menu', jPopup, [], 'Import anatomy', IconLoader.ICON_ANATOMY, [], []);
+                        gui_component('MenuItem', jMenuImportAnat, [], 'Anatomy folder', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 0));  
+                        gui_component('MenuItem', jMenuImportAnat, [], 'Anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
+                    
+                    jMenuImportVol= gui_component('Menu', jPopup, [], 'Import volumes', IconLoader.ICON_ANATOMY, [], []);  
+                        gui_component('MenuItem', jMenuImportVol, [], 'MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
+                        gui_component('MenuItem', jMenuImportVol, [], 'CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'Import CT'));
+                        gui_component('MenuItem', jMenuImportVol, [], 'PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 0, 1, 'Import PET'));
                     gui_component('MenuItem', jPopup, [], 'Import surfaces', IconLoader.ICON_SURFACE, [], @(h,ev)bst_call(@import_surfaces, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Import fibers', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@import_fibers, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Convert DWI to DTI', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@process_dwi2dti, 'ComputeInteractive', iSubject));
@@ -1046,7 +1050,7 @@ switch (lower(action))
                 end
                 
 %% ===== POPUP: ANATOMY =====
-            case {'anatomy', 'volatlas', 'volct'}
+            case {'anatomy', 'volatlas', 'volct', 'volpet'}
                 iSubject = bstNodes(1).getStudyIndex();
                 sSubject = bst_get('Subject', iSubject);
                 iAnatomy = [];
@@ -1056,8 +1060,9 @@ switch (lower(action))
                 mriComment = lower(char(bstNodes(1).getComment()));
                 isAtlas = strcmpi(nodeType, 'volatlas') || ~isempty(strfind(mriComment, 'tissues')) || ~isempty(strfind(mriComment, 'aseg')) || ~isempty(strfind(mriComment, 'atlas'));
                 isCt    = strcmpi(nodeType, 'volct');
+                isPet   = strcmpi(nodeType, 'volpet');
                     
-                if (length(bstNodes) == 1)
+                if (length(bstNodes) == 1) && ~isPet
                     % MENU : DISPLAY
                     jMenuDisplay = gui_component('Menu', jPopup, [], 'Display', IconLoader.ICON_ANATOMY, [], []);
                         % Display
@@ -1087,11 +1092,11 @@ switch (lower(action))
                             gui_component('MenuItem', jMenuDisplay, [], 'Histogram', IconLoader.ICON_HISTOGRAM, [], @(h,ev)view_mri_histogram(filenameFull));
                         end
                     % === MENU: EDIT MRI ===
-                    if ~bst_get('ReadOnly') && ~isAtlas && ~isCt
+                    if ~bst_get('ReadOnly') && ~isAtlas && ~isCt && ~isPet
                         gui_component('MenuItem', jPopup, [], 'Edit MRI...', IconLoader.ICON_ANATOMY, [], @(h,ev)view_mri(filenameRelative, 'EditMri'));
                     end
                     % === MENU: SET AS DEFAULT ===
-                    if ~bst_get('ReadOnly') && (~ismember(iAnatomy, sSubject.iAnatomy) || ~bstNodes(1).isMarked()) && ~isAtlas && ~isCt
+                    if ~bst_get('ReadOnly') && (~ismember(iAnatomy, sSubject.iAnatomy) || ~bstNodes(1).isMarked()) && ~isAtlas && ~isCt && ~isPet
                         gui_component('MenuItem', jPopup, [], 'Set as default MRI', IconLoader.ICON_GOOD, [], @(h,ev)SetDefaultSurf(iSubject, 'Anatomy', iAnatomy));
                     end
                     % === MENU: CREATE SURFACES ===
@@ -1100,7 +1105,53 @@ switch (lower(action))
                     end
                 end
                 
-                if ~bst_get('ReadOnly')
+              %  =============== POPUP: PET DATA==========
+              if isPet
+                  % === MENU: DISPLAY PET ===
+                  jMenuDisplay = gui_component('Menu', jPopup, [], 'Display', IconLoader.ICON_VOLPET, [], []);
+                  gui_component('MenuItem', jMenuDisplay, [], 'PET Volume',           IconLoader.ICON_VOLPET, [], @(h,ev)view_mri(filenameRelative));
+                  gui_component('MenuItem', jMenuDisplay, [], '3D orthogonal slices', IconLoader.ICON_VOLPET, [], @(h,ev)view_mri_3d(filenameRelative));
+                  AddSeparator(jMenuDisplay);
+                  % Display as overlay
+                  if ~bstNodes(1).isMarked()
+                      % Get subject structure
+                      sSubject = bst_get('MriFile', filenameRelative);
+                      MriFile = sSubject.Anatomy(sSubject.iAnatomy).FileName;
+                      % Overlay menus
+                      gui_component('MenuItem', jMenuDisplay, [], 'Overlay on default MRI (MRI Viewer)', IconLoader.ICON_VOLPET, [], @(h,ev)view_mri(MriFile, filenameRelative));
+                      gui_component('MenuItem', jMenuDisplay, [], 'Overlay on default MRI (3D)',         IconLoader.ICON_VOLPET, [], @(h,ev)view_mri_3d(MriFile, filenameRelative));
+                      AddSeparator(jMenuDisplay);
+                  end
+                  gui_component('MenuItem', jMenuDisplay, [], 'Axial slices',    IconLoader.ICON_SLICES,  [], @(h,ev)view_mri_slices(filenameRelative, 'axial', 20));
+                  gui_component('MenuItem', jMenuDisplay, [], 'Coronal slices',  IconLoader.ICON_SLICES,  [], @(h,ev)view_mri_slices(filenameRelative, 'coronal', 20));
+                  gui_component('MenuItem', jMenuDisplay, [], 'Sagittal slices', IconLoader.ICON_SLICES,  [], @(h,ev)view_mri_slices(filenameRelative, 'sagittal', 20));
+                  AddSeparator(jMenuDisplay);
+                  gui_component('MenuItem', jMenuDisplay, [], 'Histogram', IconLoader.ICON_HISTOGRAM, [], @(h,ev)view_mri_histogram(filenameFull));
+                  % === MENU: EDIT PET VOLUME ===
+                  AddSeparator(jPopup);
+                  gui_component('MenuItem', jPopup, [], 'MNI normalization', IconLoader.ICON_VOLPET, [], @(h,ev)process_mni_normalize('ComputeInteractive', filenameRelative));
+                  gui_component('MenuItem', jPopup, [], 'Resample volume...', IconLoader.ICON_VOLPET, [], @(h,ev)ResampleMri(filenameRelative));
+                    jMenuRegister = gui_component('Menu', jPopup, [], 'Register with default MRI', IconLoader.ICON_VOLPET);
+                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Realign + register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
+                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
+                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register only',      IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 0));
+                  jMenuMask = gui_component('Menu', jPopup, [], 'Apply mask', IconLoader.ICON_VOLATLAS, [], []);
+                    gui_component('MenuItem', jMenuMask, [], 'None (default)', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'none', 1,1));
+                        gui_component('MenuItem', jMenuMask, [], 'Brainmask (skull strip)', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
+                        gui_component('MenuItem', jMenuMask, [], 'Gray Matter', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
+                        gui_component('MenuItem', jMenuMask, [], 'White Matter', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
+                        gui_component('MenuItem', jMenuMask, [], 'Gray Matter - Cortex', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
+                  AddSeparator(jPopup)
+                  gui_component('MenuItem', jPopup, [], 'Process PET...', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                  jMenuSUVR = gui_component('Menu', jPopup, [], 'Calculate SUVR', IconLoader.ICON_VOLPET, [], []);
+                  gui_component('MenuItem', jMenuSUVR, [], 'Select reference region', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                  jMenuSurface =    gui_component('Menu', jPopup, [], 'Project to surface', IconLoader.ICON_SURFACE, [], []);
+                  gui_component('MenuItem', jMenuSurface, [], 'Cortex', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                  gui_component('MenuItem', jMenuSurface, [], 'White', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                  gui_component('MenuItem', jMenuSurface, [], 'Mid', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                end
+
+                if ~bst_get('ReadOnly') && ~isPet
                     % === REGISTRATION ===
                     % Get file comment
                     if ~isAtlas && (length(bstNodes) == 1)
