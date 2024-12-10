@@ -1178,7 +1178,7 @@ switch (lower(action))
                     fcnMriSegment(jPopup, sSubject, iSubject, iAnatomy, isAtlas, isCt);
                 end
                 % === MENU: EXPORT ===
-                % Export menu (added later)
+                % Export menu (added later)~bst_get('ReadOnly')
                 if (length(bstNodes) == 1)
                     jMenuExport = gui_component('MenuItem', [], [], 'Export to file', IconLoader.ICON_SAVE, [], @(h,ev)bst_call(@export_mri, filenameFull));
                 end

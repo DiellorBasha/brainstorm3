@@ -1,5 +1,5 @@
 function [BstMriFile, sMri, Messages] = import_mri(iSubject, MriFile, FileFormat, isInteractive, isAutoAdjust, Comment, Labels)
-% IMPORT_MRI: Import a volume file (MRI, Atlas, CT, etc) in a subject of the Brainstorm database
+% IMPORT_MRI: Import a volume file (MRI, Atlas, CT, PET, etc) in a subject of the Brainstorm database
 % 
 % USAGE: [BstMriFile, sMri, Messages] = import_mri(iSubject, MriFile, FileFormat='ALL', isInteractive=0, isAutoAdjust=1, Comment=[], Labels=[])
 %               BstMriFiles = import_mri(iSubject, MriFiles, ...)   % Import multiple volumes at once
@@ -74,6 +74,9 @@ end
 volType = 'MRI';
 if ~isempty(strfind(Comment, 'CT'))
     volType = 'CT';
+end
+if ~isempty(strfind(Comment, 'PET'))
+    volType = 'PET';
 end
 % Get node comment from filename
 if ~isempty(strfind(Comment, 'Import'))
@@ -153,13 +156,17 @@ isProgress = bst_progress('isVisible');
 if ~isProgress
     bst_progress('start', ['Import ', volType], ['Loading ', volType, ' file...']);
 end
-% MNI / Atlas / CT ?
+% MNI / Atlas / CT / PET?
 isMni   = ismember(FileFormat, {'ALL-MNI', 'ALL-MNI-ATLAS'});
 isAtlas = ismember(FileFormat, {'ALL-ATLAS', 'ALL-MNI-ATLAS', 'SPM-TPM'});
 isCt    = strcmpi(volType, 'CT');
-% Tag for CT volume
+isPet   = strcmpi(volType,'PET');
+% Tag for CT or PET volume
 if isCt
     tagVolType = '_volct';
+    isAtlas = 0;
+elseif isPet
+    tagVolType = '_volpet';
     isAtlas = 0;
 else
     tagVolType = '';
@@ -167,7 +174,7 @@ end
 
 % Load MRI
 isNormalize = 0;
-sMri = in_mri(MriFile, FileFormat, isInteractive && ~isMni, isNormalize);
+sMri = in_mri(MriFile, FileFormat, isInteractive && ~isMni && ~isPet, isNormalize);
 if isempty(sMri)
     bst_progress('stop');
     return
@@ -188,7 +195,7 @@ end
 
 %% ===== GET ATLAS LABELS =====
 % Try to get associated labels
-if isempty(Labels) && ~iscell(MriFile) && ~isCt
+if isempty(Labels) && ~iscell(MriFile) && ~isCt && ~isPet
     Labels = mri_getlabels(MriFile, sMri, isAtlas);
 end
 % Save labels in the file structure
@@ -264,6 +271,14 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         refSize = size(sMriRef.Cube(:,:,:,1));
         newSize = size(sMri.Cube(:,:,:,1));
         isSameSize = all(refSize == newSize) && all(round(sMriRef.Voxsize(1:3) .* 1000) == round(sMri.Voxsize(1:3) .* 1000));
+        if isPet % Realign frames before co-registration
+            nFrames = size(sMri.Cube, 4);
+                if nFrames>1
+                    [sMri, errMsg, fileTag] = mri_coregister(sMri, sMriRef, 'pet2mri', isReslice, 0, 1); % Align frames then register - dynamic PET
+                elseif nFrames==1
+                    [sMri, errMsg, fileTag] = mri_coregister(sMri, sMriRef, 'spm', isReslice, 0, 1); % Register only - static PET
+                end
+        end
         % Ask what operation to perform with this MRI
         if isInteractive
             % Initialize list of options to register this new MRI with the existing one
