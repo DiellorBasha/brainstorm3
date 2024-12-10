@@ -271,13 +271,11 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         refSize = size(sMriRef.Cube(:,:,:,1));
         newSize = size(sMri.Cube(:,:,:,1));
         isSameSize = all(refSize == newSize) && all(round(sMriRef.Voxsize(1:3) .* 1000) == round(sMri.Voxsize(1:3) .* 1000));
-        if isPet % Realign frames before co-registration
-            nFrames = size(sMri.Cube, 4);
-                if nFrames>1
-                    [sMri, errMsg, fileTag] = mri_coregister(sMri, sMriRef, 'pet2mri', isReslice, 0, 1); % Align frames then register - dynamic PET
-                elseif nFrames==1
-                    [sMri, errMsg, fileTag] = mri_coregister(sMri, sMriRef, 'spm', isReslice, 0, 1); % Register only - static PET
-                end
+        nFrames = size(sMri.Cube, 4);
+        if isPet && nFrames>1
+         [sMri, sMriMean, fileTag] = mri_realign(sMri); % Align frames then register to frame mean
+         isInteractive = 0; % skip method and register with SPM
+         RegMethod = 'SPM';
         end
         % Ask what operation to perform with this MRI
         if isInteractive
@@ -316,7 +314,7 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         if isInteractive && (~strcmpi(RegMethod, 'Ignore') || ...
             (isfield(sMriRef, 'InitTransf') && ~isempty(sMriRef.InitTransf) && ismember('vox2ras', sMriRef.InitTransf(:,1)) && ...
              isfield(sMri,    'InitTransf') && ~isempty(sMri.InitTransf)    && ismember('vox2ras', sMri.InitTransf(:,1)) && ...
-             ~isResliceDisabled))
+             ~isResliceDisabled)) && ~isPet
             % If the volumes don't have the same size, add a warning
             if ~isSameSize
                 strSizeWarn = '<BR>The two volumes have different sizes: if you answer no here, <BR>you will not be able to overlay them in the same figure.';
@@ -334,6 +332,9 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
                 bst_progress('stop');
                 return;
             end
+        % Reslice PET 
+        elseif isPet
+            isReslice=1; 
         % In non-interactive mode: never reslice
         else
             isReslice = 0;

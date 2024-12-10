@@ -1,10 +1,10 @@
-function  [MriFileMean, MriFileAlign, fileTag, sMriMean] = mri_realign (MriFile, Method)
+function  [sMriAlign, sMriMean, fileTag] = mri_realign (MriFile, Method)
 % MRI_REALIGN: Extract frames from dynamic volumes, realign and compute the mean across frames.
 %
-% USAGE:  [MriFileMean, MriFileAlign, fileTag, sMriMean] = mri_realign(MriFile, Method)
-%                         [sMriMean, sMriAlign, fileTag] = mri_realign(sMri, Method)
-%         [MriFileMean, MriFileAlign, fileTag, sMriMean] = mri_realign(MriFile)
-%                         [sMriMean, sMriAlign, fileTag] = mri_realign(sMri)
+% USAGE:  [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile)
+%         [sMriAlign, sMriMean, fileTag] = mri_realign(sMri)
+%         [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile, Method)
+%         [sMriAlign, sMriMean, fileTag] = mri_realign(sMri, Method)
 %
 % INPUTS:
 %    - MriFile : Relative path to the Brainstorm Mri file to realign
@@ -126,29 +126,26 @@ switch lower(Method)
 
         spm('defaults', 'PET');
         spm_jobman('run', matlabbatch);
-
+        
        % Import the calculated transformation matrices; 
-            sTransfMat = in_bst_matrix(TransfMatrix);  
-            sMriAligned = in_mri(MriFileRealign, 'ALL', 0, 1);  % Import the realigned dynamic volume            
-``          
-         % Output file tag
-        fileTag = '_spm_align';
-
+            sTransfMat  = in_bst_matrix(TransfMatFile);  
+            sMriAligned = in_mri(MriFileRealign, 'ALL', 0, 1);  % Import the realigned dynamic volume     
+            sMriMean    = in_mri(MriFileMean, 'ALL', 0, 1);
 
     case 'freesurfer'
+        % TO DO
 end
 
-% ===== UPDATE HISTORY ========
-
+% ===== UPDATE HISTORY ========       
+fileTag = '_spm_align'; % Output file tag
 sMriAlign.Comment = [sMriAlign.Comment, fileTag]; % Add file tag
-    % Add history entry
-    sMriAlign = bst_history('add', sMriAlign, 'realign', ['PET Frames realigned using (' Method '): ']);
-    
+sMriAlign = bst_history('add', sMriAlign, 'realign', ['PET Frames realigned using (' Method '): ']);   % Add history entry
+sMriAlign.InitTransf(end+1,[1 2]) = {'spm_realign', sTransfMat.mat};
 sMriMean.Comment = [fileTag, '_mean']; % Add file tag
-    sMriMean = bst_history('add', sMriMean, 'realign', ['PET Frames realigned using (' Method '): ']);
-    sMriMean = bst_history('add', sMriMean, 'mean realigned', ['Mean of realigned PET computed using (' Method '): ']);
+sMriMean = bst_history('add', sMriMean, 'realign', ['PET Frames realigned using (' Method '): ']);
+sMriMean = bst_history('add', sMriMean, 'mean realigned', ['Mean of realigned PET computed using (' Method '): ']);
 
-    file_delete(TmpDir, 1, 1);
+file_delete(TmpDir, 1, 1);
 
 % Close progress bar
 if ~isProgress
