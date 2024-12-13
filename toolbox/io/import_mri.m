@@ -272,13 +272,19 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         newSize = size(sMri.Cube(:,:,:,1));
         isSameSize = all(refSize == newSize) && all(round(sMriRef.Voxsize(1:3) .* 1000) == round(sMri.Voxsize(1:3) .* 1000));
         nFrames = size(sMri.Cube, 4);
-        if isPet && nFrames>1
-         [sMri, sMriMean, fileTag] = mri_realign(sMri); % Align frames then register to frame mean
-         isInteractive = 0; % skip method and register with SPM
-         RegMethod = 'SPM';
+        if isPet
+            isInteractive = 0; % skip method and register with SPM
+            RegMethod = 'SPM';
+            if nFrames>1
+                isRealign = java_dialog('confirm', [sprintf(' Imported volume contains %d frames ', nFrames) 10 10 ...
+                    ' Do you want to align the frames and compute their mean? ' 10 10], ['Dynamic volume']);
+                if isRealign
+                    [~, sMri, fileTag] = mri_realign(sMri); % Align frames then register to frame mean
+                end
+            end
         end
         % Ask what operation to perform with this MRI
-        if isInteractive
+        if isInteractive && ~isPet
             % Initialize list of options to register this new MRI with the existing one
             strOptions = '<HTML>How to register the new volume with the reference image?<BR>';
             cellOptions = {};
@@ -298,8 +304,9 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
             cellOptions{end+1} = 'Ignore';
             % Ask user to make a choice
             RegMethod = java_dialog('question', [strOptions '<BR><BR></HTML>'], ['Import ', volType], [], cellOptions, 'Reg+reslice');
-
-        % In non-interactive mode: ignore if possible, or use the first option available
+        elseif isPet
+            RegMethpd = 'SPM';
+            % In non-interactive mode: ignore if possible, or use the first option available
         else
             RegMethod = 'Ignore';
         end
@@ -335,6 +342,7 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         % Reslice PET 
         elseif isPet
             isReslice=1; 
+            isInteractive=1;
         % In non-interactive mode: never reslice
         else
             isReslice = 0;

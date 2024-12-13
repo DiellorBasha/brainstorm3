@@ -1,9 +1,10 @@
-function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method)
+function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
 % MRI_SKULLSTRIP: Skull stripping on 'MriFileSrc' using 'MriFileRef' as reference MRI.
 %                 Both volumes must have the same Cube and Voxel size
 %
-% USAGE:  [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method)
-%            [sMriMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(sMriSrc,    sMriRef,    Method)
+% USAGE:  [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
+%            [sMriMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(sMriSrc,    sMriRef,    Method, SubMethod, isRescale)
+%
 %
 % INPUTS:
 %    - MriFileSrc   : MRI structure or MRI file to apply skull stripping on
@@ -11,7 +12,9 @@ function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSr
 %                     If empty, the Default MRI for that Subject with 'MriFileSrc' is used
 %    - Method       : If 'BrainSuite', use BrainSuite's Brain Surface Extractor (BSE)
 %                     If 'SPM', use SPM Tissue Segmentation
-%
+%                     If 'ASEG', use Freesurfer aseg+aparc
+%    - SubMethod    : 
+%    - isRescale    :
 % OUTPUTS:
 %    - MriFileMask  : MRI structure or MRI file after skull stripping
 %    - errMsg       : Error message. Empty if no error
@@ -41,6 +44,12 @@ function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSr
 
 % ===== PARSE INPUTS =====
 % Parse inputs
+if (nargin < 5)
+    isRescale = 0;
+end
+if (nargin < 4)
+    SubMethod = [];
+end
 if (nargin < 3)
     Method = [];
 end
@@ -159,6 +168,43 @@ switch lower(Method)
         % Temporary files to delete
         filesDel = bst_fileparts(TpmFiles{1});
 
+    case 'aseg'
+        % Get subject
+        if isempty (MriFileSrc)
+            sSubject = bst_get('Subject');
+        else
+            [sSubject, iSubject] = bst_get('MriFile', MriFileSrc);
+        end
+        % Get atlas and generate mask
+        iAtlas = find(cellfun(@(c) contains(c, 'ASEG'), {sSubject.Anatomy.Comment}));
+        [sAtlas, ~] = bst_memory('LoadMri', (sSubject.Anatomy(iAtlas).FileName));
+        if isempty(sAtlas)
+            error('Failed to load aseg file.');
+        end
+        % Extract subregion masks
+        switch lower(SubMethod)
+            case 'brainmask'
+                iLabel = 1:255; % cerebrum
+            case 'cortex'
+                iLabel = [3,42];
+            case 'gm'
+                iLabel = [3, 8, 9, 10, 11, 12, 13, 17, 18, 19, 26, 27, 42, 47, 48, 49, 50, 51, 52, 52, 54, 55, 58, 59];
+            case 'wm'
+                iLabel = [2, 7, 41, 46];
+            case 'ventricles'
+                iLabel = [4, 5, 14, 15, 43, 44, 72];
+            case 'hippocampus'
+                iLabel = [17, 53];
+            case 'brainstem'
+                iLabel = 16;
+            case 'cerebellum'
+                iLabel = [7, 8, 46, 47];
+            case 'cerebellum-gm'
+                iLabel = [8,47];
+        end
+          binBrainMask = ismember(sAtlas.Cube, iLabel);
+          filesDel = '';
+          Method = [SubMethod '-' Method]; % for the file tag
     otherwise
         errMsg = ['Invalid skull stripping method: ' Method];
         return
@@ -172,6 +218,20 @@ sMriMask.Cube(~binBrainMask) = 0;
 % File tag
 fileTag = sprintf('_masked_%s', lower(Method));
 
+% === RESCALING ===
+    if isRescale
+    % rescale the source cube to the average of the masked region
+    sMriMask.Cube = double(sMriMask.Cube);  % Convert to double for calculations 
+    sMriSrc.Cube = double(sMriSrc.Cube);
+    % shift: start values at 1
+        %sMriSrc.Cube = (sMriSrc.Cube - min(sMriSrc.Cube(:)))+1;
+        maskMean = mean(sMriMask.Cube(binBrainMask));
+        sMriSrc.Cube = sMriSrc.Cube./maskMean;  
+    sMriMask = sMriSrc; % output rescaled volume)
+    % File tag
+    fileTag = sprintf('_rescaled_%s', lower(SubMethod));
+    end
+
 % ===== SAVE NEW FILE =====
 % Add file tag
 sMriMask.Comment = [sMriSrc.Comment, fileTag];
@@ -182,14 +242,18 @@ if ~isempty(MriFileSrc)
     [sSubject, iSubject] = bst_get('MriFile', MriFileSrc);
     % Update comment
     sMriMask.Comment = file_unique(sMriMask.Comment, {sSubject.Anatomy.Comment});
+    if isRescale
+        % Add history entry
+    sMriMask = bst_history('add', sMriMask, 'resample', ['Rescaled to "' SubMethod '" using: ' Method]);
+    else
     % Add history entry
     sMriMask = bst_history('add', sMriMask, 'resample', ['Skull stripping with "' Method '" using on default file: ' MriFileRef]);
+    end
     % Save new file
     MriFileMaskFull = file_unique(strrep(file_fullpath(MriFileSrc), '.mat', [fileTag '.mat']));
     MriFileMask = file_short(MriFileMaskFull);
     % Save new MRI in Brainstorm format
     sMriMask = out_mri_bst(sMriMask, MriFileMaskFull);
-
     % Register new MRI
     iAnatomy = length(sSubject.Anatomy) + 1;
     sSubject.Anatomy(iAnatomy) = db_template('Anatomy');

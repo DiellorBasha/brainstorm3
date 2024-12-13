@@ -73,6 +73,7 @@ else
     if (length(sSubject.Anatomy) > 1)
         iAnatList = [sSubject.iAnatomy, setdiff(iAnatList,[iAtlas,sSubject.iAnatomy]), setdiff(iAtlas,sSubject.iAnatomy)];
     end
+
     % Create and add anatomy nodes
     for iAnatomy = iAnatList
         if ismember(iAnatomy, iAtlas)
@@ -84,22 +85,76 @@ else
         else
             nodeType = 'anatomy';
         end
-        [nodeCreated, nodeAnatomy] = CreateNode(nodeType, ...
-            char(sSubject.Anatomy(iAnatomy).Comment), ...
-            char(sSubject.Anatomy(iAnatomy).FileName), ...
-            iAnatomy, iSubject, iSearch);
 
-        if nodeCreated
-            % If current item is default one
-            if ismember(iAnatomy, sSubject.iAnatomy)
-                nodeAnatomy.setMarked(1);
-            end
-            if showParentNodes
-                nodeSubject.add(nodeAnatomy);
+        % Handle volpet nodes with frame children
+        if strcmp(nodeType, 'volpet')
+            % Check for frames in the corresponding @subjectimage directory
+            [volumeDir, baseFileName, ~] = bst_fileparts(file_fullpath(char(sSubject.Anatomy(iAnatomy).FileName)));
+            % Locate the frame directory (starts with @ and matches volume name)
+            frameDir = bst_fullfile(volumeDir, ['@' baseFileName]);
+            if isfolder(frameDir)
+                % Multi-frame PET: Create the parent PET node
+                [nodeCreated, nodePet] = CreateNode('volpet', ...
+                    [char(sSubject.Anatomy(iAnatomy).Comment) ' (PET)'], ...
+                    char(sSubject.Anatomy(iAnatomy).FileName), ...
+                    iAnatomy, iSubject, iSearch);
+                if nodeCreated
+                    % Add frame children under PET node
+                    petFrames = get_pet_frames(char(sSubject.Anatomy(iAnatomy).FileName)); % Retrieve frame file paths
+                    for iFrame = 1:length(petFrames)
+                        frameComment = sprintf('Frame %d', iFrame);
+                        frameFileName = petFrames{iFrame};
+                        [frameCreated, nodeFrame] = CreateNode('volpet', ...
+                            frameComment, ...
+                            frameFileName, ...
+                            iFrame, iSubject, iSearch);
+                        if frameCreated
+                            nodePet.add(nodeFrame); % Add frame node to PET node
+                            numElems = numElems + 1;
+                        end
+                    end
+                    % Add PET node to subject
+                    if showParentNodes
+                        nodeSubject.add(nodePet);
+                    else
+                        nodeRoot.add(nodePet);
+                    end
+                    numElems = numElems + 1;
+                end
             else
-                nodeRoot.add(nodeAnatomy);
+                % Single-frame PET: Create node directly
+                [nodeCreated, nodePet] = CreateNode('volpet', ...
+                    char(sSubject.Anatomy(iAnatomy).Comment), ...
+                    char(sSubject.Anatomy(iAnatomy).FileName), ...
+                    iAnatomy, iSubject, iSearch);
+                if nodeCreated
+                    if showParentNodes
+                        nodeSubject.add(nodePet);
+                    else
+                        nodeRoot.add(nodePet);
+                    end
+                    numElems = numElems + 1;
+                end
             end
-            numElems = numElems + 1;
+        else
+            % Create other anatomy nodes
+            [nodeCreated, nodeAnatomy] = CreateNode(nodeType, ...
+                char(sSubject.Anatomy(iAnatomy).Comment), ...
+                char(sSubject.Anatomy(iAnatomy).FileName), ...
+                iAnatomy, iSubject, iSearch);
+            
+            if nodeCreated
+                % If current item is default one
+                if ismember(iAnatomy, sSubject.iAnatomy)
+                    nodeAnatomy.setMarked(1);
+                end
+                if showParentNodes
+                    nodeSubject.add(nodeAnatomy);
+                else
+                    nodeRoot.add(nodeAnatomy);
+                end
+                numElems = numElems + 1;
+            end
         end
     end
 
@@ -152,3 +207,30 @@ function [isCreated, node] = CreateNode(nodeType, nodeComment, ...
         node = [];
     end
 end
+
+function petFrames = get_pet_frames(petFileName)
+% GET_PET_FRAMES: Retrieve list of PET frames from a PET volume file.
+% INPUT:
+%    - petFileName : Path to the PET volume file.
+% OUTPUT:
+%    - petFrames   : Cell array of frame file paths.
+
+petFileFull = file_fullpath(petFileName);
+% Extract directory and filename information
+[volumeDir, baseFileName, ~] = bst_fileparts(petFileFull);
+% Locate the frame directory (starts with @ and matches volume name)
+frameDir = bst_fullfile(volumeDir, ['@' baseFileName]);
+% Check if frame directory exists
+if ~isfolder(frameDir)
+    warning('Frame directory not found: %s', frameDir);
+    petFrames = {};
+    return;
+end
+
+% Look for frame files matching pattern `frame_*_volpet`
+frameFiles = dir(fullfile(frameDir, 'frame_*_volpet.mat'));
+
+% Get full file paths for each frame
+petFrames = fullfile({frameFiles.folder}, {frameFiles.name});
+end
+

@@ -1105,8 +1105,8 @@ switch (lower(action))
                     end
                 end
                 
-              %  =============== POPUP: PET DATA==========
-              if isPet
+%% ===== POPUP: PET =====
+            if isPet
                   % === MENU: DISPLAY PET ===
                   jMenuDisplay = gui_component('Menu', jPopup, [], 'Display', IconLoader.ICON_VOLPET, [], []);
                   gui_component('MenuItem', jMenuDisplay, [], 'PET Volume',           IconLoader.ICON_VOLPET, [], @(h,ev)view_mri(filenameRelative));
@@ -1129,26 +1129,28 @@ switch (lower(action))
                   gui_component('MenuItem', jMenuDisplay, [], 'Histogram', IconLoader.ICON_HISTOGRAM, [], @(h,ev)view_mri_histogram(filenameFull));
                   % === MENU: EDIT PET VOLUME ===
                   AddSeparator(jPopup);
-                  gui_component('MenuItem', jPopup, [], 'MNI normalization', IconLoader.ICON_VOLPET, [], @(h,ev)process_mni_normalize('ComputeInteractive', filenameRelative));
-                  gui_component('MenuItem', jPopup, [], 'Resample volume...', IconLoader.ICON_VOLPET, [], @(h,ev)ResampleMri(filenameRelative));
+                    jMenuMask = gui_component('Menu', jPopup, [], 'Apply mask', IconLoader.ICON_VOLATLAS, [], []);
+                        MenuMaskLabels = {'Brainmask','GM', 'WM', 'Ventricles', 'Cortex', 'Brainstem', 'Cerebellum', 'Cerebellum-gm', 'Hippocampus'};
+                        for iGuiComp = 1:numel(MenuMaskLabels)        
+                        MenuMaskLabel = MenuMaskLabels{iGuiComp}; % Get the current label
+                            gui_component('MenuItem', jMenuMask, [], MenuMaskLabel, IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', lower(MenuMaskLabel)));
+                        end
+                   jMenuSUVR = gui_component('Menu', jPopup, [], 'Calculate SUVR', IconLoader.ICON_VOLATLAS, [], []);
+                        gui_component('MenuItem', jMenuSUVR, [], 'Reference Region:', [], [], [] );
+                        gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-Whole', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum', 1));
+                        gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-GM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+                        gui_component('MenuItem', jMenuSUVR, [], 'Brainstem', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+                        gui_component('MenuItem', jMenuSUVR, [], 'Pons', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+                        gui_component('MenuItem', jMenuSUVR, [], 'Eroded subcortical WM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+                        gui_component('MenuItem', jMenuSUVR, [], 'Composite', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+                        gui_component('MenuItem', jPopup, [], 'Project to surface', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@mri_interp_vol2tess, filenameFull, [], 'SUVR'));
+                        AddSeparator(jPopup)
+                        gui_component('MenuItem', jPopup, [], 'Launch PET2SURF...', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, iSubject, filenameFull));
+                        gui_component('MenuItem', jPopup, [], 'Resample volume...', IconLoader.ICON_VOLPET, [], @(h,ev)ResampleMri(filenameRelative));
                     jMenuRegister = gui_component('Menu', jPopup, [], 'Register with default MRI', IconLoader.ICON_VOLPET);
-                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Realign + register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
-                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
-                  gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register only',      IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 0));
-                  jMenuMask = gui_component('Menu', jPopup, [], 'Apply mask', IconLoader.ICON_VOLATLAS, [], []);
-                    gui_component('MenuItem', jMenuMask, [], 'None (default)', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'none', 1,1));
-                        gui_component('MenuItem', jMenuMask, [], 'Brainmask (skull strip)', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
-                        gui_component('MenuItem', jMenuMask, [], 'Gray Matter', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
-                        gui_component('MenuItem', jMenuMask, [], 'White Matter', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
-                        gui_component('MenuItem', jMenuMask, [], 'Gray Matter - Cortex', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@mri_mask_apply, filenameFull, 'brainmask',1,1));
-                  AddSeparator(jPopup)
-                  gui_component('MenuItem', jPopup, [], 'Process PET...', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
-                  jMenuSUVR = gui_component('Menu', jPopup, [], 'Calculate SUVR', IconLoader.ICON_VOLPET, [], []);
-                  gui_component('MenuItem', jMenuSUVR, [], 'Select reference region', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
-                  jMenuSurface =    gui_component('Menu', jPopup, [], 'Project to surface', IconLoader.ICON_SURFACE, [], []);
-                  gui_component('MenuItem', jMenuSurface, [], 'Cortex', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
-                  gui_component('MenuItem', jMenuSurface, [], 'White', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
-                  gui_component('MenuItem', jMenuSurface, [], 'Mid', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, filenameFull));
+                      gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Realign + register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
+                      gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register + reslice', IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 1));
+                      gui_component('MenuItem', jMenuRegister, [], 'PET2MRI: Register only',      IconLoader.ICON_VOLPET, [], @(h,ev)MriCoregister(filenameRelative, [], 'PET2MRI', 0));                               
                 end
 
                 if ~bst_get('ReadOnly') && ~isPet

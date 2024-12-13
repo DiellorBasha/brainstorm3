@@ -71,8 +71,6 @@ switch(lower(extension))
                  sprintf('%f * values + %f', hdr.nifti.scl_slope, hdr.nifti.scl_inter), 10 ...
                  'This would save the file in float instead of integers.' 10 10, ...
                  'Do you want to apply it to the volume now?' 10 10], 'NIfTI scaling');
-        else
-            isScale = 0;
         end
         % Read image (3D matrix)
         fseek(fid, double(hdr.dim.vox_offset), 'bof');

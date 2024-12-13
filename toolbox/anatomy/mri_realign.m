@@ -1,7 +1,8 @@
-function  [sMriAlign, sMriMean, fileTag] = mri_realign (MriFile, Method)
+function  [sMriAlign, sMriMean, fileTag] = mri_realign (MriFile, Method, FWHM)
 % MRI_REALIGN: Extract frames from dynamic volumes, realign and compute the mean across frames.
 %
-% USAGE:  [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile)
+% USAGE:  [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile, Method, FWHM)
+%         [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile)
 %         [sMriAlign, sMriMean, fileTag] = mri_realign(sMri)
 %         [sMriAlign, sMriMean, fileTag] = mri_realign(MriFile, Method)
 %         [sMriAlign, sMriMean, fileTag] = mri_realign(sMri, Method)
@@ -44,9 +45,15 @@ function  [sMriAlign, sMriMean, fileTag] = mri_realign (MriFile, Method)
 
 % ===== LOAD INPUTS =====
 % Parse inputs
+if (nargin < 3) || isempty(Method)
+    FWHM = repelem(6, 3); % Default 6 mm smoothing
+else
+    FWHM = repelem(FWHM, 3);
+end
 if (nargin < 2) || isempty(Method)
     Method = 'spm_align';
 end
+
 % Progress bar
 isProgress = bst_progress('isVisible');
 if ~isProgress
@@ -71,8 +78,8 @@ end
 TmpDir = bst_get('BrainstormTmpDir', 0, 'mri_frames');
 % Initialize output file names
 sMriOutNii = bst_fullfile(TmpDir, 'orig.nii'); 
-MriFileMean = bst_fullfile(TmpDir, 'meanorig.nii'); % SPM output: static volume with mean of realigned frames
-MriFileRealign = bst_fullfile(TmpDir, 'rorig.nii'); % SPM output: dynamic volume with realigned frames
+MriFileMean = bst_fullfile(TmpDir, 'meansorig.nii'); % SPM output: static volume with mean of realigned frames
+MriFileRealign = bst_fullfile(TmpDir, 'sorig.nii'); % SPM output: dynamic volume with realigned frames
 TransfMatFile =  bst_fullfile(TmpDir, 'orig.mat');  % SPM output: transformation matrices for realigned frames
 
 % ====== ALIGN FRAMES =======
@@ -102,50 +109,54 @@ switch lower(Method)
         bst_plugin('SetProgressLogo', 'spm12');
 
  % === CALL SPM REALIGN ===
-  bst_progress('text', sprintf('Aligning %d  frames using SPM Realign...', numFrames));
+  bst_progress('text', sprintf('Aligning %d frames using SPM Realign...', numFrames));
       % Create realign batch 
-    matlabbatch = {};
-    matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.dir = {TmpDir};
-    matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.filter = 'orig';
-    matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.rec = 'FPList';
-    matlabbatch{2}.spm.util.exp_frames.files(1) = cfg_dep('File Selector (Batch Mode): Selected Files (orig)', substruct('.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
-    matlabbatch{2}.spm.util.exp_frames.frames = Inf;
-    matlabbatch{3}.spm.spatial.realign.estwrite.data{1}(1) = cfg_dep('Expand image frames: Expanded filename list.', substruct('.','val', '{}',{2}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.quality = 0.9;
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.sep = 4;
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.fwhm = 5;
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.rtm = 1;
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.interp = 2;
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.wrap = [0 0 0];
-    matlabbatch{3}.spm.spatial.realign.estwrite.eoptions.weight = '';
-    matlabbatch{3}.spm.spatial.realign.estwrite.roptions.which = [2 1];
-    matlabbatch{3}.spm.spatial.realign.estwrite.roptions.interp = 4;
-    matlabbatch{3}.spm.spatial.realign.estwrite.roptions.wrap = [0 0 0];
-    matlabbatch{3}.spm.spatial.realign.estwrite.roptions.mask = 1;
-    matlabbatch{3}.spm.spatial.realign.estwrite.roptions.prefix = 'r';
+      matlabbatch = {};
+      matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.dir = {TmpDir};
+      matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.filter = 'orig';
+      matlabbatch{1}.cfg_basicio.file_dir.file_ops.file_fplist.rec = 'FPList';
+      matlabbatch{2}.spm.util.exp_frames.files(1) = cfg_dep('File Selector (Batch Mode): Selected Files (orig)', substruct('.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+      matlabbatch{2}.spm.util.exp_frames.frames = Inf;
+      matlabbatch{3}.spm.spatial.smooth.data(1) = cfg_dep('Expand image frames: Expanded filename list.', substruct('.','val', '{}',{2}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+      matlabbatch{3}.spm.spatial.smooth.fwhm = FWHM;
+      matlabbatch{3}.spm.spatial.smooth.dtype = 0;
+      matlabbatch{3}.spm.spatial.smooth.im = 1;
+      matlabbatch{3}.spm.spatial.smooth.prefix = 's';
+      matlabbatch{4}.spm.spatial.realign.estwrite.data{1}(1) = cfg_dep('Smooth: Smoothed Images', substruct('.','val', '{}',{3}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','files'));
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.quality = 0.9;
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.sep = 4;
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.fwhm = 5;
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.rtm = 0;
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.interp = 3;
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.wrap = [0 0 0];
+      matlabbatch{4}.spm.spatial.realign.estwrite.eoptions.weight = '';
+      matlabbatch{4}.spm.spatial.realign.estwrite.roptions.which = [2 1];
+      matlabbatch{4}.spm.spatial.realign.estwrite.roptions.interp = 4;
+      matlabbatch{4}.spm.spatial.realign.estwrite.roptions.wrap = [0 0 0];
+      matlabbatch{4}.spm.spatial.realign.estwrite.roptions.mask = 0;
+      matlabbatch{4}.spm.spatial.realign.estwrite.roptions.prefix = 'r';
 
         spm('defaults', 'PET');
         spm_jobman('run', matlabbatch);
         
        % Import the calculated transformation matrices; 
-            sTransfMat  = in_bst_matrix(TransfMatFile);  
-            sMriAligned = in_mri(MriFileRealign, 'ALL', 0, 1);  % Import the realigned dynamic volume     
-            sMriMean    = in_mri(MriFileMean, 'ALL', 0, 1);
-
+        %   sTransfMat  = in_bst_matrix(TransfMatFile);  
+            sMriAlign = in_mri(MriFileRealign, 'ALL', 0, 0);  % Import the realigned dynamic volume     
+            sMriMean = in_mri_nii(MriFileMean, 0, 1, 1); % Import mean and apply multiplicative rescaling, if any           
     case 'freesurfer'
         % TO DO
 end
 
 % ===== UPDATE HISTORY ========       
-fileTag = '_spm_align'; % Output file tag
+fileTag = '_spm_realign'; % Output file tag
 sMriAlign.Comment = [sMriAlign.Comment, fileTag]; % Add file tag
 sMriAlign = bst_history('add', sMriAlign, 'realign', ['PET Frames realigned using (' Method '): ']);   % Add history entry
-sMriAlign.InitTransf(end+1,[1 2]) = {'spm_realign', sTransfMat.mat};
+%sMriAlign.InitTransf(end+1,[1 2]) = {'spm_realign', sTransfMat.mat};
 sMriMean.Comment = [fileTag, '_mean']; % Add file tag
 sMriMean = bst_history('add', sMriMean, 'realign', ['PET Frames realigned using (' Method '): ']);
 sMriMean = bst_history('add', sMriMean, 'mean realigned', ['Mean of realigned PET computed using (' Method '): ']);
 
-file_delete(TmpDir, 1, 1);
+% file_delete(TmpDir, 1, 1);
 
 % Close progress bar
 if ~isProgress
