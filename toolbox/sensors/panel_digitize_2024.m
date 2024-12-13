@@ -836,7 +836,7 @@ function ManualCollect_Callback()
     ctrl.jButtonCollectPoint.setEnabled(0);
     % Simulation: call the callback directly
     if Digitize.Options.isSimulate
-        BytesAvailable_Callback();
+        BytesAvailable_Callback([], []);
     % Else: Send a collection request to the Polhemus
     else
         % User clicked the button, collect a point
@@ -1096,6 +1096,7 @@ function PlotCoordinate(isAdd)
             GlobalData.DataSet(Digitize.iDS).HeadPoints.Type{iP}  = Digitize.Points(Digitize.iPoint).Type; % 'CARDINAL' or 'EXTRA'
             GlobalData.DataSet(Digitize.iDS).HeadPoints.Loc(:,iP) = Digitize.Points(Digitize.iPoint).Loc';
         else
+            iP = iP - 1;
             if iP > 0
                 GlobalData.DataSet(Digitize.iDS).HeadPoints.Label(iP) = [];
                 GlobalData.DataSet(Digitize.iDS).HeadPoints.Type(iP)  = [];
@@ -1500,7 +1501,7 @@ end
 
 
 %% ===== BYTES AVAILABLE CALLBACK =====
-function BytesAvailable_Callback() %#ok<INUSD>
+function BytesAvailable_Callback(h, ev) %#ok<INUSD>
     global Digitize
     % Get controls
     ctrl = bst_get('PanelControls', 'Digitize');
@@ -1619,8 +1620,8 @@ function BytesAvailable_Callback() %#ok<INUSD>
             ctrl.jLabelWarning.setOpaque(true);
             ctrl.jLabelWarning.setBackground(java.awt.Color.red);
             % Extra beep for large distances
-            pause(0.15);
-            sound(Digitize.BeepWav.data, Digitize.BeepWav.fs*.08);
+            pause(0.25);
+            sound(Digitize.BeepWav.data, Digitize.BeepWav.fs);
         end
     end
 
