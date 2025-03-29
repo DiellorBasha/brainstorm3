@@ -68,6 +68,13 @@ function Start(varargin) %#ok<DEFNU>
             'headshape',[], ...
             'trans',    []));
     
+    % Update montage struct. ChannelFile is used for Automatic EEG with 3Dscanner (nov 2024)
+    DigitizeOptions = bst_get('DigitizeOptions');
+    if length(DigitizeOptions.Montages) > 1 && ~isfield(DigitizeOptions.Montages, 'ChannelFile')
+        DigitizeOptions.Montages(end).ChannelFile = [];
+        bst_set('DigitizeOptions', DigitizeOptions);
+    end
+
     % ===== PARSE INPUT =====
     DigitizerType = 'Digitize';
     sSubject = [];
@@ -1680,6 +1687,7 @@ function AddMontage(ChannelFile)
         % Intialize new montage
         newMontage.Name = MontageName;
         newMontage.Labels = {};
+        newMontage.ChannelFile = [];
         
         % Open file
         fid = fopen(MontageFile,'r');

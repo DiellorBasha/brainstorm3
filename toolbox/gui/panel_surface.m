@@ -109,10 +109,10 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
             % Threshold title
             jLabelSurfIsoValueTitle = gui_component('label', jPanelSurfaceOptions, 'br', 'Thresh.:');
-            % Min size slider
-            jSliderSurfIsoValue = JSlider(1, GetIsoValueMaxRange(), 1);
+            % IsoSurface threshold slider
+            jSliderSurfIsoValue = JSlider(1, 1000, 1);
             jSliderSurfIsoValue.setPreferredSize(Dimension(SLIDER_WIDTH, DEFAULT_HEIGHT));
-            jSliderSurfIsoValue.setToolTipText('isoSurface Threshold');
+            jSliderSurfIsoValue.setToolTipText('IsoSurface threshold');
             java_setcb(jSliderSurfIsoValue, 'MouseReleasedCallback', @(h,ev)SliderCallback(h, ev, 'SurfIsoValue'), ...
                                             'KeyPressedCallback',    @(h,ev)SliderCallback(h, ev, 'SurfIsoValue'));
             jPanelSurfaceOptions.add('tab hfill', jSliderSurfIsoValue);
@@ -415,40 +415,40 @@ function SliderCallback(hObject, event, target)
             SetSurfaceSmooth(hFig, iSurface, SurfSmoothValue, 1);
 
         case 'SurfIsoValue'
-            % get the handles
-            hFig = bst_figures('GetFiguresByType', '3DViz');
-            SubjectFile = getappdata(hFig, 'SubjectFile');
-            if ~isempty(SubjectFile)
-                sSubject = bst_get('Subject', SubjectFile);
-                CtFile = [];
-                MeshFile = [];
-                for i=1:length(sSubject.Anatomy)
-                    if ~isempty(regexp(sSubject.Anatomy(i).FileName, '_volct', 'match'))
-                        CtFile = sSubject.Anatomy(i).FileName;
-                    end
-                end
-                for i=1:length(sSubject.Surface)
-                    if ~isempty(regexp(sSubject.Surface(i).FileName, 'tess_isosurface', 'match')) 
-                        MeshFile = sSubject.Surface(i).FileName;
-                    end
+            isosurfFile = TessInfo(iSurface).SurfaceFile;
+            % Get CT file and IsoValue used to generate the isosurface file
+            [ctFile, isoValue] = GetIsosurfaceParams(isosurfFile);
+            if isoValue == jSlider.getValue()
+                return
+            end
+            sSubject = bst_get('MriFile', ctFile);
+            dialogTitle = 'Change threshold IsoSurface';
+            if isempty(sSubject)
+                bst_error(sprintf('CT file %s is not in the Protocol database.', ctFile), dialogTitle);
+                SetIsoValue(isoValue);
+                return;
+            else
+                subjectFile = getappdata(hFig, 'SubjectFile');
+                if ~strcmp(subjectFile, sSubject.FileName)
+                    bst_error('Subject for CT and IsoSurface is not the same', dialogTitle);
+                    SetIsoValue(isoValue);
+                    return;
                 end
             end
-            
-            % ask user if they want to proceed
-            isProceed = java_dialog('confirm', 'Do you want to proceed generating mesh with new isoValue ?', 'Changing threshold');
-            if ~isProceed
-                [sSubjectTmp, iSubjectTmp, iSurfaceTmp] = bst_get('SurfaceFile', MeshFile);
-                isoValue = regexp(sSubjectTmp.Surface(iSurfaceTmp).Comment, '\d*', 'match');
-                SetIsoValue(str2double(isoValue{1}));
+            % Ask user if they want to proceed
+            if ~java_dialog('confirm', 'Do you want to proceed generating mesh with new isoValue ?', dialogTitle)
+                SetIsoValue(isoValue);
                 return;
             end
-            
-            % get the iso value from slider
+            % Get new isoValue from the slider
             isoValue = jSlider.getValue();
-            
-            % remove the old isosurface and generate and load the new one
-            ButtonRemoveSurfaceCallback();
-            tess_isosurface(CtFile, isoValue);
+            % Remove the old IsoSurface, generate, and load the new one
+            RemoveSurface(hFig, iSurface);
+            bst_memory('UnloadSurface', isosurfFile);
+            colorBak = TessInfo(iSurface).AnatomyColor;
+            tess_isosurface(ctFile, isoValue);
+            SetSurfaceColor(hFig, iSurface, colorBak(2,:), colorBak(1,:));
+            UpdatePanel();
             
         case 'DataAlpha'
             % Update value in Surface array
@@ -475,6 +475,10 @@ function SliderCallback(hObject, event, target)
             DefaultSurfaceDisplay = bst_get('DefaultSurfaceDisplay');
             DefaultSurfaceDisplay.DataThreshold = TessInfo(iSurface).DataThreshold;
             bst_set('DefaultSurfaceDisplay', DefaultSurfaceDisplay); 
+            % Update threshold value as tooltip
+            DataLimit = TessInfo(iSurface).DataLimitValue;
+            threshBar = ((DataLimit(2) - DataLimit(1)) * TessInfo(iSurface).DataThreshold) + DataLimit(1);
+            ctrl.jSliderDataThresh.setToolTipText(num2str(threshBar));
             
         case 'SizeThreshold'
             % Update value in Surface array
@@ -531,30 +535,6 @@ function sliderSizeVector = GetSliderSizeVector(nVertices)
     end
 end
 
-%% ===== GET SLIDER ISOVALUE =====
-function isoValue = GetIsoValueMaxRange()
-    % get the handles
-    hFig = bst_figures('GetFiguresByType', '3DViz');
-    if ~isempty(hFig)
-        SubjectFile = getappdata(hFig, 'SubjectFile');
-        if ~isempty(SubjectFile)
-            sSubject = bst_get('Subject', SubjectFile);
-            CtFile = [];
-            for i=1:length(sSubject.Anatomy)
-                if ~isempty(regexp(sSubject.Anatomy(i).FileName, '_volct', 'match'))
-                    CtFile = sSubject.Anatomy(i).FileName;
-                end
-            end
-        end
-        
-        if ~isempty(CtFile)
-            sMri = bst_memory('LoadMri', CtFile);
-            isoValue = double(sMri.Histogram.intensityMax);
-        end
-    else
-        isoValue = 4500.0;
-    end
-end
 
 %% ===== SET SLIDER ISOVALUE =====
 function SetIsoValue(isoValue)
@@ -844,10 +824,18 @@ function ButtonAddSurfaceCallback(surfaceType)
         if ~isempty(iSubCortical)
             typesList{end+1} = 'Subcortical';
         end
+        % IsoSurface
+        iIsoSurface = find(cellfun(@(x) ~isempty(regexp(x, 'tess_isosurface', 'match')), {sSubject.Surface.FileName}), 1);
+        if ~isempty(iIsoSurface)
+            typesList{end+1} = 'IsoSurface';
+        end
         % Remove surfaces that are already displayed
         if ~isempty(TessInfo)
             typesList = setdiff(typesList, {TessInfo.Name});
         end
+        % Order of surfacetypes
+        typeListOrder = {'Anatomy', 'Scalp', 'OuterSkull', 'InnerSkull', 'Cortex', 'White', 'Fibers', 'FEM', 'IsoSurface'};
+        typesList = intersect(typeListOrder, typesList, 'stable');
         % Nothing more
         if isempty(typesList)
             bst_error('There are no additional anatomy files that you can add to this figure.', 'Add surface', 0);
@@ -881,6 +869,8 @@ function ButtonAddSurfaceCallback(surfaceType)
             SurfaceFile = sSubject.Surface(iSubCortical).FileName;
         case 'White'
             SurfaceFile = sSubject.Surface(iWhite).FileName;
+        case 'IsoSurface'
+            SurfaceFile = sSubject.Surface(iIsoSurface).FileName;
         case 'Other'
             % Offer all the other surfaces
             Comment = java_dialog('combo', '<HTML>Select the surface to add:<BR><BR>', 'Select surface', [], {sSubject.Surface.Comment});
@@ -1160,9 +1150,10 @@ function UpdateSurfaceProperties()
     ctrl.jLabelSurfIsoValueTitle.setVisible(isIsoSurface);
     ctrl.jLabelSurfIsoValue.setVisible(isIsoSurface);
     if isIsoSurface
-        [sSubjectTmp, iSubjectTmp, iSurfaceTmp] = bst_get('SurfaceFile', TessInfo(iSurface).SurfaceFile);
-        isoValue = regexp(sSubjectTmp.Surface(iSurfaceTmp).Comment, '\d*', 'match');
-        SetIsoValue(str2double(isoValue{1}));
+        [~, isoValue, isoRange] = panel_surface('GetIsosurfaceParams', TessInfo(iSurface).SurfaceFile);
+        ctrl.jSliderSurfIsoValue.setMinimum(isoRange(1));
+        ctrl.jSliderSurfIsoValue.setMaximum(isoRange(2));
+        SetIsoValue(isoValue);
     end
     % Show sulci button
     ctrl.jButtonSurfSulci.setSelected(TessInfo(iSurface).SurfShowSulci);
@@ -1220,6 +1211,14 @@ function UpdateSurfaceProperties()
     % Data threshold
     ctrl.jSliderDataThresh.setValue(100 * TessInfo(iSurface).DataThreshold);
     ctrl.jLabelDataThresh.setText(sprintf('%d%%', round(100 * TessInfo(iSurface).DataThreshold)));
+    if isOverlay && ~isOverlayStat && ~isOverlayLabel
+        DataLimit = TessInfo(iSurface).DataLimitValue;
+        threshBar = ((DataLimit(2) - DataLimit(1)) * TessInfo(iSurface).DataThreshold) + DataLimit(1);
+        tooltipText = num2str(threshBar);
+    else
+        tooltipText = '';
+    end
+    ctrl.jSliderDataThresh.setToolTipText(tooltipText);
     % Size threshold
     sliderSizeVector = GetSliderSizeVector(TessInfo(iSurface).nVertices);
     iSlider = bst_closest(sliderSizeVector, TessInfo(iSurface).SizeThreshold);
@@ -2378,7 +2377,7 @@ function hs = PlotMri(hFig, posXYZ, isFast)
     setappdata(hFig, 'Surface', TessInfo);
     
     % Plot threshold markers
-    if ~isempty(TessInfo(iTess).Data) 
+    if ~isempty(TessInfo(iTess).Data) || ~isempty(TessInfo(iTess).OverlayCube)
         if ~sColormapData.isAbsoluteValues && (OPTIONS.OverlayBounds(1) == -OPTIONS.OverlayBounds(2))
             ThreshBar = OPTIONS.OverlayThreshold * max(abs(OPTIONS.OverlayBounds)) * [-1,1];
         elseif (OPTIONS.OverlayBounds(2) <= 0)
@@ -2729,3 +2728,36 @@ function ApplyDefaultDisplay() %#ok<DEFNU>
     end
 end
 
+%% ===== GET ISOSURFACE PARAMETERS =====
+function [ctFile, isoValue, isoRange] = GetIsosurfaceParams(isosurfaceFile)
+    % Intialize returned variables
+    ctFile = [];
+    isoValue = [];
+    isoRange = [];
+    % Load the IsoSurface
+    sSurf = load(file_fullpath(isosurfaceFile), 'History');
+    if isfield(sSurf, 'History') && ~isempty(sSurf.History)
+        % Get CT file, value and range from last History entry
+        ctEntries = regexp(sSurf.History(:, 3), '^Thresholded CT:\s(.*)\sthreshold\s*=\s*(\d+)(?:\sminVal\s*=\s*)?(\d+)?(?:\smaxVal\s*=\s*)?(\d+)?', 'tokens');
+        iEntries =  find(~cellfun(@isempty, ctEntries));
+        if any(iEntries) && length(ctEntries{iEntries(end)}{1}) == 4
+            ctFile   = ctEntries{iEntries(end)}{1}{1};
+            isoValue = str2double(ctEntries{iEntries(end)}{1}{2});
+            if any(cellfun(@isempty, ctEntries{iEntries(end)}{1}(3:4)))
+                % If range not in last History entry, load from CT file and update History accordingly
+                warning off
+                sCt = load(file_fullpath(ctFile), 'Histogram');
+                warning on
+                if ~isfield(sCt, 'Histogram')
+                    sCt = bst_memory('LoadMri', ctFile);
+                end
+                isoRange = double(round([sCt.Histogram.whiteLevel, sCt.Histogram.intensityMax]));
+                % Update history
+                sSurf.History{iEntries(end), 3} = sprintf('Thresholded CT: %s threshold = %d minVal = %d maxVal = %d', ctFile, isoValue, isoRange);                
+                bst_save(file_fullpath(isosurfaceFile), sSurf, [], 1);
+            else
+                isoRange = str2double(ctEntries{iEntries(end)}{1}(3:4));
+            end
+        end
+    end
+end
