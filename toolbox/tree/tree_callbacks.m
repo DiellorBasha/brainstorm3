@@ -3208,10 +3208,29 @@ function fcnPetProcessing(jPopup, sSubject, iAnatomy)
     AddSeparator(jPopup);
     % Create sub-menu
     jMenu = gui_component('Menu', jPopup, [], 'PET processing', IconLoader.ICON_VOLPET);
+    jMenuMask = gui_component('Menu', jMenu, [], 'Apply mask', IconLoader.ICON_VOLATLAS, [], []);
+    MenuMaskLabels = {'Brainmask','GM', 'WM', 'Ventricles', 'Cortex', 'Brainstem', 'Cerebellum', 'Cerebellum-gm', 'Hippocampus'};
+        for iGuiComp = 1:numel(MenuMaskLabels)        
+            MenuMaskLabel = MenuMaskLabels{iGuiComp}; % Get the current label
+                gui_component('MenuItem', jMenuMask, [], MenuMaskLabel, IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', lower(MenuMaskLabel)));
+        end
+    jMenuSUVR = gui_component('Menu', jMenu, [], 'Calculate SUVR', IconLoader.ICON_VOLATLAS, [], []);
+       gui_component('MenuItem', jMenuSUVR, [], 'Reference Region:', [], [], [] );
+    gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-Whole', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-GM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Brainstem', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Pons', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Eroded subcortical WM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Composite', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+        AddSeparator(jMenu)
+    gui_component('MenuItem', jMenu, [], 'Project to surface', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)PetImportProcess_Callback(PetFile));
+    gui_component('MenuItem', jMenu, [], 'Launch PET2SURF...', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, iSubject, filenameFull));
+
     % === PET IMPORT PROCESSING ===
     if length(iAnatomy) == 1
         PetFile = sSubject.Anatomy(iAnatomy).FileName;
         gui_component('MenuItem', jMenu, [], 'Realign frames', IconLoader.ICON_VOLPET, [], @(h,ev)PetImportProcess_Callback(PetFile));
+        AddSeparator(jPopup)
     end
 end
 
