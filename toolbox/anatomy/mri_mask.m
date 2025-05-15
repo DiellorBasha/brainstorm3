@@ -1,18 +1,19 @@
-function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
-% MRI_SKULLSTRIP: Skull stripping on 'MriFileSrc' using 'MriFileRef' as reference MRI.
+function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_roimask(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
+% mri_roimask: Skull stripping on 'MriFileSrc' using 'MriFileRef' as reference MRI.
 %                 Both volumes must have the same Cube and Voxel size
 %
-% USAGE:  [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
-%            [sMriMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(sMriSrc,    sMriRef,    Method, SubMethod, isRescale)
+% USAGE:  [MriFileMask, errMsg, fileTag, binBrainMask] = mri_roimask(MriFileSrc, MriFileRef, Method, SubMethod, isRescale)
+%            [sMriMask, errMsg, fileTag, binBrainMask] = mri_roimask(sMriSrc,    sMriRef,    Method, SubMethod, isRescale)
 %
 %
 % INPUTS:
 %    - MriFileSrc   : MRI structure or MRI file to apply skull stripping on
 %    - MriFileRef   : MRI structure or MRI file to find brain masking for skull stripping
 %                     If empty, the Default MRI for that Subject with 'MriFileSrc' is used
-%    - Method       : If 'BrainSuite', use BrainSuite's Brain Surface Extractor (BSE)
-%                     If 'SPM', use SPM Tissue Segmentation
-%                     If 'ASEG', use Freesurfer aseg+aparc
+%    - Method       : If 'ASEG', use 
+%                     If 'DKT', 
+%                     If 'Desikan-Killiany'
+                      If 'Destrieux'
 %    - SubMethod    : 
 %    - isRescale    :
 % OUTPUTS:
@@ -39,8 +40,7 @@ function [MriFileMask, errMsg, fileTag, binBrainMask] = mri_skullstrip(MriFileSr
 % For more information type "brainstorm license" at command prompt.
 % =============================================================================@
 %
-% Authors: Raymundo Cassani, 2024
-%           Chinmay Chinara, 2024
+% Authors: Diellor Basha, 2025
 
 % ===== PARSE INPUTS =====
 % Parse inputs
@@ -59,7 +59,7 @@ MriFileMask  = [];
 errMsg       = '';
 fileTag      = '';
 binBrainMask = [];
-
+atlasDir = bst_fileparts(file_fullpath(sDefSubject.FileName));
 % Return if invalid Method
 if isempty(Method) || strcmpi(Method, 'Skip')
     return;
@@ -102,72 +102,6 @@ end
 % Reset any previous logo
 bst_plugin('SetProgressLogo', []);
 switch lower(Method)
-    case 'brainsuite'
-        % Check for BrainSuite Installation
-        [~, errMsg] = process_dwi2dti('CheckBrainSuiteInstall');
-        if ~isempty(errMsg)
-            bst_progress('text', 'Skipping skull stripping. BrainSuite not installed.');
-            return
-        end
-        % Set the BrainSuite logo
-        bst_progress('setimage', bst_fullfile(bst_get('BrainstormDocDir'), 'plugins', 'brainsuite_logo.png'));
-        % Get temporary folder
-        TmpDir = bst_get('BrainstormTmpDir', 0, 'brainsuite');
-        % Save reference MRI in .nii format
-        NiiRefFile = bst_fullfile(TmpDir, 'mri_ref.nii');
-        out_mri_nii(sMriRef, NiiRefFile);
-        % Perform skull stripping using Brain Surface Extractor (BSE)
-        bst_progress('text', 'Skull Stripping: BrainSuite Brain Surface Extractor...');
-        strCall = [...
-            'bse -i "' NiiRefFile '" --auto' ...
-            ' -o "'            fullfile(TmpDir, 'skull_stripped_mri.nii.gz"') ...
-            ' --trim --mask "' fullfile(TmpDir, 'bse_smooth_brain.mask.nii.gz"') ...
-            ' --hires "'       fullfile(TmpDir, 'bse_detailled_brain.mask.nii.gz"') ...
-            ' --cortex "'      fullfile(TmpDir, 'bse_cortex_file.nii.gz"')];
-        disp(['BST> System call: ' strCall]);
-        status = system(strCall);
-        % Error handling
-        if (status ~= 0)
-            errMsg = ['BrainSuite failed at step BSE.', 10, 'Check the Matlab command window for more information.'];
-            return
-        end
-        % Get the brain mask
-        NiiBrainMaskFile = bst_fullfile(TmpDir, 'bse_smooth_brain.mask.nii.gz');
-        sMriBrainMask = in_mri(NiiBrainMaskFile, 'ALL', 0, 0);
-        % Make it a binary mask
-        sMriBrainMask.Cube = sMriBrainMask.Cube/255;
-        % Some erosion to reduce any artefacts
-        sMriBrainMask.Cube = sMriBrainMask.Cube & ~mri_dilate(~sMriBrainMask.Cube, 3);
-        % Logic brain mask cube
-        binBrainMask = sMriBrainMask.Cube > 0;
-        % Temporary files to delete
-        filesDel = TmpDir;
-
-    case 'spm'
-        % Check for SPM12 installation
-        [isInstalledSpm, errMsg] = bst_plugin('Install', 'spm12');
-        if ~isInstalledSpm
-            bst_progress('text', 'Skipping skull stripping. SPM not installed.');
-            return;
-        end
-        % Set the SPM logo
-        bst_plugin('SetProgressLogo', 'spm12');
-        % Perform skull stripping using SPM Tissue Segmentation
-        bst_progress('text', 'Skull Stripping: SPM Segment...');
-        % Reset matlabbatch to start fresh
-        clear matlabbatch;
-        % Get the TPM atlas
-        TpmFile = bst_get('SpmTpmAtlas', 'SPM');
-        % Get the SPM tissue segments
-        [~, TpmFiles] = mri_normalize_segment(sMriRef, TpmFile);
-        % Compute brain mask: union(GM, WM, CSF)
-        sGm =  in_mri_nii(TpmFiles{2}, 0, 0, 0);
-        sWm =  in_mri_nii(TpmFiles{1}, 0, 0, 0);
-        sCsf = in_mri_nii(TpmFiles{3}, 0, 0, 0);
-        binBrainMask = (sGm.Cube + sWm.Cube + sCsf.Cube) > 0;
-        % Temporary files to delete
-        filesDel = bst_fileparts(TpmFiles{1});
-
     case 'aseg'
         % Get subject
         if isempty (MriFileSrc)

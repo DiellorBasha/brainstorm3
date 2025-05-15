@@ -572,13 +572,11 @@ switch (lower(action))
                 if ~bst_get('ReadOnly') && ((iSubject == 0) || ~sSubject.UseDefaultAnat)
                     AddSeparator(jPopup);
                     % === IMPORT ===
-                    jMenuImportAnat = gui_component('Menu', jPopup, [], 'Import anatomy', IconLoader.ICON_ANATOMY, [], []);
-                        gui_component('MenuItem', jMenuImportAnat, [], 'Anatomy folder', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 0));  
-                        gui_component('MenuItem', jMenuImportAnat, [], 'Anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
-                    jMenuImportVol= gui_component('Menu', jPopup, [], 'Import volumes', IconLoader.ICON_ANATOMY, [], []);  
-                        gui_component('MenuItem', jMenuImportVol, [], 'MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
-                        gui_component('MenuItem', jMenuImportVol, [], 'CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'Import CT'));
-                        gui_component('MenuItem', jMenuImportVol, [], 'PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 0, 1, 'Import PET'));
+                    gui_component('MenuItem', jPopup, [], 'Import anatomy folder', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 0));
+                    gui_component('MenuItem', jPopup, [], 'Import anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
+                    gui_component('MenuItem', jPopup, [], 'Import MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
+                    gui_component('MenuItem', jPopup, [], 'Import CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'Import CT'));
+                    gui_component('MenuItem', jPopup, [], 'Import PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'Import PET'));
                     gui_component('MenuItem', jPopup, [], 'Import surfaces', IconLoader.ICON_SURFACE, [], @(h,ev)bst_call(@import_surfaces, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Import fibers', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@import_fibers, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Convert DWI to DTI', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@process_dwi2dti, 'ComputeInteractive', iSubject));
@@ -652,6 +650,10 @@ switch (lower(action))
 
                     % === MRI SEGMENTATION ===
                     fcnMriSegment(jPopup, sSubject, iSubject, [], 0, 0);
+                    % === DEFACE MRI ===
+                    gui_component('MenuItem', jPopup, [], 'Deface anatomy', IconLoader.ICON_ANATOMY, [], @(h,ev)process_mri_deface('Compute', iSubject, struct('isDefaceHead', 1)));
+                    % === SEEG/ECOG ===
+                    gui_component('MenuItem', jPopup, [], 'SEEG/ECOG implantation', IconLoader.ICON_SEEG_DEPTH, [], @(h,ev)bst_call(@panel_ieeg, 'CreateImplantation', sSubject));
                     % Export menu (added later)
                     if (iSubject ~= 0)
                         jMenuExport{1} = gui_component('MenuItem', [], [], 'Export subject',  IconLoader.ICON_SAVE, [], @(h,ev)export_protocol(bst_get('iProtocol'), iSubject));
@@ -1060,6 +1062,13 @@ switch (lower(action))
                 isAtlas = strcmpi(nodeType, 'volatlas') || ~isempty(strfind(mriComment, 'tissues')) || ~isempty(strfind(mriComment, 'aseg')) || ~isempty(strfind(mriComment, 'atlas'));
                 isCt    = strcmpi(nodeType, 'volct');
                 isPet   = strcmpi(nodeType, 'volpet');
+                % Menu icon
+                volIcon = 'ICON_ANATOMY';
+                if isCt
+                    volIcon = 'ICON_VOLCT';
+                elseif isPet
+                    volIcon = 'ICON_VOLPET';
+                end
                     
                 if (length(bstNodes) == 1) && ~isPet
                     % MENU : DISPLAY
@@ -1127,8 +1136,20 @@ switch (lower(action))
                             gui_component('MenuItem', jMenuRegister, [], 'Copy fiducials from default MRI',    IconLoader.ICON_ANATOMY, [], @(h,ev)MriCoregister(filenameRelative, [], 'vox2ras', 0));
                         end
                     end
-                    % === MRI SEGMENTATION ===
-                    fcnMriSegment(jPopup, sSubject, iSubject, iAnatomy, isAtlas, isCt);
+                    % === MRI and CT SEGMENTATION ===
+                    if ~isPet
+                        fcnMriSegment(jPopup, sSubject, iSubject, iAnatomy, isAtlas, isCt);
+                    else
+                        fcnPetProcessing(jPopup, sSubject, iAnatomy);
+                    end
+                    if ~isAtlas
+                        % === DEFACE MRI ===
+                        gui_component('MenuItem', jPopup, [], 'Deface volume', IconLoader.(volIcon), [], @(h,ev)process_mri_deface('Compute', filenameRelative, struct('isDefaceHead', 0)));
+                        % === SEEG/ECOG ===
+                        if (length(iAnatomy) == 1) && iSubject ~=0 && ~isPet
+                            gui_component('MenuItem', jPopup, [], 'SEEG/ECOG implantation', IconLoader.ICON_SEEG_DEPTH, [], @(h,ev)bst_call(@panel_ieeg, 'CreateImplantation', filenameRelative));
+                        end
+                    end
                 end
                 % === MENU: EXPORT ===
                 % Export menu (added later)
@@ -3171,20 +3192,6 @@ function fcnMriSegment(jPopup, sSubject, iSubject, iAnatomy, isAtlas, isCt)
                 gui_component('MenuItem', jMenu, [], '<HTML><B>FreeSurfer</B>: Cortex, atlases', IconLoader.ICON_FEM, [], @(h,ev)bst_call(@process_segment_freesurfer, 'ComputeInteractive', iSubject, iAnatomy));
             end
         end
-        % === DEFACE MRI ===
-        if isempty(iAnatomy)
-            gui_component('MenuItem', jPopup, [], 'Deface anatomy', IconLoader.ICON_ANATOMY, [], @(h,ev)process_mri_deface('Compute', iSubject, struct('isDefaceHead', 1)));
-        else
-            gui_component('MenuItem', jPopup, [], 'Deface volume', IconLoader.(volIcon), [], @(h,ev)process_mri_deface('Compute', MriFile, struct('isDefaceHead', 0)));
-        end
-        % === SEEG/ECOG ===
-        % Right click on the subject only
-        if isempty(iAnatomy) && iSubject ~=0
-            gui_component('MenuItem', jPopup, [], 'SEEG/ECOG implantation', IconLoader.ICON_SEEG_DEPTH, [], @(h,ev)bst_call(@panel_ieeg, 'CreateImplantation', sSubject));
-        % Right click on a desired volume (MRI/CT) in a subject
-        elseif (length(iAnatomy) == 1) && iSubject ~=0
-                gui_component('MenuItem', jPopup, [], 'SEEG/ECOG implantation', IconLoader.ICON_SEEG_DEPTH, [], @(h,ev)bst_call(@panel_ieeg, 'CreateImplantation', MriFile));
-        end
           
     % === TISSUE SEGMENTATION ===
     elseif (length(iAnatomy) == 1) && ~isempty(strfind(lower(sSubject.Anatomy(iAnatomy).Comment), 'tissues'))
@@ -3194,6 +3201,59 @@ function fcnMriSegment(jPopup, sSubject, iSubject, iAnatomy, isAtlas, isCt)
 end
 
                     
+%% ===== PET PROCESSING =====
+function fcnPetProcessing(jPopup, sSubject, iAnatomy)
+    import org.brainstorm.icon.*;
+    % Add menu separator
+    AddSeparator(jPopup);
+    % Create sub-menu
+    jMenu = gui_component('Menu', jPopup, [], 'PET processing', IconLoader.ICON_VOLPET);
+    jMenuMask = gui_component('Menu', jMenu, [], 'Apply mask', IconLoader.ICON_VOLATLAS, [], []);
+    MenuMaskLabels = {'Brainmask','GM', 'WM', 'Ventricles', 'Cortex', 'Brainstem', 'Cerebellum', 'Cerebellum-gm', 'Hippocampus'};
+        for iGuiComp = 1:numel(MenuMaskLabels)        
+            MenuMaskLabel = MenuMaskLabels{iGuiComp}; % Get the current label
+                gui_component('MenuItem', jMenuMask, [], MenuMaskLabel, IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', lower(MenuMaskLabel)));
+        end
+    jMenuSUVR = gui_component('Menu', jMenu, [], 'Calculate SUVR', IconLoader.ICON_VOLATLAS, [], []);
+       gui_component('MenuItem', jMenuSUVR, [], 'Reference Region:', [], [], [] );
+    gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-Whole', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Cerebellum-GM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Brainstem', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Pons', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Eroded subcortical WM', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+    gui_component('MenuItem', jMenuSUVR, [], 'Composite', IconLoader.ICON_VOLATLAS, [], @(h,ev)bst_call(@mri_skullstrip, filenameFull, [], 'ASEG', 'cerebellum-gm', 1));
+        AddSeparator(jMenu)
+    gui_component('MenuItem', jMenu, [], 'Project to surface', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)PetImportProcess_Callback(PetFile));
+    gui_component('MenuItem', jMenu, [], 'Launch PET2SURF...', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@pet_app_launcher, iSubject, filenameFull));
+
+    % === PET IMPORT PROCESSING ===
+    if length(iAnatomy) == 1
+        PetFile = sSubject.Anatomy(iAnatomy).FileName;
+        gui_component('MenuItem', jMenu, [], 'Realign frames', IconLoader.ICON_VOLPET, [], @(h,ev)PetImportProcess_Callback(PetFile));
+        AddSeparator(jPopup)
+    end
+end
+
+
+%% ===== PET IMPORT PROCESSING =====
+function PetImportProcess_Callback(PetFile)
+    % Get number of frames (4D)
+    CubeInfo = whos('-file', file_fullpath(PetFile), 'Cube');
+    nFrames = CubeInfo.size(4);
+    % Nothing to do here
+    if nFrames < 2
+        disp('BST> PET volume is static (3D), skipping realignment across frames');
+        return
+    end
+    % Collect user inputs
+    petopts = gui_show_dialog('PET Pre-processing options', @panel_import_pet, 1, [], nFrames, 0);
+    if ~isempty(petopts)
+        % Realign, smooth and aggregate
+        mri_realign(PetFile, petopts.align, petopts.fwhm, petopts.aggregate);
+    end
+end
+
+
 %% ===== GET ALL FILENAMES =====
 function FileNames = GetAllFilenames(bstNodes, targetType, isExcludeBad, isFullPath)
     % Parse inputs
