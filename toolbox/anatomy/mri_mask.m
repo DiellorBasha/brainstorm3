@@ -30,7 +30,6 @@ MriFileMask = [];
 errMsg = '';
 fileTag = '';
 binMask = [];
-isSaving = false;
 
 % Progress bar
 isProgress = bst_progress('isVisible');
@@ -50,7 +49,7 @@ if isstruct(MriFile)
 elseif ischar(MriFile)
     sMri = in_mri_bst(MriFile);
     mriFilePath = MriFile;
-    [sSubject, iSubject, iMri] = bst_get('MriFile', MriFile);
+    [sSubject, ~, ~] = bst_get('MriFile', MriFile);
     isSaving = true;
 else
     bst_progress('stop');
