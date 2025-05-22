@@ -22,7 +22,7 @@ function [OutputFile, errorMsg] = mri_interp_vol2tess(MriFileSrc, MriFileRef, Co
 %% ===== INITIALIZATION =====
 errorMsg = '';
 OutputFile = '';
-if nargin < 6, ProjFrac = [0.1 0.4 0.5]; end
+if nargin < 6, ProjFrac = [0.1 0.8 0.]; end
 if nargin < 5, DisplayUnits = []; end
 if nargin < 4, TimeVector = []; end
 if nargin < 3, Condition = []; end
@@ -75,46 +75,65 @@ if ~isequal(refSize, srcSize)
 end
 
 %% ===== LOAD SURFACES =====
-Surfaces = {'cortex_15002V', 'mid_15002V', 'white_15002V'};
-%Surfaces = {'cortex_266935V', 'mid_266935V', 'white_266935V'};
-SurfaceFiles = {};
-for nSurf = 1:numel(Surfaces)
-    iSurf = find(cellfun(@(c) contains(c, Surfaces{nSurf}), {sSubject.Surface.Comment}));
-    if isempty(iSurf)
-        errorMsg = 'Required surface files not found.';
-        return;
-    end
-    SurfaceFiles{nSurf} = sSubject.Surface(iSurf).FileName;
+% Find and load pial, mid, and white "low" resolution surfaces from sSubject.Surface 
+pialFile = '';
+midFile = '';
+whiteFile = '';
+
+% Collect all file names
+allFiles = {sSubject.Surface.FileName};
+
+% Find indices for each surface type
+idxPial  = find(~cellfun('isempty', regexp(allFiles, 'cortex_pial_low\.mat$', 'once')), 1);
+idxMid   = find(~cellfun('isempty', regexp(allFiles, 'cortex_mid_low\.mat$', 'once')), 1);
+idxWhite = find(~cellfun('isempty', regexp(allFiles, 'cortex_white_low\.mat$', 'once')), 1);
+
+% Assign file names if found
+if ~isempty(idxPial)
+    pialFile = allFiles{idxPial};
+else
+    error('Pial surface (cortex_pial_low) not found.');
+end
+if ~isempty(idxMid)
+    midFile = allFiles{idxMid};
+else
+    error('Mid surface (cortex_mid_low) not found.');
+end
+if ~isempty(idxWhite)
+    whiteFile = allFiles{idxWhite};
+else
+    error('White surface (cortex_white_low) not found.');
 end
 
-pialFile = SurfaceFiles{1};
-sPial = in_tess_bst(SurfaceFiles{1});
-sMid = in_tess_bst(SurfaceFiles{2});
-sWhite = in_tess_bst(SurfaceFiles{3});
+% Load the surfaces
+sPial  = in_tess_bst(pialFile);
+sMid   = in_tess_bst(midFile);
+sWhite = in_tess_bst(whiteFile);
 
-%% ===== COMPUTE PROJECTION =====
-nVertices = size(sPial.Vertices, 1);
-nVoxels = numel(sMriRef.Cube);
-nFrames = size(sMriSrc.Cube, 4);
+SurfaceFiles = {pialFile, midFile, whiteFile};
+sSurf = {sPial, sMid, sWhite};
+vol2tess = cell(1, numel(SurfaceFiles)); % Use cell array to handle different vertex counts
+
 cube2vec = double(sMriSrc.Cube(:,:,:,1));
 cube2vec = cube2vec(:);
 
-vol2tess = zeros(nVertices, numel(Surfaces));
-for nSurf = 1:numel(Surfaces)
+for nSurf = 1:numel(SurfaceFiles)
+    nVertices = size(sSurf{nSurf}.Vertices, 1);
     tess2mri_interp = tess_interp_mri(SurfaceFiles{nSurf}, sMriRef);
     ivol2tess = tess2mri_interp' * cube2vec;
     vWeights = sum(tess2mri_interp, 1);
     ivol2tess = ivol2tess ./ vWeights';
     ivol2tess(~isfinite(ivol2tess)) = 0;
-    vol2tess(:, nSurf) = ivol2tess;
+    vol2tess{nSurf} = ivol2tess;
 end
 
-
-map = vol2tess * ProjFrac';
-% minNonZero = min(cube2vec(cube2vec > 0));
-% map = (map - minNonZero) / (max(cube2vec) - minNonZero);
-% map = vol2tess;
-
+% If all surfaces have the same number of vertices, you can concatenate:
+if all(cellfun(@(v) numel(v), vol2tess) == numel(vol2tess{1}))
+    vol2tess_mat = cell2mat(vol2tess);
+    map = vol2tess_mat * ProjFrac';
+else
+    error('Surface vertex counts do not match. Cannot combine projections.');
+end
 
 % === STORE AS REGULAR SOURCE FILE ===
     ResultsMat = db_template('resultsmat');
@@ -166,9 +185,7 @@ if ~isProgressBar
     bst_progress('stop');
 end
 %% ====== VISUALIZE RESULT ======= 
-
 view_surface_data(pialFile, file_short(OutputFile))
-
 if ~isProgressBar
     bst_progress('stop');
 end
