@@ -1,28 +1,26 @@
 function varargout = process_evt_detect_burst( varargin )
-% PROCESS_EVT_DETECT_BURST: Detect transient oscillatory bursts in continuous recordings.
+% PROCESS_EVT_DETECT_BURST: Detect oscillatory bursts using CFAR-style SNR.
 %
-% Detects time intervals where narrowband oscillatory power exceeds a threshold.
-% Two detection methods are available:
+% Detects transient narrowband oscillatory events using a constant false
+% alarm rate (CFAR) approach based on the signal-to-noise ratio between
+% bandpass and bandstop filtered signals (Muller et al. 2016, eLife 5:e17267).
 %
-% Method 1: Hilbert envelope + MAD threshold
-%   1. Band-pass filter the selected channel(s) in the target frequency band.
-%   2. Compute the analytic signal via Hilbert transform; take the envelope.
-%   3. Compute threshold = median(envelope) + k * MAD(envelope), where k is
-%      user-specified (default 2). MAD-based thresholding is robust to outliers.
-%   4. Mark contiguous supra-threshold intervals as burst events.
-%
-% Method 2: SNR / CFAR (Muller et al. 2016, eLife 5:e17267)
-%   1. Bandpass filter in target band (8th-order Butterworth by default).
-%   2. Bandstop filter: broadband (1-100 Hz) with target band removed.
-%   3. Compute power of bandpass and bandstop in sliding windows (500 ms).
+% Algorithm:
+%   1. Bandpass filter in target band (Butterworth, configurable order).
+%   2. Bandstop filter: broadband with target band removed.
+%   3. Compute power of bandpass and bandstop in sliding windows (default 500 ms).
 %   4. SNR(t) = 10*log10(P_bandpass / P_bandstop) in dB per channel.
-%   5. Threshold at constant SNR level (default 5 dB) — CFAR-like detection.
-%   This method is amplitude-invariant: it detects narrowband spectral events
-%   regardless of overall signal amplitude.
+%      Optionally normalized by bandwidth (PSD mode) for invariance to
+%      the broadband range choice.
+%   5. Per-channel thresholding at constant SNR level (default 5 dB).
+%   6. Consensus voting: require N% of channels to exceed threshold
+%      simultaneously before calling a burst.
+%   7. Boundary extension: event start/end are extended to the earliest
+%      onset and latest offset across all participating channels.
+%   8. Merge nearby events and enforce minimum duration.
 %
-% Both methods then:
-%   - Enforce minimum burst duration (reject brief crossings).
-%   - Merge nearby events separated by less than the minimum gap.
+% This method is amplitude-invariant: it detects narrowband spectral events
+% regardless of overall signal amplitude.
 %
 % USAGE:  OutputFiles = process_evt_detect_burst('Run', sProcess, sInputs)
 %                 evt = process_evt_detect_burst('Compute', F, TimeVector, OPTIONS)
@@ -53,13 +51,13 @@ end
 
 
 %% ===== GET DESCRIPTION =====
-function sProcess = GetDescription() %#ok<DEFNU>
+function sProcess = GetDescription()
     % Description
-    sProcess.Comment     = 'Detect oscillatory bursts';
+    sProcess.Comment     = 'Detect bursts (CFAR)';
     sProcess.Category    = 'Custom';
     sProcess.SubGroup    = 'Events';
     sProcess.Index       = 46;
-    sProcess.Description = '';
+    sProcess.Description = 'https://doi.org/10.7554/eLife.17267';
     % Input/Output
     sProcess.InputTypes  = {'raw', 'data'};
     sProcess.OutputTypes = {'raw', 'data'};
@@ -69,7 +67,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     % === EVENT NAME ===
     sProcess.options.eventname.Comment = 'Event name: ';
     sProcess.options.eventname.Type    = 'text';
-    sProcess.options.eventname.Value   = 'burst_beta';
+    sProcess.options.eventname.Value   = 'burst_alpha';
     % Separator
     sProcess.options.sep1.Type    = 'separator';
     sProcess.options.sep1.Comment = ' ';
@@ -79,10 +77,6 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.sensortypes.Type    = 'text';
     sProcess.options.sensortypes.Value   = 'MEG';
     sProcess.options.sensortypes.InputTypes = {'raw', 'data'};
-    % Sensor selection help
-    sProcess.options.sensorhelp.Comment = ['<I><FONT color="#777777">When multiple channels are selected, the RMS envelope<BR>' ...
-                                           'across channels is used for detection.</FONT></I>'];
-    sProcess.options.sensorhelp.Type    = 'label';
 
     % === TIME WINDOW ===
     sProcess.options.timewindow.Comment = 'Time window: ';
@@ -94,47 +88,23 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.sep2.Comment = ' ';
 
     % === FREQUENCY BAND ===
-    sProcess.options.label_freq.Comment = '<U><B>Frequency band</B></U>:';
+    sProcess.options.label_freq.Comment = '<U><B>Target frequency band</B></U>:';
     sProcess.options.label_freq.Type    = 'label';
     sProcess.options.freqband.Comment = {'Delta (2-4 Hz)', 'Theta (4-8 Hz)', 'Alpha (8-13 Hz)', ...
                                          'Beta (13-30 Hz)', 'Low gamma (30-60 Hz)', 'Custom', ''};
     sProcess.options.freqband.Type    = 'radio_line';
-    sProcess.options.freqband.Value   = 4;  % Default: Beta
+    sProcess.options.freqband.Value   = 3;  % Default: Alpha
     % Custom frequency range
     sProcess.options.freqrange.Comment = 'Custom frequency range: ';
     sProcess.options.freqrange.Type    = 'range';
-    sProcess.options.freqrange.Value   = {[13, 30], 'Hz', 2};
+    sProcess.options.freqrange.Value   = {[8, 13], 'Hz', 2};
 
     % Separator
     sProcess.options.sep3.Type    = 'separator';
     sProcess.options.sep3.Comment = ' ';
 
-    % === DETECTION METHOD ===
-    sProcess.options.label_method.Comment = '<U><B>Detection method</B></U>:';
-    sProcess.options.label_method.Type    = 'label';
-    sProcess.options.method.Comment = {'Hilbert envelope (MAD threshold)', ...
-                                       'SNR / CFAR (Muller et al. 2016)', ''};
-    sProcess.options.method.Type    = 'radio_line';
-    sProcess.options.method.Value   = 1;
-
-    % Separator
-    sProcess.options.sep4.Type    = 'separator';
-    sProcess.options.sep4.Comment = ' ';
-
-    % === HILBERT/MAD OPTIONS ===
-    sProcess.options.label_hilbert.Comment = '<U><B>Hilbert envelope parameters</B></U>:';
-    sProcess.options.label_hilbert.Type    = 'label';
-    % Threshold (in units of MAD above median)
-    sProcess.options.threshold.Comment = 'Threshold (median + k*MAD): ';
-    sProcess.options.threshold.Type    = 'value';
-    sProcess.options.threshold.Value   = {2, ' x MAD', 2};
-
-    % Separator
-    sProcess.options.sep5.Type    = 'separator';
-    sProcess.options.sep5.Comment = ' ';
-
-    % === SNR/CFAR OPTIONS ===
-    sProcess.options.label_snr.Comment = '<U><B>SNR/CFAR parameters</B></U>:';
+    % === SNR / CFAR PARAMETERS ===
+    sProcess.options.label_snr.Comment = '<U><B>CFAR detection parameters</B></U>:';
     sProcess.options.label_snr.Type    = 'label';
     sProcess.options.label_snr_help.Comment = ['<I><FONT color="#777777">Bandpass vs bandstop power ratio in sliding windows.<BR>' ...
                                                 'Amplitude-invariant detection (Muller et al. 2016, eLife).</FONT></I>'];
@@ -148,24 +118,31 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.winlength.Type    = 'value';
     sProcess.options.winlength.Value   = {0.500, 's', 3};
     % Broadband range for bandstop reference
-    sProcess.options.broadband.Comment = 'Broadband range (for bandstop reference): ';
+    sProcess.options.broadband.Comment = 'Broadband range (bandstop reference): ';
     sProcess.options.broadband.Type    = 'range';
     sProcess.options.broadband.Value   = {[1, 100], 'Hz', 1};
     % Filter order
     sProcess.options.filtorder.Comment = 'Butterworth filter order: ';
     sProcess.options.filtorder.Type    = 'value';
     sProcess.options.filtorder.Value   = {8, '', 0};
+    % PSD normalization
+    sProcess.options.psdnorm.Comment = 'Normalize by bandwidth (PSD mode)';
+    sProcess.options.psdnorm.Type    = 'checkbox';
+    sProcess.options.psdnorm.Value   = 1;
+    sProcess.options.psdnorm_help.Comment = ['<I><FONT color="#777777">Divides power by bandwidth before computing SNR, making the<BR>' ...
+                                              'metric invariant to the broadband range choice. Recommended.</FONT></I>'];
+    sProcess.options.psdnorm_help.Type    = 'label';
     % Resample frequency (0 = no resampling)
     sProcess.options.resample.Comment = 'Resample before filtering (0=off): ';
     sProcess.options.resample.Type    = 'value';
     sProcess.options.resample.Value   = {600, 'Hz', 0};
-    sProcess.options.resample_help.Comment = ['<I><FONT color="#777777">Downsample to speed up SNR computation. Must be &gt; 2x broadband upper limit.<BR>' ...
+    sProcess.options.resample_help.Comment = ['<I><FONT color="#777777">Downsample to speed up computation. Must be &gt; 2x broadband upper limit.<BR>' ...
                                                'Recommended: 600 Hz for beta, 300 Hz for alpha/theta. 0 = use original rate.</FONT></I>'];
     sProcess.options.resample_help.Type    = 'label';
 
     % Separator
-    sProcess.options.sep6.Type    = 'separator';
-    sProcess.options.sep6.Comment = ' ';
+    sProcess.options.sep4.Type    = 'separator';
+    sProcess.options.sep4.Comment = ' ';
 
     % === CHANNEL CONSENSUS ===
     sProcess.options.label_consensus.Comment = '<U><B>Channel consensus</B></U>:';
@@ -180,10 +157,10 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.consensus_help.Type    = 'label';
 
     % Separator
-    sProcess.options.sep7.Type    = 'separator';
-    sProcess.options.sep7.Comment = ' ';
+    sProcess.options.sep5.Type    = 'separator';
+    sProcess.options.sep5.Comment = ' ';
 
-    % === COMMON EVENT PARAMETERS ===
+    % === EVENT PARAMETERS ===
     sProcess.options.label_evt.Comment = '<U><B>Event parameters</B></U>:';
     sProcess.options.label_evt.Type    = 'label';
     % Minimum burst duration
@@ -198,18 +175,13 @@ end
 
 
 %% ===== FORMAT COMMENT =====
-function Comment = FormatComment(sProcess) %#ok<DEFNU>
-    methodNames = {'Hilbert/MAD', 'SNR/CFAR'};
-    iMethod = sProcess.options.method.Value;
-    if iMethod < 1 || iMethod > 2
-        iMethod = 1;
-    end
-    Comment = ['Detect bursts (' methodNames{iMethod} '): ', sProcess.options.eventname.Value];
+function Comment = FormatComment(sProcess)
+    Comment = ['Detect bursts (CFAR): ', sProcess.options.eventname.Value];
 end
 
 
 %% ===== RUN =====
-function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
+function OutputFiles = Run(sProcess, sInputs)
     % ===== GET OPTIONS =====
     evtName = strtrim(sProcess.options.eventname.Value);
     if isempty(evtName)
@@ -243,30 +215,18 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         TimeWindow = [];
     end
 
-    % Detection method
-    iMethod = sProcess.options.method.Value;
-    if iMethod == 1
-        methodStr = 'hilbert';
-    else
-        methodStr = 'snr';
-    end
-
     % Build OPTIONS structure for Compute
     OPTIONS = Compute();  % Get defaults
-    OPTIONS.method      = methodStr;
-    OPTIONS.freqRange   = FreqRange;
-    OPTIONS.minDuration = sProcess.options.minduration.Value{1};
-    OPTIONS.minGap      = sProcess.options.mingap.Value{1};
-    % Hilbert/MAD options
-    OPTIONS.threshold   = sProcess.options.threshold.Value{1};
-    % SNR/CFAR options
-    OPTIONS.snrThreshold = sProcess.options.snrthreshold.Value{1};
-    OPTIONS.winLength    = sProcess.options.winlength.Value{1};
-    OPTIONS.broadband    = sProcess.options.broadband.Value{1};
-    OPTIONS.filtOrder    = sProcess.options.filtorder.Value{1};
-    OPTIONS.resample     = sProcess.options.resample.Value{1};
-    % Consensus
+    OPTIONS.freqRange      = FreqRange;
+    OPTIONS.snrThreshold   = sProcess.options.snrthreshold.Value{1};
+    OPTIONS.winLength      = sProcess.options.winlength.Value{1};
+    OPTIONS.broadband      = sProcess.options.broadband.Value{1};
+    OPTIONS.filtOrder      = sProcess.options.filtorder.Value{1};
+    OPTIONS.psdNorm        = logical(sProcess.options.psdnorm.Value);
+    OPTIONS.resample       = sProcess.options.resample.Value{1};
     OPTIONS.minChannelsPct = sProcess.options.minchannels.Value{1};
+    OPTIONS.minDuration    = sProcess.options.minduration.Value{1};
+    OPTIONS.minGap         = sProcess.options.mingap.Value{1};
 
     % Option structure for in_fread()
     ImportOptions = db_template('ImportOptions');
@@ -330,7 +290,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         end
 
         % ===== DETECT BURSTS =====
-        bst_progress('text', sprintf('File %d/%d: Detecting bursts...', iFile, length(sInputs)));
+        bst_progress('text', sprintf('File %d/%d: Detecting bursts (CFAR)...', iFile, length(sInputs)));
         bst_progress('set', progressPos + round(2 * iFile / length(sInputs) / 3 * 100));
 
         [evt, stats] = Compute(F, TimeVector, OPTIONS);
@@ -373,19 +333,17 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             % Report
             nBursts = size(evt, 2);
             meanDur = mean(evt(2,:) - evt(1,:)) * 1000;
-            consensusStr = sprintf(', consensus: %d/%d channels', stats.minChannelsUsed, stats.nChannels);
-            if strcmpi(OPTIONS.method, 'hilbert')
-                bst_report('Info', sProcess, sInputs(iFile), ...
-                    sprintf('[Hilbert/MAD] %d bursts (mean dur: %.0f ms, thresh: %.2e%s)', ...
-                    nBursts, meanDur, stats.thresholdValue, consensusStr));
-            else
-                bst_report('Info', sProcess, sInputs(iFile), ...
-                    sprintf('[SNR/CFAR] %d bursts (mean dur: %.0f ms, SNR: %.1f dB, peak: %.1f dB%s)', ...
-                    nBursts, meanDur, stats.snrThresholdUsed, stats.maxSNR, consensusStr));
+            normStr = '';
+            if OPTIONS.psdNorm
+                normStr = ', PSD-normalized';
             end
+            bst_report('Info', sProcess, sInputs(iFile), ...
+                sprintf('[CFAR] %d bursts (mean dur: %.0f ms, SNR: %.1f dB, peak: %.1f dB, consensus: %d/%d ch%s)', ...
+                nBursts, meanDur, stats.snrThresholdUsed, stats.maxSNR, ...
+                stats.minChannelsUsed, stats.nChannels, normStr));
         else
             bst_report('Warning', sProcess, sInputs(iFile), ...
-                'No bursts detected. Try lowering the threshold or widening the frequency band.');
+                'No bursts detected. Try lowering the threshold, widening the frequency band, or reducing the consensus percentage.');
         end
         iOk(iFile) = true;
     end
@@ -401,17 +359,16 @@ end
 function [evt, stats] = Compute(F, TimeVector, OPTIONS)
     % Default options
     defOptions = struct(...
-        'method',        'hilbert', ... % 'hilbert' or 'snr'
-        'freqRange',     [13, 30], ...  % Frequency band [low, high] in Hz
-        'threshold',     2, ...         % Hilbert: threshold in units of MAD above median
-        'snrThreshold',  5, ...         % SNR: threshold in dB
-        'winLength',     0.500, ...     % SNR: sliding window length in seconds
-        'broadband',     [1, 100], ...  % SNR: broadband range for bandstop reference
-        'filtOrder',     8, ...         % SNR: Butterworth filter order
-        'resample',      600, ...       % SNR: resample to this freq before filtering (0=off)
-        'minChannelsPct', 5, ...        % Min % of channels for consensus (0=single-channel max)
-        'minDuration',   0.050, ...     % Minimum burst duration in seconds
-        'minGap',        0.050);        % Minimum gap between bursts in seconds (merge if shorter)
+        'freqRange',      [8, 13], ...   % Frequency band [low, high] in Hz
+        'snrThreshold',   5, ...         % Threshold in dB
+        'winLength',      0.500, ...     % Sliding window length in seconds
+        'broadband',      [1, 100], ...  % Broadband range for bandstop reference
+        'filtOrder',      8, ...         % Butterworth filter order
+        'psdNorm',        true, ...      % Normalize by bandwidth (PSD mode)
+        'resample',       600, ...       % Resample to this freq before filtering (0=off)
+        'minChannelsPct', 5, ...         % Min % of channels for consensus
+        'minDuration',    0.050, ...     % Minimum burst duration in seconds
+        'minGap',         0.050);        % Minimum gap between bursts in seconds
 
     % Return defaults if no input
     if (nargin == 0)
@@ -425,24 +382,14 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
     sFreq = 1 / (TimeVector(2) - TimeVector(1));
     nSamplesOrig = length(TimeVector);
 
-    % ===== DISPATCH BY METHOD (returns per-channel masks) =====
-    switch lower(OPTIONS.method)
-        case 'hilbert'
-            [chanMasks, stats] = ComputeHilbert(F, sFreq, OPTIONS);
-        case 'snr'
-            [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS);
-        otherwise
-            error('Unknown detection method: %s', OPTIONS.method);
-    end
+    % ===== COMPUTE PER-CHANNEL SNR MASKS =====
+    [chanMasks, stats] = ComputeSNR(F, sFreq, nSamplesOrig, OPTIONS);
     % chanMasks: nChannels x nSamplesOrig (binary, at original sample rate)
 
     nChannels = size(chanMasks, 1);
 
     % ===== CONSENSUS VOTING =====
-    % Count how many channels exceed threshold at each time point
-    chanCount = sum(chanMasks, 1);  % 1 x nSamplesOrig
-
-    % Minimum channels for consensus
+    chanCount = sum(chanMasks, 1);
     minChanAbs = max(1, round(OPTIONS.minChannelsPct / 100 * nChannels));
     consensusMask = chanCount >= minChanAbs;
 
@@ -461,8 +408,6 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
     end
 
     % ===== EXTEND BOUNDARIES TO EARLIEST/LATEST CHANNEL CROSSING =====
-    % For each consensus interval, find the participating channels and
-    % extend the event to the earliest onset and latest offset among them.
     onsets  = zeros(1, length(consOnsets));
     offsets = zeros(1, length(consOnsets));
     for iEvt = 1:length(consOnsets)
@@ -472,18 +417,15 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
         % Channels active during this consensus period
         activeChan = find(any(chanMasks(:, cOn:cOff), 2));
 
-        % For each active channel, find the contiguous supra-threshold
-        % interval that overlaps with [cOn, cOff] and take the union
+        % Union of per-channel crossings overlapping [cOn, cOff]
         evtStart = cOn;
         evtEnd   = cOff;
         for iCh = 1:length(activeChan)
             ch = activeChan(iCh);
-            % Walk backward from cOn to find where this channel's crossing began
             s = cOn;
             while s > 1 && chanMasks(ch, s-1)
                 s = s - 1;
             end
-            % Walk forward from cOff to find where this channel's crossing ends
             e = cOff;
             while e < nSamplesOrig && chanMasks(ch, e+1)
                 e = e + 1;
@@ -496,7 +438,6 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
     end
 
     % ===== MERGE CLOSE / OVERLAPPING BURSTS =====
-    % Extension may cause overlap between adjacent consensus events
     minGapSamples = round(OPTIONS.minGap * sFreq);
     iBurst = 1;
     while iBurst < length(onsets)
@@ -526,45 +467,20 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
 end
 
 
-%% ===== COMPUTE: HILBERT ENVELOPE + MAD =====
-% Returns per-channel binary masks (nChannels x nSamples)
-function [chanMasks, stats] = ComputeHilbert(F, sFreq, OPTIONS)
-    % Band-pass filter
-    Ffilt = process_bandpass('Compute', F, sFreq, OPTIONS.freqRange(1), OPTIONS.freqRange(2), ...
-                             'bst-hfilter-2019', 1);
-
-    % Hilbert envelope per channel
-    nChannels = size(Ffilt, 1);
-    envelopes = abs(hilbert(Ffilt'))';  % nChannels x nSamples
-
-    % Per-channel robust threshold: median + k * scaled MAD
-    chanMasks = false(size(envelopes));
-    medEnvs = zeros(1, nChannels);
-    madEnvs = zeros(1, nChannels);
-    threshValues = zeros(1, nChannels);
-    for iCh = 1:nChannels
-        env = envelopes(iCh, :);
-        medEnvs(iCh) = median(env);
-        madEnvs(iCh) = median(abs(env - medEnvs(iCh)));
-        threshValues(iCh) = medEnvs(iCh) + OPTIONS.threshold * 1.4826 * madEnvs(iCh);
-        chanMasks(iCh, :) = env > threshValues(iCh);
-    end
-
-    stats = struct('method', 'hilbert', ...
-                   'medianEnv', median(medEnvs), ...
-                   'madEnv', median(madEnvs), ...
-                   'thresholdValue', median(threshValues));
-end
-
-
-%% ===== COMPUTE: SNR / CFAR (Muller et al. 2016) =====
-% Bandpass vs bandstop power ratio in sliding windows.
+%% ===== COMPUTE SNR (CFAR) =====
+% Bandpass vs bandstop power ratio in sliding windows per channel.
 % Reference: Muller et al. (2016) eLife 5:e17267
-%   SNR(t) = 10*log10( P_bandpass(t) / P_bandstop(t) )
-%   Detection at constant SNR threshold (CFAR-like).
-function [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS)
+%
+% Two modes:
+%   Power mode:  SNR = 10*log10( P_bp / P_bs )
+%   PSD mode:    SNR = 10*log10( (P_bp/BW_bp) / (P_bs/BW_bs) )
+%
+% PSD mode normalizes by bandwidth, making the metric invariant to the
+% broadband range choice. At 0 dB in PSD mode, the power spectral density
+% in the target band equals the average PSD elsewhere — any positive value
+% indicates a genuine spectral peak.
+function [chanMasks, stats] = ComputeSNR(F, sFreq, nSamplesOrig, OPTIONS)
     nChannelsOrig = size(F, 1);
-    nSamplesOrig  = size(F, 2);
 
     % --- Optional downsampling for speed ---
     targetFs = OPTIONS.resample;
@@ -614,7 +530,7 @@ function [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS)
         F_bs(iChan, :) = filtfilt(sosBS, gBS, tmp);
     end
 
-    % --- Sliding window power and SNR (vectorized) ---
+    % --- Sliding window power (vectorized) ---
     winSamples = round(OPTIONS.winLength * sFreq);
     if winSamples < 2
         winSamples = 2;
@@ -622,13 +538,25 @@ function [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS)
     powBP = movmean(F_bp.^2, winSamples, 2);
     powBS = movmean(F_bs.^2, winSamples, 2);
 
-    % SNR in dB per channel
+    % --- PSD normalization (divide power by bandwidth) ---
+    if OPTIONS.psdNorm
+        bwBP = fHigh - fLow;                              % Target bandwidth (Hz)
+        bwBS = (bHigh - bLow) - bwBP;                     % Bandstop bandwidth (Hz)
+        if bwBS <= 0
+            error('Broadband range must be wider than the target band.');
+        end
+        % Convert total power to power spectral density
+        powBP = powBP / bwBP;
+        powBS = powBS / bwBS;
+    end
+
+    % --- SNR in dB per channel ---
     snrPerChan = -Inf(nChannels, nSamples);
     validMask = (powBP > 0) & (powBS > 0);
     snrPerChan(validMask) = 10 * log10(powBP(validMask) ./ powBS(validMask));
 
-    % Per-channel thresholding → binary masks at downsampled rate
-    chanMasksDS = snrPerChan >= OPTIONS.snrThreshold;  % nChannels x nSamples
+    % Per-channel thresholding
+    chanMasksDS = snrPerChan >= OPTIONS.snrThreshold;
 
     % --- Upsample per-channel masks to original sample count ---
     if didResample
@@ -638,11 +566,14 @@ function [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS)
         chanMasks = chanMasksDS;
     end
 
-    % Stats (aggregate for reporting only)
+    % Stats (aggregate for reporting)
     maxSNR = max(snrPerChan, [], 1);
-    stats = struct('method', 'snr', ...
-                   'snrThresholdUsed', OPTIONS.snrThreshold, ...
-                   'meanSNR', mean(maxSNR(isfinite(maxSNR))), ...
-                   'maxSNR', max(maxSNR(isfinite(maxSNR))), ...
-                   'actualSFreq', sFreq);
+    stats = struct(...
+        'snrThresholdUsed', OPTIONS.snrThreshold, ...
+        'psdNormalized',    OPTIONS.psdNorm, ...
+        'meanSNR',          mean(maxSNR(isfinite(maxSNR))), ...
+        'maxSNR',           max(maxSNR(isfinite(maxSNR))), ...
+        'bwBandpass',       fHigh - fLow, ...
+        'bwBandstop',       (bHigh - bLow) - (fHigh - fLow), ...
+        'actualSFreq',      sFreq);
 end
