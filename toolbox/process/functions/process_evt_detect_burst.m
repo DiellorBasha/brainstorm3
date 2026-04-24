@@ -167,6 +167,22 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.sep6.Type    = 'separator';
     sProcess.options.sep6.Comment = ' ';
 
+    % === CHANNEL CONSENSUS ===
+    sProcess.options.label_consensus.Comment = '<U><B>Channel consensus</B></U>:';
+    sProcess.options.label_consensus.Type    = 'label';
+    sProcess.options.minchannels.Comment = 'Min channels exceeding threshold (%): ';
+    sProcess.options.minchannels.Type    = 'value';
+    sProcess.options.minchannels.Value   = {5, '% of channels', 1};
+    sProcess.options.consensus_help.Comment = ['<I><FONT color="#777777">Per-channel detection with consensus voting. A burst is called<BR>' ...
+                                                'when &ge; N channels exceed threshold simultaneously. Event<BR>' ...
+                                                'boundaries extend to the earliest onset / latest offset<BR>' ...
+                                                'across all participating channels.</FONT></I>'];
+    sProcess.options.consensus_help.Type    = 'label';
+
+    % Separator
+    sProcess.options.sep7.Type    = 'separator';
+    sProcess.options.sep7.Comment = ' ';
+
     % === COMMON EVENT PARAMETERS ===
     sProcess.options.label_evt.Comment = '<U><B>Event parameters</B></U>:';
     sProcess.options.label_evt.Type    = 'label';
@@ -249,6 +265,8 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     OPTIONS.broadband    = sProcess.options.broadband.Value{1};
     OPTIONS.filtOrder    = sProcess.options.filtorder.Value{1};
     OPTIONS.resample     = sProcess.options.resample.Value{1};
+    % Consensus
+    OPTIONS.minChannelsPct = sProcess.options.minchannels.Value{1};
 
     % Option structure for in_fread()
     ImportOptions = db_template('ImportOptions');
@@ -355,14 +373,15 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             % Report
             nBursts = size(evt, 2);
             meanDur = mean(evt(2,:) - evt(1,:)) * 1000;
+            consensusStr = sprintf(', consensus: %d/%d channels', stats.minChannelsUsed, stats.nChannels);
             if strcmpi(OPTIONS.method, 'hilbert')
                 bst_report('Info', sProcess, sInputs(iFile), ...
-                    sprintf('[Hilbert/MAD] %d bursts detected (mean dur: %.0f ms, median env: %.2e, thresh: %.2e)', ...
-                    nBursts, meanDur, stats.medianEnv, stats.thresholdValue));
+                    sprintf('[Hilbert/MAD] %d bursts (mean dur: %.0f ms, thresh: %.2e%s)', ...
+                    nBursts, meanDur, stats.thresholdValue, consensusStr));
             else
                 bst_report('Info', sProcess, sInputs(iFile), ...
-                    sprintf('[SNR/CFAR] %d bursts detected (mean dur: %.0f ms, SNR thresh: %.1f dB, mean SNR: %.1f dB, max SNR: %.1f dB)', ...
-                    nBursts, meanDur, stats.snrThresholdUsed, stats.meanSNR, stats.maxSNR));
+                    sprintf('[SNR/CFAR] %d bursts (mean dur: %.0f ms, SNR: %.1f dB, peak: %.1f dB%s)', ...
+                    nBursts, meanDur, stats.snrThresholdUsed, stats.maxSNR, consensusStr));
             end
         else
             bst_report('Warning', sProcess, sInputs(iFile), ...
@@ -382,16 +401,17 @@ end
 function [evt, stats] = Compute(F, TimeVector, OPTIONS)
     % Default options
     defOptions = struct(...
-        'method',       'hilbert', ... % 'hilbert' or 'snr'
-        'freqRange',    [13, 30], ...  % Frequency band [low, high] in Hz
-        'threshold',    2, ...         % Hilbert: threshold in units of MAD above median
-        'snrThreshold', 5, ...         % SNR: threshold in dB
-        'winLength',    0.500, ...     % SNR: sliding window length in seconds
-        'broadband',    [1, 100], ...  % SNR: broadband range for bandstop reference
-        'filtOrder',    8, ...         % SNR: Butterworth filter order
-        'resample',     600, ...       % SNR: resample to this freq before filtering (0=off)
-        'minDuration',  0.050, ...     % Minimum burst duration in seconds
-        'minGap',       0.050);        % Minimum gap between bursts in seconds (merge if shorter)
+        'method',        'hilbert', ... % 'hilbert' or 'snr'
+        'freqRange',     [13, 30], ...  % Frequency band [low, high] in Hz
+        'threshold',     2, ...         % Hilbert: threshold in units of MAD above median
+        'snrThreshold',  5, ...         % SNR: threshold in dB
+        'winLength',     0.500, ...     % SNR: sliding window length in seconds
+        'broadband',     [1, 100], ...  % SNR: broadband range for bandstop reference
+        'filtOrder',     8, ...         % SNR: Butterworth filter order
+        'resample',      600, ...       % SNR: resample to this freq before filtering (0=off)
+        'minChannelsPct', 5, ...        % Min % of channels for consensus (0=single-channel max)
+        'minDuration',   0.050, ...     % Minimum burst duration in seconds
+        'minGap',        0.050);        % Minimum gap between bursts in seconds (merge if shorter)
 
     % Return defaults if no input
     if (nargin == 0)
@@ -403,34 +423,85 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
 
     % Sampling frequency
     sFreq = 1 / (TimeVector(2) - TimeVector(1));
+    nSamplesOrig = length(TimeVector);
 
-    % ===== DISPATCH BY METHOD =====
+    % ===== DISPATCH BY METHOD (returns per-channel masks) =====
     switch lower(OPTIONS.method)
         case 'hilbert'
-            [supraMask, stats] = ComputeHilbert(F, sFreq, OPTIONS);
+            [chanMasks, stats] = ComputeHilbert(F, sFreq, OPTIONS);
         case 'snr'
-            [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS);
+            [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS);
         otherwise
             error('Unknown detection method: %s', OPTIONS.method);
     end
+    % chanMasks: nChannels x nSamplesOrig (binary, at original sample rate)
 
-    % ===== DETECT SUPRA-THRESHOLD INTERVALS =====
-    diffMask = diff([0, supraMask, 0]);
-    onsets  = find(diffMask == 1);
-    offsets = find(diffMask == -1) - 1;
+    nChannels = size(chanMasks, 1);
 
-    if isempty(onsets)
+    % ===== CONSENSUS VOTING =====
+    % Count how many channels exceed threshold at each time point
+    chanCount = sum(chanMasks, 1);  % 1 x nSamplesOrig
+
+    % Minimum channels for consensus
+    minChanAbs = max(1, round(OPTIONS.minChannelsPct / 100 * nChannels));
+    consensusMask = chanCount >= minChanAbs;
+
+    stats.minChannelsUsed = minChanAbs;
+    stats.nChannels = nChannels;
+
+    % Find consensus intervals
+    diffCons = diff([0, consensusMask, 0]);
+    consOnsets  = find(diffCons == 1);
+    consOffsets = find(diffCons == -1) - 1;
+
+    if isempty(consOnsets)
         stats.nRawBursts = 0;
         evt = [];
         return;
     end
 
-    % ===== MERGE CLOSE BURSTS =====
+    % ===== EXTEND BOUNDARIES TO EARLIEST/LATEST CHANNEL CROSSING =====
+    % For each consensus interval, find the participating channels and
+    % extend the event to the earliest onset and latest offset among them.
+    onsets  = zeros(1, length(consOnsets));
+    offsets = zeros(1, length(consOnsets));
+    for iEvt = 1:length(consOnsets)
+        cOn  = consOnsets(iEvt);
+        cOff = consOffsets(iEvt);
+
+        % Channels active during this consensus period
+        activeChan = find(any(chanMasks(:, cOn:cOff), 2));
+
+        % For each active channel, find the contiguous supra-threshold
+        % interval that overlaps with [cOn, cOff] and take the union
+        evtStart = cOn;
+        evtEnd   = cOff;
+        for iCh = 1:length(activeChan)
+            ch = activeChan(iCh);
+            % Walk backward from cOn to find where this channel's crossing began
+            s = cOn;
+            while s > 1 && chanMasks(ch, s-1)
+                s = s - 1;
+            end
+            % Walk forward from cOff to find where this channel's crossing ends
+            e = cOff;
+            while e < nSamplesOrig && chanMasks(ch, e+1)
+                e = e + 1;
+            end
+            evtStart = min(evtStart, s);
+            evtEnd   = max(evtEnd, e);
+        end
+        onsets(iEvt)  = evtStart;
+        offsets(iEvt) = evtEnd;
+    end
+
+    % ===== MERGE CLOSE / OVERLAPPING BURSTS =====
+    % Extension may cause overlap between adjacent consensus events
     minGapSamples = round(OPTIONS.minGap * sFreq);
     iBurst = 1;
     while iBurst < length(onsets)
         if (onsets(iBurst + 1) - offsets(iBurst)) < minGapSamples
-            offsets(iBurst) = offsets(iBurst + 1);
+            offsets(iBurst) = max(offsets(iBurst), offsets(iBurst + 1));
             onsets(iBurst + 1)  = [];
             offsets(iBurst + 1) = [];
         else
@@ -456,31 +527,33 @@ end
 
 
 %% ===== COMPUTE: HILBERT ENVELOPE + MAD =====
-function [supraMask, stats] = ComputeHilbert(F, sFreq, OPTIONS)
+% Returns per-channel binary masks (nChannels x nSamples)
+function [chanMasks, stats] = ComputeHilbert(F, sFreq, OPTIONS)
     % Band-pass filter
     Ffilt = process_bandpass('Compute', F, sFreq, OPTIONS.freqRange(1), OPTIONS.freqRange(2), ...
                              'bst-hfilter-2019', 1);
 
-    % Hilbert envelope
+    % Hilbert envelope per channel
     nChannels = size(Ffilt, 1);
-    envelopes = abs(hilbert(Ffilt'))';
-    if nChannels > 1
-        envelope = sqrt(mean(envelopes.^2, 1));  % RMS across channels
-    else
-        envelope = envelopes;
+    envelopes = abs(hilbert(Ffilt'))';  % nChannels x nSamples
+
+    % Per-channel robust threshold: median + k * scaled MAD
+    chanMasks = false(size(envelopes));
+    medEnvs = zeros(1, nChannels);
+    madEnvs = zeros(1, nChannels);
+    threshValues = zeros(1, nChannels);
+    for iCh = 1:nChannels
+        env = envelopes(iCh, :);
+        medEnvs(iCh) = median(env);
+        madEnvs(iCh) = median(abs(env - medEnvs(iCh)));
+        threshValues(iCh) = medEnvs(iCh) + OPTIONS.threshold * 1.4826 * madEnvs(iCh);
+        chanMasks(iCh, :) = env > threshValues(iCh);
     end
 
-    % Robust threshold: median + k * scaled MAD
-    medEnv = median(envelope);
-    madEnv = median(abs(envelope - medEnv));
-    threshValue = medEnv + OPTIONS.threshold * 1.4826 * madEnv;
-
-    supraMask = envelope > threshValue;
-
     stats = struct('method', 'hilbert', ...
-                   'medianEnv', medEnv, ...
-                   'madEnv', madEnv, ...
-                   'thresholdValue', threshValue);
+                   'medianEnv', median(medEnvs), ...
+                   'madEnv', median(madEnvs), ...
+                   'thresholdValue', median(threshValues));
 end
 
 
@@ -489,7 +562,7 @@ end
 % Reference: Muller et al. (2016) eLife 5:e17267
 %   SNR(t) = 10*log10( P_bandpass(t) / P_bandstop(t) )
 %   Detection at constant SNR threshold (CFAR-like).
-function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
+function [chanMasks, stats] = ComputeSNR(F, sFreq, OPTIONS)
     nChannelsOrig = size(F, 1);
     nSamplesOrig  = size(F, 2);
 
@@ -497,12 +570,10 @@ function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
     targetFs = OPTIONS.resample;
     didResample = false;
     if targetFs > 0 && targetFs < sFreq
-        % Validate: target Fs must be > 2 * broadband upper limit (Nyquist)
         if targetFs <= 2 * OPTIONS.broadband(2)
             error('Resample rate (%.0f Hz) must be > 2x broadband upper limit (%.0f Hz).', ...
                 targetFs, OPTIONS.broadband(2));
         end
-        % Resample each channel using MATLAB's resample() (anti-alias built in)
         [p, q] = rat(targetFs / sFreq, 1e-6);
         nSamplesNew = round(nSamplesOrig * p / q);
         Frs = zeros(nChannelsOrig, nSamplesNew);
@@ -518,7 +589,7 @@ function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
     nChannels = size(F, 1);
     nSamples  = size(F, 2);
 
-    % --- Design Butterworth filters ---
+    % --- Design Butterworth filters (SOS for numerical stability) ---
     fLow  = OPTIONS.freqRange(1);
     fHigh = OPTIONS.freqRange(2);
     bLow  = OPTIONS.broadband(1);
@@ -526,28 +597,19 @@ function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
     filtOrd = OPTIONS.filtOrder;
     nyq = sFreq / 2;
 
-    % Use second-order sections (SOS) for numerical stability.
-    % Transfer-function form [b,a] is unstable for high-order filters at
-    % low normalized frequencies (e.g. 1 Hz at 2400 Hz sampling rate).
-
-    % Bandpass: target frequency band
     [zBP, pBP, kBP] = butter(filtOrd, [fLow, fHigh] / nyq, 'bandpass');
     [sosBP, gBP] = zp2sos(zBP, pBP, kBP);
 
-    % Bandstop: broadband with target band removed
-    % Strategy: bandpass to broadband, then bandstop the target band
     [zBroad, pBroad, kBroad] = butter(filtOrd, [bLow, bHigh] / nyq, 'bandpass');
     [sosBroad, gBroad] = zp2sos(zBroad, pBroad, kBroad);
     [zBS, pBS, kBS] = butter(filtOrd, [fLow, fHigh] / nyq, 'stop');
     [sosBS, gBS] = zp2sos(zBS, pBS, kBS);
 
-    % --- Filter each channel (filtfilt with SOS, G form) ---
+    % --- Filter each channel ---
     F_bp = zeros(nChannels, nSamples);
     F_bs = zeros(nChannels, nSamples);
     for iChan = 1:nChannels
-        % Bandpass in target band
         F_bp(iChan, :) = filtfilt(sosBP, gBP, F(iChan, :));
-        % Broadband then bandstop (= everything except target band, within broadband)
         tmp = filtfilt(sosBroad, gBroad, F(iChan, :));
         F_bs(iChan, :) = filtfilt(sosBS, gBS, tmp);
     end
@@ -557,42 +619,30 @@ function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
     if winSamples < 2
         winSamples = 2;
     end
-
-    % Use movmean for efficient sliding-window mean power (vectorized)
-    % movmean handles edge effects by shrinking the window at boundaries
-    powBP = movmean(F_bp.^2, winSamples, 2);  % nChannels x nSamples
+    powBP = movmean(F_bp.^2, winSamples, 2);
     powBS = movmean(F_bs.^2, winSamples, 2);
 
-    % SNR in dB per channel (guard against zero power)
+    % SNR in dB per channel
     snrPerChan = -Inf(nChannels, nSamples);
     validMask = (powBP > 0) & (powBS > 0);
     snrPerChan(validMask) = 10 * log10(powBP(validMask) ./ powBS(validMask));
 
-    % Aggregate across channels: max SNR in dB
-    % Using max because bursts are spatially focal — averaging across all
-    % channels washes out the signal (most channels are not bursting at any
-    % given time). Max detects a burst if ANY channel exceeds threshold.
-    if nChannels > 1
-        snrSignal = max(snrPerChan, [], 1);
-    else
-        snrSignal = snrPerChan;
-    end
+    % Per-channel thresholding → binary masks at downsampled rate
+    chanMasksDS = snrPerChan >= OPTIONS.snrThreshold;  % nChannels x nSamples
 
-    % Threshold
-    supraMaskDS = snrSignal >= OPTIONS.snrThreshold;
-
-    % --- Upsample mask back to original sample count if we resampled ---
+    % --- Upsample per-channel masks to original sample count ---
     if didResample
-        % Nearest-neighbor interpolation of binary mask to original length
-        idxOrig = round(linspace(1, length(supraMaskDS), nSamplesOrig));
-        supraMask = supraMaskDS(idxOrig);
+        idxOrig = round(linspace(1, nSamples, nSamplesOrig));
+        chanMasks = chanMasksDS(:, idxOrig);
     else
-        supraMask = supraMaskDS;
+        chanMasks = chanMasksDS;
     end
 
+    % Stats (aggregate for reporting only)
+    maxSNR = max(snrPerChan, [], 1);
     stats = struct('method', 'snr', ...
                    'snrThresholdUsed', OPTIONS.snrThreshold, ...
-                   'meanSNR', mean(snrSignal(isfinite(snrSignal))), ...
-                   'maxSNR', max(snrSignal(isfinite(snrSignal))), ...
+                   'meanSNR', mean(maxSNR(isfinite(maxSNR))), ...
+                   'maxSNR', max(maxSNR(isfinite(maxSNR))), ...
                    'actualSFreq', sFreq);
 end
