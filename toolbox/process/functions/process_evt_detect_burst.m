@@ -155,6 +155,13 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.filtorder.Comment = 'Butterworth filter order: ';
     sProcess.options.filtorder.Type    = 'value';
     sProcess.options.filtorder.Value   = {8, '', 0};
+    % Resample frequency (0 = no resampling)
+    sProcess.options.resample.Comment = 'Resample before filtering (0=off): ';
+    sProcess.options.resample.Type    = 'value';
+    sProcess.options.resample.Value   = {600, 'Hz', 0};
+    sProcess.options.resample_help.Comment = ['<I><FONT color="#777777">Downsample to speed up SNR computation. Must be &gt; 2x broadband upper limit.<BR>' ...
+                                               'Recommended: 600 Hz for beta, 300 Hz for alpha/theta. 0 = use original rate.</FONT></I>'];
+    sProcess.options.resample_help.Type    = 'label';
 
     % Separator
     sProcess.options.sep6.Type    = 'separator';
@@ -241,6 +248,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     OPTIONS.winLength    = sProcess.options.winlength.Value{1};
     OPTIONS.broadband    = sProcess.options.broadband.Value{1};
     OPTIONS.filtOrder    = sProcess.options.filtorder.Value{1};
+    OPTIONS.resample     = sProcess.options.resample.Value{1};
 
     % Option structure for in_fread()
     ImportOptions = db_template('ImportOptions');
@@ -381,6 +389,7 @@ function [evt, stats] = Compute(F, TimeVector, OPTIONS)
         'winLength',    0.500, ...     % SNR: sliding window length in seconds
         'broadband',    [1, 100], ...  % SNR: broadband range for bandstop reference
         'filtOrder',    8, ...         % SNR: Butterworth filter order
+        'resample',     600, ...       % SNR: resample to this freq before filtering (0=off)
         'minDuration',  0.050, ...     % Minimum burst duration in seconds
         'minGap',       0.050);        % Minimum gap between bursts in seconds (merge if shorter)
 
@@ -481,6 +490,31 @@ end
 %   SNR(t) = 10*log10( P_bandpass(t) / P_bandstop(t) )
 %   Detection at constant SNR threshold (CFAR-like).
 function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
+    nChannelsOrig = size(F, 1);
+    nSamplesOrig  = size(F, 2);
+
+    % --- Optional downsampling for speed ---
+    targetFs = OPTIONS.resample;
+    didResample = false;
+    if targetFs > 0 && targetFs < sFreq
+        % Validate: target Fs must be > 2 * broadband upper limit (Nyquist)
+        if targetFs <= 2 * OPTIONS.broadband(2)
+            error('Resample rate (%.0f Hz) must be > 2x broadband upper limit (%.0f Hz).', ...
+                targetFs, OPTIONS.broadband(2));
+        end
+        % Resample each channel using MATLAB's resample() (anti-alias built in)
+        [p, q] = rat(targetFs / sFreq, 1e-6);
+        nSamplesNew = round(nSamplesOrig * p / q);
+        Frs = zeros(nChannelsOrig, nSamplesNew);
+        for iChan = 1:nChannelsOrig
+            Frs(iChan, :) = resample(F(iChan, :), p, q);
+        end
+        F = Frs;
+        sFreq = targetFs;
+        didResample = true;
+        clear Frs;
+    end
+
     nChannels = size(F, 1);
     nSamples  = size(F, 2);
 
@@ -492,73 +526,73 @@ function [supraMask, stats] = ComputeSNR(F, sFreq, OPTIONS)
     filtOrd = OPTIONS.filtOrder;
     nyq = sFreq / 2;
 
+    % Use second-order sections (SOS) for numerical stability.
+    % Transfer-function form [b,a] is unstable for high-order filters at
+    % low normalized frequencies (e.g. 1 Hz at 2400 Hz sampling rate).
+
     % Bandpass: target frequency band
-    [bBP, aBP] = butter(filtOrd, [fLow, fHigh] / nyq, 'bandpass');
+    [zBP, pBP, kBP] = butter(filtOrd, [fLow, fHigh] / nyq, 'bandpass');
+    [sosBP, gBP] = zp2sos(zBP, pBP, kBP);
 
     % Bandstop: broadband with target band removed
     % Strategy: bandpass to broadband, then bandstop the target band
-    [bBroad, aBroad] = butter(filtOrd, [bLow, bHigh] / nyq, 'bandpass');
-    [bBS, aBS]       = butter(filtOrd, [fLow, fHigh] / nyq, 'stop');
+    [zBroad, pBroad, kBroad] = butter(filtOrd, [bLow, bHigh] / nyq, 'bandpass');
+    [sosBroad, gBroad] = zp2sos(zBroad, pBroad, kBroad);
+    [zBS, pBS, kBS] = butter(filtOrd, [fLow, fHigh] / nyq, 'stop');
+    [sosBS, gBS] = zp2sos(zBS, pBS, kBS);
 
-    % --- Filter each channel ---
+    % --- Filter each channel (filtfilt with SOS, G form) ---
     F_bp = zeros(nChannels, nSamples);
     F_bs = zeros(nChannels, nSamples);
     for iChan = 1:nChannels
         % Bandpass in target band
-        F_bp(iChan, :) = filtfilt(bBP, aBP, F(iChan, :));
+        F_bp(iChan, :) = filtfilt(sosBP, gBP, F(iChan, :));
         % Broadband then bandstop (= everything except target band, within broadband)
-        tmp = filtfilt(bBroad, aBroad, F(iChan, :));
-        F_bs(iChan, :) = filtfilt(bBS, aBS, tmp);
+        tmp = filtfilt(sosBroad, gBroad, F(iChan, :));
+        F_bs(iChan, :) = filtfilt(sosBS, gBS, tmp);
     end
 
-    % --- Sliding window power and SNR ---
+    % --- Sliding window power and SNR (vectorized) ---
     winSamples = round(OPTIONS.winLength * sFreq);
     if winSamples < 2
         winSamples = 2;
     end
-    halfWin = floor(winSamples / 2);
 
-    % Compute squared signals
-    F_bp_sq = F_bp.^2;
-    F_bs_sq = F_bs.^2;
+    % Use movmean for efficient sliding-window mean power (vectorized)
+    % movmean handles edge effects by shrinking the window at boundaries
+    powBP = movmean(F_bp.^2, winSamples, 2);  % nChannels x nSamples
+    powBS = movmean(F_bs.^2, winSamples, 2);
 
-    % Cumulative sum for efficient sliding window (per channel)
-    % Power in each window = mean of squared signal
-    snrPerChan = zeros(nChannels, nSamples);
-    for iChan = 1:nChannels
-        cumBP = [0, cumsum(F_bp_sq(iChan, :))];
-        cumBS = [0, cumsum(F_bs_sq(iChan, :))];
+    % SNR in dB per channel (guard against zero power)
+    snrPerChan = -Inf(nChannels, nSamples);
+    validMask = (powBP > 0) & (powBS > 0);
+    snrPerChan(validMask) = 10 * log10(powBP(validMask) ./ powBS(validMask));
 
-        for iSamp = 1:nSamples
-            % Window bounds (centered, clipped at edges)
-            iStart = max(1, iSamp - halfWin);
-            iEnd   = min(nSamples, iSamp + halfWin);
-            nWin   = iEnd - iStart + 1;
-
-            powBP = (cumBP(iEnd + 1) - cumBP(iStart)) / nWin;
-            powBS = (cumBS(iEnd + 1) - cumBS(iStart)) / nWin;
-
-            % SNR in dB (guard against zero/negative power)
-            if powBS > 0 && powBP > 0
-                snrPerChan(iChan, iSamp) = 10 * log10(powBP / powBS);
-            else
-                snrPerChan(iChan, iSamp) = -Inf;
-            end
-        end
-    end
-
-    % Aggregate across channels: mean SNR in dB
+    % Aggregate across channels: max SNR in dB
+    % Using max because bursts are spatially focal — averaging across all
+    % channels washes out the signal (most channels are not bursting at any
+    % given time). Max detects a burst if ANY channel exceeds threshold.
     if nChannels > 1
-        snrSignal = mean(snrPerChan, 1);
+        snrSignal = max(snrPerChan, [], 1);
     else
         snrSignal = snrPerChan;
     end
 
     % Threshold
-    supraMask = snrSignal >= OPTIONS.snrThreshold;
+    supraMaskDS = snrSignal >= OPTIONS.snrThreshold;
+
+    % --- Upsample mask back to original sample count if we resampled ---
+    if didResample
+        % Nearest-neighbor interpolation of binary mask to original length
+        idxOrig = round(linspace(1, length(supraMaskDS), nSamplesOrig));
+        supraMask = supraMaskDS(idxOrig);
+    else
+        supraMask = supraMaskDS;
+    end
 
     stats = struct('method', 'snr', ...
                    'snrThresholdUsed', OPTIONS.snrThreshold, ...
                    'meanSNR', mean(snrSignal(isfinite(snrSignal))), ...
-                   'maxSNR', max(snrSignal(isfinite(snrSignal))));
+                   'maxSNR', max(snrSignal(isfinite(snrSignal))), ...
+                   'actualSFreq', sFreq);
 end
