@@ -252,11 +252,6 @@ else
     SourcePrior = ones(K, 1);
 end
 
-%% ===== COMPUTE REGULARIZATION PARAMETER =====
-% Follow Brainstorm convention: λ = 1/SNR²
-% The regularization balances data fit vs source norm
-Lambda = 1 / (SNR^2);
-
 %% ===== COMPUTE EIGENMODE-SPACE INVERSE =====
 % The system: d = L̃ · c + noise
 % Where c ∈ ℝ^K are eigenmode coefficients
@@ -285,6 +280,12 @@ ConditionNumber = s(1) / max(s(end), eps);
 L_full_white = iW * L;
 s_full = svd(L_full_white);
 ConditionNumberFull = s_full(1) / max(s_full(end), eps);
+
+% Compute regularization parameter (Brainstorm convention):
+%   Lambda = trace(L_ws · L_ws') / (nChannels · SNR²)
+% This scales the regularization to the data, so the SNR parameter has
+% a consistent meaning regardless of the absolute scale of the lead field.
+Lambda = sum(s.^2) / (nChannels * SNR^2);
 
 % Inverse filter in SVD domain:
 %   M̃_w = V · diag(s/(s² + λ)) · U'
