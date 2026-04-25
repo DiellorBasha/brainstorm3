@@ -162,6 +162,19 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         return;
     end
 
+    % Check vertex count consistency between head model and eigenmodes
+    nVertEigen = size(Eigenmodes.Vectors, 1);
+    HeadModelFull = in_bst_headmodel(HeadModelFile, 0, 'Gain');
+    nVertHM = size(HeadModelFull.Gain, 2) / 3;  % unconstrained: 3 orientations per vertex
+    if nVertEigen ~= nVertHM
+        bst_report('Error', sProcess, sInputs, ...
+            sprintf(['Head model has %d vertices but eigenmodes have %d vertices.\n' ...
+            'This typically happens because computing eigenmodes repaired the surface mesh.\n' ...
+            'Please recompute the head model (right-click study > Compute head model).'], ...
+            nVertHM, nVertEigen));
+        return;
+    end
+
     % ===== GET NOISE COVARIANCE =====
     NoiseCovFile = '';
     if ~isempty(sStudy.NoiseCov) && ~isempty(sStudy.NoiseCov(1).FileName)
