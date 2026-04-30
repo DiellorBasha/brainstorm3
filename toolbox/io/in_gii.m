@@ -21,7 +21,7 @@ function [sXml, Values] = in_gii(GiiFile)
 %
 % Authors: Francois Tadel, 2017
 
-import sun.misc.BASE64Decoder;
+% import sun.misc.BASE64Decoder;  % Removed: Java class unavailable in Java 11+ (MATLAB R2023b+)
 
 % Read XML file
 sXml = in_xml(GiiFile);
@@ -55,9 +55,8 @@ for iArray = 1:nArrays
             Values{iArray} = str2num(sXml.GIFTI.DataArray(iArray).Data.text)';
             
         case {'Base64Binary', 'GZipBase64Binary'}
-            % Base64 decoding
-            decoder = BASE64Decoder();
-            Values{iArray} = decoder.decodeBuffer(sXml.GIFTI.DataArray(iArray).Data.text);
+            % Base64 decoding (use MATLAB built-in, compatible with Java 11+)
+            Values{iArray} = matlab.net.base64decode(sXml.GIFTI.DataArray(iArray).Data.text);
             % Unpack gzipped stream
             if strcmpi(sXml.GIFTI.DataArray(iArray).Encoding, 'GZipBase64Binary')
                 Values{iArray} = dunzip(Values{iArray});

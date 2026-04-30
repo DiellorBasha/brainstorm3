@@ -30,7 +30,7 @@ function TessMat = in_tess_gii(TessFile)
 %
 % Authors: Francois Tadel, 2012-2017
 
-import sun.misc.BASE64Decoder;
+% import sun.misc.BASE64Decoder;  % Removed: Java class unavailable in Java 11+ (MATLAB R2023b+)
 
 % Read GII file
 [sXml, Values] = in_gii(TessFile);
