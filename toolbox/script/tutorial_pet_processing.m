@@ -107,8 +107,14 @@ for iPet = 1 : length(PetFiles)
     PetAggFile = mri_realign(impPetFile, 'spm_realign', 0, 'mean');
     % Co-register and reslice PET volume
     PetAggCoregFile = mri_coregister(PetAggFile, MriFile, 'spm', 1);
+    % Partial volume correction (Muller-Gartner, FWHM=6mm)
+    [PetPvcFile, errPvc] = pet_pvc(PetAggCoregFile, MriFile, 6);
+    if ~isempty(errPvc)
+        disp(['BST> PVC failed: ' errPvc '. Continuing without PVC.']);
+        PetPvcFile = PetAggCoregFile;
+    end
     % Compute SUVR, and project to surface
-    [PetSuvrFile, ~, suvrSurfFile] = pet_process(PetAggCoregFile, 'ASEG', 'Cortex', 'Brainmask', 1, 1);
+    [PetSuvrFile, ~, suvrSurfFile] = pet_process(PetPvcFile, 'ASEG', 'Cortex', 'Brainmask', 1, 1);
 
     % Figure: Aligned, aggregated, co-registered PET overlayed on MRI
     hFigPetOvr = view_mri(MriFile, PetAggCoregFile);
