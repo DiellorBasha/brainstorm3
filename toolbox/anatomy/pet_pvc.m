@@ -79,22 +79,20 @@ if ~isfield(pvcOpts, 'wmcsfMethod') || isempty(pvcOpts.wmcsfMethod), pvcOpts.wmc
 if ~isfield(pvcOpts, 'wmcsfThresh') || isempty(pvcOpts.wmcsfThresh), pvcOpts.wmcsfThresh = 0.5;         end
 
 % ===== CHECK PLUGINS =====
-% SPM12
-if ~bst_plugin('IsLoaded', 'spm12')
-    [isInstalled, errInstall] = bst_plugin('Install', 'spm12', 1);
-    if ~isInstalled
-        errMsg = ['SPM12 plugin is required: ' errInstall];
-        return;
-    end
+% SPM12: Install if needed, then load
+[isOk, errInstall] = bst_plugin('Install', 'spm12', 1);
+if ~isOk
+    errMsg = ['SPM12 plugin is required: ' errInstall];
+    return;
 end
-% PETPVE12
-if ~bst_plugin('IsLoaded', 'petpve12')
-    [isInstalled, errInstall] = bst_plugin('Install', 'petpve12', 1);
-    if ~isInstalled
-        errMsg = ['PETPVE12 plugin is required: ' errInstall];
-        return;
-    end
+bst_plugin('Load', 'spm12');
+% PETPVE12: Install if needed, then load
+[isOk, errInstall] = bst_plugin('Install', 'petpve12', 1);
+if ~isOk
+    errMsg = ['PETPVE12 plugin is required: ' errInstall];
+    return;
 end
+bst_plugin('Load', 'petpve12');
 
 % ===== PROGRESS BAR =====
 isProgress = bst_progress('isVisible');
