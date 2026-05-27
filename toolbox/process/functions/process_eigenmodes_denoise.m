@@ -73,7 +73,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
 
     sProcess.options.label_info.Comment = ['<FONT color="#777777">Files A = data, Files B = empty-room. ' ...
         'Subtraction is on Welch-averaged power (not complex coefficients).<BR>' ...
-        'Outputs an SNR(\lambda,\omega) spectrum + cleaned power spectrum. Both inputs must be imported.</FONT>'];
+        'Outputs an SNR(&lambda;,&omega;) spectrum + cleaned power spectrum. Both inputs must be imported.</FONT>'];
     sProcess.options.label_info.Type    = 'label';
 end
 
@@ -124,7 +124,12 @@ function OutputFiles = Run(sProcess, sInputsA, sInputsB) %#ok<DEFNU>
     end
 
     % ===== CHANNELS: common good channels (by name) between data and noise =====
-    ChA = in_bst_channel(bst_get('ChannelFileForStudy', sStudyA.FileName));
+    ChanFileA = bst_get('ChannelFileForStudy', sStudyA.FileName);
+    if isempty(ChanFileA)
+        bst_report('Error', sProcess, sInputsA, 'No channel file for the data study (Files A).');
+        return;
+    end
+    ChA = in_bst_channel(ChanFileA);
     DA  = in_bst_data(sInputsA(1).FileName);
     if isstruct(DA.F)
         bst_report('Error', sProcess, sInputsA, 'Files A must be imported data (not raw). Import a block first.');
@@ -132,9 +137,18 @@ function OutputFiles = Run(sProcess, sInputsA, sInputsB) %#ok<DEFNU>
     end
     iA = good_channel(ChA.Channel, DA.ChannelFlag, 'MEG');
     if isempty(iA), iA = good_channel(ChA.Channel, DA.ChannelFlag, 'EEG'); end
+    if isempty(iA)
+        bst_report('Error', sProcess, sInputsA, 'No good MEG or EEG channels found in data (Files A).');
+        return;
+    end
 
     [sStudyB,~,~,~] = bst_get('Study', sInputsB(1).iStudy);
-    ChB = in_bst_channel(bst_get('ChannelFileForStudy', sStudyB.FileName));
+    ChanFileB = bst_get('ChannelFileForStudy', sStudyB.FileName);
+    if isempty(ChanFileB)
+        bst_report('Error', sProcess, sInputsB, 'No channel file for the empty-room study (Files B).');
+        return;
+    end
+    ChB = in_bst_channel(ChanFileB);
     DB  = in_bst_data(sInputsB(1).FileName);
     if isstruct(DB.F)
         bst_report('Error', sProcess, sInputsB, 'Files B (empty-room) must be imported data (not raw). Import a block first.');
@@ -142,6 +156,10 @@ function OutputFiles = Run(sProcess, sInputsA, sInputsB) %#ok<DEFNU>
     end
     iB = good_channel(ChB.Channel, DB.ChannelFlag, 'MEG');
     if isempty(iB), iB = good_channel(ChB.Channel, DB.ChannelFlag, 'EEG'); end
+    if isempty(iB)
+        bst_report('Error', sProcess, sInputsB, 'No good MEG or EEG channels found in empty-room (Files B).');
+        return;
+    end
 
     [~, ia, ib] = intersect({ChA.Channel(iA).Name}, {ChB.Channel(iB).Name}, 'stable');
     if isempty(ia)
