@@ -39,7 +39,7 @@ function [Kernel, Info] = bst_eigenmodes_transform(Gain, Phi, varargin)
 %     Kernel : [K x nch] transform A = pinv(L_tilde).
 %     Info   : struct with fields
 %              .CompressedLF    [nch x K]  L_tilde = Gain*Phi
-%              .SingularValues  [r x 1]    singular values of L_tilde
+%              .SingularValues  [min(nch,K) x 1]  all singular values of L_tilde (descending)
 %              .Rank            scalar     number of singular values > Tol
 %              .ConditionNumber scalar     s(1)/s(Rank)
 %              .Tol             scalar     floor used
@@ -67,17 +67,22 @@ function [Kernel, Info] = bst_eigenmodes_transform(Gain, Phi, varargin)
 %
 % Authors: Diellor Basha, 2026
 
-% Parse options
+%% ===== PARSE OPTIONS =====
 Tol = [];
 for i = 1:2:numel(varargin)
     switch lower(varargin{i})
-        case 'tol', Tol = varargin{i+1};
+        case 'tol'
+            Tol = varargin{i+1};
+            if ~isempty(Tol) && (~isscalar(Tol) || Tol < 0)
+                error('bst_eigenmodes_transform: Tol must be a non-negative scalar.');
+            end
     end
 end
 
 Gain = double(Gain);
 Phi  = double(Phi);
 
+%% ===== COMPRESS LEAD FIELD + PSEUDOINVERSE =====
 % Compressed lead field: column k = sensor topography of eigenmode k
 L_tilde = Gain * Phi;                      % [nch x K]
 
@@ -99,7 +104,7 @@ sinv(isKeep) = 1 ./ s(isKeep);
 
 Kernel = V * diag(sinv) * U';              % [K x nch]
 
-% Diagnostics
+%% ===== DIAGNOSTICS =====
 rankEff = sum(isKeep);
 Info = struct();
 Info.CompressedLF   = L_tilde;

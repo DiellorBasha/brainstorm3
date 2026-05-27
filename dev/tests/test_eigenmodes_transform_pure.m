@@ -28,6 +28,25 @@ assert(Info.Rank == K, 'Rank should equal K when K<nch and full rank.');
 assert(isfinite(Info.ConditionNumber) && Info.ConditionNumber >= 1, 'Bad condition number.');
 assert(numel(Info.SingularValues) == K, 'SingularValues length mismatch.');
 
+% Custom Tol floors more singular values -> lower effective rank.
+sAll   = svd(L_tilde);                       % descending
+TolMid = (sAll(9) + sAll(10)) / 2;           % keep exactly the first 9 modes
+[~, InfoTol] = bst_eigenmodes_transform(Gain, Phi, 'Tol', TolMid);
+assert(InfoTol.Rank == 9, 'Custom Tol did not reduce rank as expected (got %d).', InfoTol.Rank);
+
+% Tol above the largest singular value -> rank 0, condition number Inf.
+[~, InfoZero] = bst_eigenmodes_transform(Gain, Phi, 'Tol', sAll(1) * 2);
+assert(InfoZero.Rank == 0 && isinf(InfoZero.ConditionNumber), 'Rank-0 path: expected Inf condition number.');
+
+% Invalid Tol must error.
+threw = false;
+try
+    bst_eigenmodes_transform(Gain, Phi, 'Tol', -1);
+catch
+    threw = true;
+end
+assert(threw, 'Negative Tol should error.');
+
 % ----- Underdetermined regime: K > nch (min-norm right inverse) -----
 nCh2 = 20; nVert2 = 200; K2 = 35;
 Gain2    = randn(nCh2, nVert2);
