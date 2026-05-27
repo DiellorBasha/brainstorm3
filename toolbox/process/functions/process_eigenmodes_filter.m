@@ -19,7 +19,7 @@ function varargout = process_eigenmodes_filter( varargin )
 %
 %     Requires precomputed eigenmodes on the surface (from process_eigenmodes).
 %
-% SEE ALSO: tess_eigenmodes_filter, bst_eigenmodes_project, tess_eigenmodes, process_eigenmodes
+% SEE ALSO: bst_eigenmodes_filter, bst_eigenmodes_project, tess_eigenmodes, process_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -197,8 +197,12 @@ function sInput = Run(sProcess, sInput) %#ok<DEFNU>
         return;
     end
 
+    % Mass matrix for the M-weighted filter (computed once, reused across freqs).
+    sSurf = in_tess_bst(SurfaceFile, 0);
+    [~, MassMatrix] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eigenmodes.MassType);
+
     % ===== APPLY FILTER =====
-    % Build option arguments for tess_eigenmodes_filter
+    % Build option arguments for bst_eigenmodes_filter
     switch FilterType
         case 'lowpass'
             filterArgs = {'CutoffMode', CutoffMode};
@@ -228,11 +232,11 @@ function sInput = Run(sProcess, sInput) %#ok<DEFNU>
     if nFreqs > 1
         % Time-frequency data: filter each frequency band separately
         for iFreq = 1:nFreqs
-            sInput.A(:, :, iFreq) = tess_eigenmodes_filter(SurfaceFile, ...
-                sInput.A(:, :, iFreq), FilterType, filterArgs{:});
+            sInput.A(:, :, iFreq) = bst_eigenmodes_filter(Eigenmodes, ...
+                sInput.A(:, :, iFreq), MassMatrix, FilterType, filterArgs{:});
         end
     else
-        sInput.A = tess_eigenmodes_filter(SurfaceFile, sInput.A, FilterType, filterArgs{:});
+        sInput.A = bst_eigenmodes_filter(Eigenmodes, sInput.A, MassMatrix, FilterType, filterArgs{:});
     end
 
     % ===== UPDATE HISTORY =====
