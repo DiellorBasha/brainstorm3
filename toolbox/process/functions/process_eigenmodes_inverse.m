@@ -22,7 +22,7 @@ function varargout = process_eigenmodes_inverse( varargin )
 %
 %     Requires precomputed eigenmodes on the cortex surface.
 %
-% SEE ALSO: tess_eigenmodes_leadfield, in_tess_eigenmodes, process_eigenmodes
+% SEE ALSO: bst_inverse_eigenmodes, in_tess_eigenmodes, process_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -220,7 +220,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     bst_progress('start', 'Eigenmode inverse', 'Computing compressed lead field...', 0, 100);
     bst_progress('set', 5);
 
-    [InvResults, errMsg] = tess_eigenmodes_leadfield(HeadModelFile, SurfaceFile, NoiseCovFile, ...
+    [InvResults, errMsg] = bst_inverse_eigenmodes(HeadModelFile, SurfaceFile, NoiseCovFile, ...
         'Method', Method, ...
         'nModes', nModes, ...
         'PriorAlpha', PriorAlpha, ...

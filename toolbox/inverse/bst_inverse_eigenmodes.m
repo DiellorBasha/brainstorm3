@@ -1,7 +1,7 @@
-function [Results, errMsg] = tess_eigenmodes_leadfield(HeadModelFile, SurfaceFile, NoiseCovFile, varargin)
-% TESS_EIGENMODES_LEADFIELD: Eigenmode-space source mapping via compressed lead field.
+function [Results, errMsg] = bst_inverse_eigenmodes(HeadModelFile, SurfaceFile, NoiseCovFile, varargin)
+% BST_INVERSE_EIGENMODES: Eigenmode-space source mapping via compressed lead field.
 %
-% USAGE:  [Results, errMsg] = tess_eigenmodes_leadfield(HeadModelFile, SurfaceFile, NoiseCovFile, ...)
+% USAGE:  [Results, errMsg] = bst_inverse_eigenmodes(HeadModelFile, SurfaceFile, NoiseCovFile, ...)
 %
 % DESCRIPTION:
 %     Implements eigenmode-space MEG/EEG source mapping by compressing the
