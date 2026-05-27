@@ -36,6 +36,10 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %                                M(i,j) = area/12 for edge (i,j) in face,
 %                                M(i,i) = area/6 for vertex i in face.
 %     Symmetrize : (logical) Enforce symmetry via (L+L')/2. Default: true.
+%     CheckManifold : (logical) Warn if the input mesh is not a clean
+%                     2-manifold. Default: false. This function ASSUMES a
+%                     clean 2-manifold input (e.g. icosphere-downsampled
+%                     cortex); validate upstream with tess_manifold.
 %
 % OUTPUTS:
 %     L : [nVertices x nVertices] sparse positive semidefinite cotangent
@@ -79,10 +83,12 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %% ===== PARSE INPUTS =====
 MassType = 'barycentric';
 Symmetrize = true;
+CheckManifold = false;
 for i = 1:2:length(varargin)
     switch lower(varargin{i})
-        case 'masstype',    MassType = lower(varargin{i+1});
-        case 'symmetrize',  Symmetrize = varargin{i+1};
+        case 'masstype',      MassType = lower(varargin{i+1});
+        case 'symmetrize',    Symmetrize = varargin{i+1};
+        case 'checkmanifold', CheckManifold = varargin{i+1};
     end
 end
 
@@ -92,6 +98,18 @@ if (size(Vertices, 2) ~= 3) || (size(Faces, 2) ~= 3)
 end
 nV = size(Vertices, 1);
 Faces = double(Faces);
+
+% Optional manifold check (OFF by default). This operator is recomputed on
+% every project/filter call, and tess_eigenmodes is the authoritative gate,
+% so a full manifold scan in the inner loop would be wasteful.
+if CheckManifold
+    [~, ~, isManifold] = tess_manifold(Vertices, Faces, 'Repair', 0, 'Verbose', 0);
+    if ~isManifold
+        warning('tess_laplacian:NonManifold', ...
+            ['Input mesh is not a clean 2-manifold; the cotangent Laplacian may be ' ...
+             'inaccurate. Validate with tess_manifold or re-mesh with icosphere downsampling.']);
+    end
+end
 
 %% ===== COTANGENT LAPLACIAN =====
 % For each face (i,j,k), compute cotangent weights for all three edges.
