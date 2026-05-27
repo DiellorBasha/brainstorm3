@@ -80,7 +80,7 @@ function Filtered = tess_eigenmodes_filter(SurfaceFile, Data, FilterType, vararg
 %     % Isolate mid-frequency cortical patterns
 %     BandPass = tess_eigenmodes_filter(SurfaceFile, Sources, 'bandpass', 'ModeRange', [10 60]);
 %
-% SEE ALSO: tess_eigenmodes_project, tess_eigenmodes_load, tess_eigenmodes, tess_laplacian
+% SEE ALSO: tess_eigenmodes_project, in_tess_eigenmodes, tess_eigenmodes, tess_laplacian
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -122,7 +122,7 @@ for i = 1:2:length(varargin)
 end
 
 %% ===== LOAD EIGENMODES =====
-[Eigenmodes, isComputed] = tess_eigenmodes_load(SurfaceFile);
+[Eigenmodes, isComputed] = in_tess_eigenmodes(SurfaceFile);
 if ~isComputed
     error('No precomputed eigenmodes found in: %s. Run tess_eigenmodes first.', SurfaceFile);
 end

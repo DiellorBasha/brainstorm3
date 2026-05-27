@@ -18,7 +18,7 @@ function varargout = process_eigenmodes( varargin )
 %     assembles the cotangent Laplacian and mass matrix, solves the generalized
 %     eigenvalue problem L*phi = lambda*M*phi, and stores the result.
 %
-% SEE ALSO: tess_eigenmodes, tess_eigenmodes_save, tess_eigenmodes_load, tess_laplacian
+% SEE ALSO: tess_eigenmodes, out_tess_eigenmodes, in_tess_eigenmodes, tess_laplacian
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -156,7 +156,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
 
     % ===== CHECK EXISTING =====
     if ~Overwrite
-        [~, isComputed] = tess_eigenmodes_load(SurfaceFile);
+        [~, isComputed] = in_tess_eigenmodes(SurfaceFile);
         if isComputed
             bst_report('Info', sProcess, [], ...
                 ['Eigenmodes already computed for: ' SurfaceFile '. Skipping (set Overwrite to recompute).']);
@@ -249,7 +249,7 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInt
     bst_progress('set', 90);
     bst_progress('text', 'Saving eigenmodes to surface file...');
     try
-        tess_eigenmodes_save(SurfaceFile, Eigenmodes, Vertices, Faces, true);
+        out_tess_eigenmodes(SurfaceFile, Eigenmodes, Vertices, Faces, true);
     catch ME
         bst_progress('stop');
         errMsg = ['Failed to save eigenmodes: ' ME.message];

@@ -17,7 +17,7 @@ function varargout = process_eigenmodes_view( varargin )
 %
 %     Requires precomputed eigenmodes (from process_eigenmodes).
 %
-% SEE ALSO: tess_eigenmodes_load, process_eigenmodes
+% SEE ALSO: in_tess_eigenmodes, process_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -133,7 +133,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     end
 
     % ===== LOAD EIGENMODES =====
-    [Eigenmodes, isComputed] = tess_eigenmodes_load(SurfaceFile);
+    [Eigenmodes, isComputed] = in_tess_eigenmodes(SurfaceFile);
     if ~isComputed
         bst_report('Error', sProcess, [], ...
             ['No eigenmodes on surface: ' SurfaceFile '. Run "Compute eigenmodes" first.']);

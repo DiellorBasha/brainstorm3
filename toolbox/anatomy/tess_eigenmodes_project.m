@@ -25,7 +25,7 @@ function [Coeffs, Reconstructed] = tess_eigenmodes_project(SurfaceFile, Data, va
 %
 % INPUTS:
 %     SurfaceFile : Relative or absolute path to the Brainstorm surface file
-%                   containing precomputed Eigenmodes (from tess_eigenmodes_save).
+%                   containing precomputed Eigenmodes (from out_tess_eigenmodes).
 %     Data        : [nVertices x nTime] or [nVertices x 1] scalar field(s) on
 %                   the mesh. Each column is one time point or sample.
 %
@@ -57,7 +57,7 @@ function [Coeffs, Reconstructed] = tess_eigenmodes_project(SurfaceFile, Data, va
 %     % Band-pass: modes 20-80 (medium spatial frequencies only)
 %     [~, BandPass] = tess_eigenmodes_project(SurfaceFile, SourceData, 'ModeRange', [20 80]);
 %
-% SEE ALSO: tess_eigenmodes, tess_eigenmodes_load, tess_eigenmodes_filter, tess_laplacian
+% SEE ALSO: tess_eigenmodes, in_tess_eigenmodes, tess_eigenmodes_filter, tess_laplacian
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -90,7 +90,7 @@ for i = 1:2:length(varargin)
 end
 
 %% ===== LOAD EIGENMODES =====
-[Eigenmodes, isComputed] = tess_eigenmodes_load(SurfaceFile);
+[Eigenmodes, isComputed] = in_tess_eigenmodes(SurfaceFile);
 if ~isComputed
     error('No precomputed eigenmodes found in: %s. Run tess_eigenmodes first.', SurfaceFile);
 end

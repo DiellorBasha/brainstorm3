@@ -175,7 +175,7 @@ function sInput = Run(sProcess, sInput) %#ok<DEFNU>
     end
 
     % ===== CHECK EIGENMODES =====
-    [Eigenmodes, isComputed] = tess_eigenmodes_load(SurfaceFile);
+    [Eigenmodes, isComputed] = in_tess_eigenmodes(SurfaceFile);
     if ~isComputed
         bst_report('Error', sProcess, sInput, ...
             ['No precomputed eigenmodes found on surface: ' SurfaceFile 10 ...
