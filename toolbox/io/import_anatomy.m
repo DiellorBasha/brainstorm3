@@ -48,24 +48,30 @@ bst_set('LastUsedDirs', LastUsedDirs);
 DefaultFormats.AnatIn = FileFormat;
 bst_set('DefaultFormats',  DefaultFormats);
 
-% Auto-import: 15000 vertices, MNI registration
+% Auto-import: MNI registration, no user interaction.
+%  - FreeSurfer cortex: icosphere ico5 (20484 vertices total, FreeSurfer/MNE-style uniform mesh).
+%  - Other formats:     15000-vertex reducepatch (icosphere is FreeSurfer-only).
 if isAuto
     isInteractive = 0;
-    nVertices = 15000;
+    nVertices  = 15000;       % non-FreeSurfer formats
+    FsMethod   = 'icosphere'; % FreeSurfer cortex downsampling method
+    FsVertices = [];          % [] => import_anatomy_fs uses its icosphere default (ico5, 10242/hemi)
 else
     isInteractive = 1;
-    nVertices = [];
+    nVertices  = [];
+    FsMethod   = [];          % [] => import_anatomy_fs asks for method + resolution interactively
+    FsVertices = [];
 end
 sFid = [];
 
 % Import folder
 switch (FileFormat)
     case 'FreeSurfer-fast'
-        errorMsg = import_anatomy_fs(iSubject, AnatDir, nVertices, isInteractive, sFid, 0, 0);
+        errorMsg = import_anatomy_fs(iSubject, AnatDir, FsVertices, isInteractive, sFid, 0, 0, 0, FsMethod);
     case 'FreeSurfer'
-        errorMsg = import_anatomy_fs(iSubject, AnatDir, nVertices, isInteractive, sFid, 0, 1);
+        errorMsg = import_anatomy_fs(iSubject, AnatDir, FsVertices, isInteractive, sFid, 0, 1, 0, FsMethod);
     case 'FreeSurfer+Thick'
-        errorMsg = import_anatomy_fs(iSubject, AnatDir, nVertices, isInteractive, sFid, 1, 1);
+        errorMsg = import_anatomy_fs(iSubject, AnatDir, FsVertices, isInteractive, sFid, 1, 1, 0, FsMethod);
     case 'BrainSuite-fast'
         errorMsg = import_anatomy_bs(iSubject, AnatDir, nVertices, isInteractive, sFid, 0);
     case 'BrainSuite'

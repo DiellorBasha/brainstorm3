@@ -24,7 +24,7 @@ function [sAllAtlas, Messages] = import_label(SurfaceFile, LabelFiles, isNewAtla
 %
 % Authors: Francois Tadel, 2012-2022
 
-import sun.misc.BASE64Decoder;
+% import sun.misc.BASE64Decoder;  % Removed: Java class unavailable in Java 11+ (MATLAB R2023b+)
 
 
 %% ===== GET FILES =====
