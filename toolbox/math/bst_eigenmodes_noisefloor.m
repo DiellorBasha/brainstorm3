@@ -76,7 +76,7 @@ Out.CleanPSD = max(Pdata - Alpha .* Nnoise, Floor .* Nnoise);
 Out.Gain     = max(Pdata - Nnoise, 0) ./ max(Pdata, eps);
 
 %% ===== RELIABLE-MODE CUTOFF =====
-[K, nFreq] = size(Pdata);
+[~, nFreq] = size(Pdata);
 Out.Kstar = zeros(1, nFreq);
 for f = 1:nFreq
     idx = find(Out.SNR(:, f) >= SnrThresh, 1, 'last');

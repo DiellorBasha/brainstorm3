@@ -36,5 +36,10 @@ Outr = bst_eigenmodes_noisefloor(Pramp, N, 'SnrThresh', 1);
 % SNR>=1  <=>  3 - 0.1*(k-1) >= 1  <=>  k <= 21
 assert(Outr.Kstar(1) == 21, 'Kstar ramp wrong (got %d, expected 21).', Outr.Kstar(1));
 
+
+% Reliable-mode cutoff is 0 when no mode meets the threshold (SNR=1 everywhere < 2).
+OutZ = bst_eigenmodes_noisefloor(N, N, 'SnrThresh', 2);
+assert(all(OutZ.Kstar == 0), 'Kstar must be 0 when no mode meets the threshold.');
+
 fprintf('ALL TESTS PASSED: test_eigenmodes_noisefloor_pure\n');
 end
