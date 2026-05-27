@@ -16,7 +16,7 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %     surface, analogous to Fourier modes on flat domains.
 %
 %     The pipeline:
-%       1. Validate/repair the mesh (ensure manifold).
+%       1. Validate the mesh is manifold (repair only if Repair=true).
 %       2. Assemble L and M via tess_laplacian.
 %       3. Solve the generalized eigenvalue problem via MATLAB eigs.
 %       4. M-orthonormalize the eigenvectors.
@@ -31,7 +31,9 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %     MassType   : Mass matrix type: 'barycentric', 'voronoi', 'galerkin'
 %                  (default: 'barycentric')
 %     RemoveDC   : Remove the DC (constant) mode(s) (default: true)
-%     FixMesh    : Repair non-manifold defects (tess_manifold) before assembly (default: true)
+%     Repair     : Attempt to repair non-manifold defects before assembly
+%                  (default: false). When false, a non-manifold surface raises
+%                  an error. Repair changes vertex/edge counts (risky).
 %     Sigma      : Shift for shift-invert eigs (default: -1e-8).
 %                  A small negative shift improves convergence for the
 %                  smallest eigenvalues near zero.
@@ -88,7 +90,7 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 nModes    = 300;
 MassType  = 'barycentric';
 RemoveDC  = true;
-FixMesh   = true;
+Repair    = false;
 Sigma     = -1e-8;
 Tolerance = 1e-10;
 MaxIter   = 1000;
@@ -99,7 +101,7 @@ for i = 1:2:length(varargin)
         case 'nmodes',    nModes    = varargin{i+1};
         case 'masstype',  MassType  = varargin{i+1};
         case 'removedc',  RemoveDC  = varargin{i+1};
-        case 'fixmesh',   FixMesh   = varargin{i+1};
+        case 'repair',    Repair    = varargin{i+1};
         case 'sigma',     Sigma     = varargin{i+1};
         case 'tolerance', Tolerance = varargin{i+1};
         case 'maxiter',   MaxIter   = varargin{i+1};
@@ -109,10 +111,26 @@ end
 
 tStart = tic;
 
-%% ===== STEP 1: VALIDATE AND REPAIR MESH =====
-if FixMesh
-    % tess_manifold validates first and repairs only if defective (no-op on a clean mesh).
-    [Vertices, Faces, isManifold] = tess_manifold(Vertices, Faces, 'Repair', 1, 'Verbose', Verbose); %#ok<ASGLU>
+%% ===== STEP 1: VALIDATE MESH (NEVER AUTO-REPAIR) =====
+% Repair changes vertex/edge counts, which desyncs head models, lead fields,
+% and atlases built on this surface. So validate only; repair is opt-in.
+[~, ~, isManifold, report] = tess_manifold(Vertices, Faces, 'Repair', 0, 'Verbose', Verbose);
+if ~isManifold
+    if Repair
+        if Verbose
+            fprintf('BST> tess_eigenmodes: Surface non-manifold; attempting repair (vertex count may change)...\n');
+        end
+        [Vertices, Faces] = tess_manifold(Vertices, Faces, 'Repair', 1, 'Verbose', Verbose);
+    else
+        if isfield(report, 'summary') && ~isempty(report.summary)
+            defects = strjoin(report.summary, '; ');
+        else
+            defects = 'non-manifold mesh';
+        end
+        error(['tess_eigenmodes: Surface is not a clean 2-manifold (%s). Re-mesh with ' ...
+               'icosphere downsampling, or pass ''Repair'',true to attempt a risky repair ' ...
+               'that changes the vertex count.'], defects);
+    end
 end
 nV = size(Vertices, 1);
 

@@ -14,7 +14,7 @@ function varargout = process_eigenmodes( varargin )
 %       - Compact representation of cortical patterns
 %       - Heat kernel smoothing and diffusion
 %
-%     The pipeline validates the mesh (fixing non-manifold defects if needed),
+%     The pipeline validates the mesh (repair is opt-in via the Repair option),
 %     assembles the cotangent Laplacian and mass matrix, solves the generalized
 %     eigenvalue problem L*phi = lambda*M*phi, and stores the result.
 %
@@ -93,10 +93,10 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.removedc.Type    = 'checkbox';
     sProcess.options.removedc.Value   = 1;
 
-    % === FIX MESH ===
-    sProcess.options.fixmesh.Comment = 'Repair non-manifold defects before computing';
-    sProcess.options.fixmesh.Type    = 'checkbox';
-    sProcess.options.fixmesh.Value   = 1;
+    % === REPAIR (RISKY, OPT-IN) ===
+    sProcess.options.repair.Comment = 'Attempt repair if surface is non-manifold (risky: changes vertex count)';
+    sProcess.options.repair.Type    = 'checkbox';
+    sProcess.options.repair.Value   = 0;
 
     % === OVERWRITE ===
     sProcess.options.overwrite.Comment = 'Overwrite existing eigenmodes';
@@ -126,7 +126,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     nModes    = sProcess.options.nmodes.Value{1};
     MassType  = sProcess.options.masstype.Value;
     RemoveDC  = sProcess.options.removedc.Value;
-    FixMesh   = sProcess.options.fixmesh.Value;
+    Repair    = sProcess.options.repair.Value;
     Overwrite = sProcess.options.overwrite.Value;
     SurfType  = sProcess.options.surfacetype.Value;
 
@@ -168,7 +168,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     % ===== COMPUTE =====
     bst_report('Info', sProcess, [], ...
         sprintf('Computing %d eigenmodes on %s (%s mass)...', nModes, SurfaceFile, MassType));
-    errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, FixMesh);
+    errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, false);
     if ~isempty(errMsg)
         bst_report('Error', sProcess, [], errMsg);
         return;
@@ -183,7 +183,7 @@ end
 
 
 %% ===== COMPUTE =====
-function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, FixMesh)
+function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInteractive)
     errMsg = '';
 
     % Load surface
@@ -201,6 +201,32 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, FixMesh)
     Vertices = double(TessMat.Vertices);
     Faces    = double(TessMat.Faces);
 
+    % ===== MANIFOLD CHECK (never auto-repair) =====
+    [~, ~, isManifold, report] = tess_manifold(Vertices, Faces, 'Repair', 0, 'Verbose', 0);
+    if ~isManifold && ~Repair
+        if isfield(report, 'summary') && ~isempty(report.summary)
+            defects = strjoin(report.summary, '; ');
+        else
+            defects = 'non-manifold mesh';
+        end
+        if isInteractive
+            resp = java_dialog('question', ...
+                ['Surface is not a clean 2-manifold (' defects ').' 10 10 ...
+                 'Attempt repair? This changes the vertex count and may desync the ' ...
+                 'head model, lead field, and atlas built on this surface.'], ...
+                'Compute eigenmodes', [], {'Repair', 'Cancel'}, 'Cancel');
+            if ~strcmpi(resp, 'Repair')
+                errMsg = 'Cancelled: surface is non-manifold and repair was declined.';
+                return;
+            end
+            Repair = true;
+        else
+            errMsg = ['Surface is not a clean 2-manifold (' defects '). ' ...
+                      'Re-mesh with icosphere downsampling, or enable the repair option.'];
+            return;
+        end
+    end
+
     % Progress bar
     bst_progress('start', 'Eigenmodes', 'Computing Laplace-Beltrami eigenmodes...', 0, 100);
 
@@ -211,7 +237,7 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, FixMesh)
             'nModes',    nModes, ...
             'MassType',  MassType, ...
             'RemoveDC',  RemoveDC, ...
-            'FixMesh',   FixMesh, ...
+            'Repair',    Repair, ...
             'Verbose',   1);
     catch ME
         bst_progress('stop');
@@ -275,7 +301,7 @@ function ComputeInteractive(iSubject, iSurface) %#ok<DEFNU>
     end
 
     % Compute
-    errMsg = Compute(SurfaceFile, nModes, MassType, true, true);
+    errMsg = Compute(SurfaceFile, nModes, MassType, true, false, true);
     if ~isempty(errMsg)
         java_dialog('error', errMsg, 'Compute eigenmodes');
         return;
