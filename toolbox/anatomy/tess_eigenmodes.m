@@ -64,7 +64,7 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %     - Reconstruction from coefficients:
 %         u_approx = Vectors * c   (sum of phi_k * c_k)
 %
-% SEE ALSO: tess_laplacian, tess_manifold
+% SEE ALSO: tess_laplacian, tess_manifold, in_tess_eigenmodes, out_tess_eigenmodes, bst_eigenmodes_project, bst_eigenmodes_filter
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
