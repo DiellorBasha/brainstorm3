@@ -234,7 +234,7 @@ function chk = i_check_anatomy(iSubject, arm)
 
     % Manifold check (non-fatal if the helper errors)
     try
-        chk.isManifold = tess_check_manifold(TessMat.Vertices, TessMat.Faces);
+        [~, ~, chk.isManifold] = tess_manifold(TessMat.Vertices, TessMat.Faces);
     catch
         chk.isManifold = NaN;
     end

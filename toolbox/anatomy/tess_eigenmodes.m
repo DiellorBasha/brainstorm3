@@ -31,7 +31,7 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %     MassType   : Mass matrix type: 'barycentric', 'voronoi', 'galerkin'
 %                  (default: 'barycentric')
 %     RemoveDC   : Remove the DC (constant) mode(s) (default: true)
-%     FixMesh    : Run tess_fix_manifold before assembly (default: true)
+%     FixMesh    : Repair non-manifold defects (tess_manifold) before assembly (default: true)
 %     Sigma      : Shift for shift-invert eigs (default: -1e-8).
 %                  A small negative shift improves convergence for the
 %                  smallest eigenvalues near zero.
@@ -62,7 +62,7 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %     - Reconstruction from coefficients:
 %         u_approx = Vectors * c   (sum of phi_k * c_k)
 %
-% SEE ALSO: tess_laplacian, tess_check_manifold, tess_fix_manifold
+% SEE ALSO: tess_laplacian, tess_manifold
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -111,13 +111,8 @@ tStart = tic;
 
 %% ===== STEP 1: VALIDATE AND REPAIR MESH =====
 if FixMesh
-    [isManifold, ~] = tess_check_manifold(Vertices, Faces);
-    if ~isManifold
-        if Verbose
-            fprintf('BST> tess_eigenmodes: Mesh has defects, running tess_fix_manifold...\n');
-        end
-        [Vertices, Faces] = tess_fix_manifold(Vertices, Faces);
-    end
+    % tess_manifold validates first and repairs only if defective (no-op on a clean mesh).
+    [Vertices, Faces, isManifold] = tess_manifold(Vertices, Faces, 'Repair', 1, 'Verbose', Verbose); %#ok<ASGLU>
 end
 nV = size(Vertices, 1);
 

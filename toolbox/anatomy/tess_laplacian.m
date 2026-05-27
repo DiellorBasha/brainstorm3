@@ -54,7 +54,7 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %     For boundary edges (one adjacent triangle), only one cotangent
 %     contributes. This implements natural (Neumann) boundary conditions.
 %
-% SEE ALSO: tess_check_manifold, tess_fix_manifold
+% SEE ALSO: tess_manifold
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

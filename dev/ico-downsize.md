@@ -5,7 +5,7 @@
 Add FreeSurfer/MNE-style **icosahedral** downsampling to Brainstorm so a cortex is resampled
 **per hemisphere** to a standard ico level — ico3/4/5/6 = **642 / 2562 / 10242 / 40962 vertices per
 hemisphere** — producing clean, closed, **2-manifold** meshes with uniform vertex spacing. This
-replaces `reducepatch`'s inhomogeneous, non-manifold decimation (the defects `tess_fix_manifold`
+replaces `reducepatch`'s inhomogeneous, non-manifold decimation (the defects `tess_manifold`
 exists to repair) for users who want fsaverage-style cortices.
 
 | FreeSurfer/MNE | per hemisphere | total cortex |
