@@ -19,7 +19,7 @@ function varargout = process_eigenmodes_filter( varargin )
 %
 %     Requires precomputed eigenmodes on the surface (from process_eigenmodes).
 %
-% SEE ALSO: tess_eigenmodes_filter, tess_eigenmodes_project, tess_eigenmodes, process_eigenmodes
+% SEE ALSO: tess_eigenmodes_filter, bst_eigenmodes_project, tess_eigenmodes, process_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

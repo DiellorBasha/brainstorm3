@@ -22,7 +22,7 @@ function varargout = process_eigenmodes_spectrum( varargin )
 %
 %     Requires precomputed eigenmodes (from process_eigenmodes).
 %
-% SEE ALSO: tess_eigenmodes_project, in_tess_eigenmodes, process_eigenmodes
+% SEE ALSO: bst_eigenmodes_project, in_tess_eigenmodes, process_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -164,11 +164,15 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             continue;
         end
 
+        % Mass matrix for the M-weighted projection (computed once per surface).
+        sSurf = in_tess_bst(SurfaceFile, 0);
+        [~, MassMatrix] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eigenmodes.MassType);
+
         % ===== PROJECT ONTO EIGENMODES =====
         bst_progress('start', 'Eigenmode spectrum', 'Computing spectral projection...', 0, 100);
         bst_progress('set', 10);
 
-        Coeffs = tess_eigenmodes_project(SurfaceFile, double(Sources));
+        Coeffs = bst_eigenmodes_project(Eigenmodes, double(Sources), MassMatrix);
         nModes = size(Coeffs, 1);
         nTime  = size(Coeffs, 2);
         bst_progress('set', 70);

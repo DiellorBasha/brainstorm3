@@ -95,7 +95,7 @@ function [Results, errMsg] = tess_eigenmodes_leadfield(HeadModelFile, SurfaceFil
 %     applied to the compressed lead field — equivalent to MNE with a
 %     truncated basis constraint.
 %
-% SEE ALSO: in_tess_eigenmodes, tess_eigenmodes_project, process_eigenmodes_inverse
+% SEE ALSO: in_tess_eigenmodes, bst_eigenmodes_project, process_eigenmodes_inverse
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
