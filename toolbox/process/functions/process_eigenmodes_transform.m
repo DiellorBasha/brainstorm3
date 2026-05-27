@@ -47,9 +47,11 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.Comment     = 'Eigenmode transform (spatial FFT)';
     sProcess.Category    = 'Custom';
     sProcess.SubGroup    = 'Sources';
-    sProcess.Index       = 338;
+    sProcess.Index       = 336.5;   % leads the eigenmode Sources cluster (filter 337, spectrum 338, inverse 339)
     sProcess.Description = '';
     sProcess.InputTypes  = {'data', 'raw'};
+    % Primary output is a matrix file (matrix_eigentransform); OutputTypes mirrors the
+    % input convention used by the sibling process_eigenmodes_inverse.
     sProcess.OutputTypes = {'data', 'raw'};
     sProcess.nInputs     = 1;
     sProcess.nMinFiles   = 1;
@@ -115,6 +117,8 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     nVertEigen = size(Eigenmodes.Vectors, 1);
 
     % ===== CONSTRAINED GAIN (fixed orientation) =====
+    % HeadModelType is guaranteed 'surface' above, so ApplyOrient=1 collapses the
+    % stored [nch x 3*nVert] gain to the constrained [nch x nVert]; size(Gain,2)==nVert.
     HM   = in_bst_headmodel(HeadModelFile, 1);   % ApplyOrient=1 -> [nch x nVert]
     Gain = double(HM.Gain);
     nVertHM = size(Gain, 2);
@@ -133,6 +137,8 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         return;
     end
     ChannelMat   = in_bst_channel(ChannelFile);
+    % ChannelFlag is read from the first input; the resulting kernel is reused for
+    % every input, so a consistent good-channel set across inputs is assumed.
     DataMat0     = in_bst_data(sInputs(1).FileName, 'ChannelFlag');
     nAllChannels = length(ChannelMat.Channel);
     if isfield(DataMat0, 'ChannelFlag') && ~isempty(DataMat0.ChannelFlag)

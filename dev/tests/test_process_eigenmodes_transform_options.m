@@ -16,6 +16,7 @@ assert(isfield(sProcess.options, 'nmodes'),  'Missing nmodes option.');
 assert(isfield(sProcess.options, 'dorecon'), 'Missing dorecon option.');
 assert(strcmp(sProcess.options.dorecon.Type, 'checkbox'), 'dorecon must be a checkbox.');
 assert(sProcess.options.dorecon.Value == 0, 'Vertex reconstruction must default OFF.');
+assert(sProcess.options.nmodes.Value{1} == 0, 'nmodes must default to 0 (auto).');
 
 % Transform is unregularized: it must NOT expose inverse-method knobs.
 assert(~isfield(sProcess.options, 'method'),     'Transform must not expose a method option.');
