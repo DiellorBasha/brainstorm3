@@ -121,12 +121,18 @@ function hFig = ViewFigure(SurfaceFile, iMode)
         TessInfo = getappdata(hFig, 'Surface');
         TessInfo(1).ColormapType        = 'source';   % render eigenmode with the source palette (not anatomy)
         TessInfo(1).DataSource.Type     = 'Source';
-        TessInfo(1).DataSource.FileName = SurfaceFile;   % real DB file -> satisfies CLim guard
+        TessInfo(1).DataSource.FileName = '';   % transient overlay: empty avoids the results-load branch in UpdateSurfaceColormap (which throws on a non-headmodel file)
         TessInfo(1).Data                = d.Data;
         TessInfo(1).DataMinMax          = d.CLim;
         TessInfo(1).DataLimitValue      = d.CLim;
         setappdata(hFig, 'Surface', TessInfo);
         panel_surface('UpdateSurfaceColormap', hFig);
+        % UpdateSurfaceColormap skips its axes-CLim step when DataSource.FileName is empty,
+        % so set the symmetric color range on the 3D axes directly (drives the colorbar).
+        hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+        if ~isempty(hAxes)
+            set(hAxes, 'CLim', d.CLim);
+        end
         set(hLabel, 'String', d.Label);
     end
 
