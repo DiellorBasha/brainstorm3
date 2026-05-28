@@ -14,14 +14,14 @@
 
 | File | Responsibility |
 |---|---|
-| `toolbox/math/bst_eigenmodes_wavelet.m` (create) | Pure: `(Coeffs, sfreq, Freqs) → complex W [K×nTime×nFreq]` via `morlet_transform('n')` + permute. No I/O. |
+| `toolbox/math/bst_eigenmodes_wavelet.m` (create) | Pure: `(Coeffs, sfreq, Freqs) → complex W [K×nTime×nFreq]` via `conj(morlet_transform('n'))` (no extra permute — morlet permutes internally). No I/O. |
 | `toolbox/process/functions/process_eigenmodes_wavelet.m` (create) | Process: load coefficient matrix → build freq grid → pure fn → save complex λ-labeled timefreq. |
 | `dev/tests/test_eigenmodes_wavelet_pure.m` (create) | DB-free unit test of the pure function. |
 | `dev/tests/test_process_eigenmodes_wavelet_options.m` (create) | DB-free unit test of the process options/shape. |
 
 **Run convention (tests):** MATLAB MCP `evaluate_matlab_code` calling the function name (script-style tests print `ALL TESTS PASSED`; NOT `run_matlab_test_file`). Lint via `check_matlab_code`.
 
-Reference facts (already confirmed): `morlet_transform(x, t, f, fc, FWHM_tc, squared)` returns `[nSignals × nFreq × nTime]`; `squared='n'` ⇒ complex coefficients. `in_bst_matrix(file)` returns `.Value [K×nTime]`, `.Time`, `.Description`, `.SurfaceFile`. The disposable `EigenSmoke` protocol (subject `SmokeS`) already contains a `matrix_eigentransform` coefficient file from the M1 smoke.
+Reference facts: `morlet_transform(x, t, f, fc, FWHM_tc, squared)` returns `[nSignals × nTime × nFreq]` (it permutes internally; its header comment claiming `nFreq × nTime` is WRONG) and uses the conjugate phase convention; `squared='n'` ⇒ complex coefficients. **The implemented code therefore does NOT permute and applies `conj()` — disregard the `permute([1 3 2])` shown in the Task 1 code block below.** `in_bst_matrix(file)` returns `.Value [K×nTime]`, `.Time`, `.Description`, `.SurfaceFile`. The disposable `EigenSmoke` protocol (subject `SmokeS`) already contains a `matrix_eigentransform` coefficient file from the M1 smoke.
 
 ---
 

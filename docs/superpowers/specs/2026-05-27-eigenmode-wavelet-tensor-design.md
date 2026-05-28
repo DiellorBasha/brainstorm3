@@ -36,7 +36,7 @@ For each eigenmode coefficient series `θₖ(t)`, the complex Morlet CWT gives
 Wₖ(f,t) = ∫ θₖ(τ) ψ*_{f}(τ − t) dτ ∈ ℂ
 ```
 
-implemented by `morlet_transform(Coeffs, t, Freqs, Fc, FWHM_tc, 'n')`, which returns `P` shaped **`[K × nFreq × nTime]`** (frequency before time) with `'n'` = un-squared (complex) coefficients. We permute to the Brainstorm timefreq convention `[K × nTime × nFreq]`. `|W|` is amplitude, `arg(W)` is phase. Squaring (`'y'`) would discard phase — we explicitly do not, since phase is the point.
+implemented by `morlet_transform(Coeffs, t, Freqs, Fc, FWHM_tc, 'n')` with `'n'` = un-squared (complex) coefficients. **`morlet_transform` permutes internally and returns `[K × nTime × nFreq]` directly** (its own header comment claiming `[K × nFreq × nTime]` is wrong), so **no extra permute is applied**. We apply `conj()` so phase follows the standard positive-rotation analytic-signal convention (`morlet_transform`'s native convention is the conjugate); `|conj(W)| = |W|`, so amplitude is unaffected. `|W|` is amplitude, `arg(W)` is phase. Squaring (`'y'`) would discard phase — we explicitly do not, since phase is the point.
 
 ## Component contracts
 
@@ -54,8 +54,7 @@ implemented by `morlet_transform(Coeffs, t, Freqs, Fc, FWHM_tc, 'n')`, which ret
 - **Computation**
   - `t = (0:nTime-1) / sfreq;`
   - if `Freqs` empty → build default grid (above).
-  - `P = morlet_transform(double(Coeffs), t, Freqs, MorletFc, MorletFwhmTc, 'n');`  % `[K × nFreq × nTime]`, complex
-  - `W = permute(P, [1 3 2]);`  % `[K × nTime × nFreq]`
+  - `W = conj(morlet_transform(double(Coeffs), t, Freqs, MorletFc, MorletFwhmTc, 'n'));`  % already `[K × nTime × nFreq]` (morlet permutes internally); conj → standard phase
 - **Outputs**: complex `W` `[K × nTime × nFreq]`; the `Freqs` actually used (row vector).
 - **Invariants** (unit-tested): a single mode carrying a pure sinusoid at `f₀` (others zero) yields `|W|` peaking at that `(mode, f₀)` cell; phase at `f₀` advances at ≈ `2πf₀` rad/s; other modes' amplitude ≈ 0; `W` is complex; empty `Freqs` yields a valid `[K × nTime × 40]` tensor.
 
@@ -82,7 +81,7 @@ Pure — no file I/O.
 
 ## Risks
 
-- **Output orientation:** `morlet_transform` returns `[K × nFreq × nTime]`; the permute to `[K × nTime × nFreq]` must be correct (the unit test's shape + peak-cell assertions catch a wrong permute).
+- **Output orientation (resolved during implementation):** `morlet_transform` returns `[K × nTime × nFreq]` (it permutes internally; its header comment is wrong), so the code does NOT permute again and applies `conj()` for standard phase rotation. The unit test's shape + peak-cell assertions guard this.
 - **Complex timefreq handling:** `Measure='none'` keeps complex TF; confirm `db_add_data` + the TF viewer accept a complex `matrix`-type timefreq (the optional smoke validates display). If the viewer needs a real measure for display, magnitude view is the fallback; the stored tensor stays complex.
 - **Memory:** `W` is complex `[K × nTime × nFreq]` — for `K=200`, `nTime=60 s × sfreq`, `nFreq=40` this is large. The default `nfreqs=40` and the user's choice of block length bound it; document that long blocks × many modes × many freqs are memory-heavy (a sparse/els strategy is out of scope here).
 - **Branch base:** depends on M1's `matrix_eigentransform` output (already on `development`).
