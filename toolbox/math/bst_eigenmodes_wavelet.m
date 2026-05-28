@@ -9,9 +9,9 @@ function [W, Freqs] = bst_eigenmodes_wavelet(Coeffs, sfreq, Freqs, varargin)
 %     coefficient time series, producing the time-resolved (lambda, omega, t)
 %     tensor W_k(s,t). The result is COMPLEX: |W| is amplitude, arg(W) is phase.
 %     This wraps Brainstorm's validated morlet_transform (squared='n', the
-%     un-squared complex coefficients), which returns the coefficients in the
-%     [K x nTime x nFreq] timefreq convention; the conjugate is applied so
-%     phase follows the standard positive-rotation analytic-signal convention.
+%     un-squared complex coefficients), which returns [K x nTime x nFreq]
+%     (permuted internally); the conjugate is applied so phase follows the
+%     standard positive-rotation analytic-signal convention.
 %
 % INPUTS:
 %     Coeffs : [K x nTime] eigenmode coefficient time series.
@@ -73,8 +73,8 @@ Freqs = Freqs(:)';
 
 %% ===== MORLET CWT (complex) =====
 t = (0:nTime-1) / sfreq;
-% morlet_transform returns [K x nTime x nFreq]; 'n' keeps complex coefficients.
-% Conjugate is applied to align with the standard analytic signal convention
-% (positive phase rotation for positive frequencies).
+% morlet_transform computes in [K x nFreq x nTime] and permutes internally,
+% so it returns [K x nTime x nFreq]. 'n' keeps the complex coefficients; the
+% conjugate aligns phase with the standard positive-rotation analytic-signal convention.
 W = conj(morlet_transform(Coeffs, t, Freqs, MorletFc, MorletFwhmTc, 'n'));
 end

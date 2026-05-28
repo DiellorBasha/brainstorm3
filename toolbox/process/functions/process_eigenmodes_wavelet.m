@@ -76,7 +76,7 @@ end
 
 
 %% ===== FORMAT COMMENT =====
-function Comment = FormatComment(~) %#ok<DEFNU>
+function Comment = FormatComment(sProcess) %#ok<DEFNU,INUSD>
     Comment = 'Eigenmode wavelet tensor (complex)';
 end
 
@@ -102,6 +102,14 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         fhiEff = fhi;
         if fhiEff <= 0
             fhiEff = min(100, 0.4 * sfreq);
+        end
+        if flo <= 0
+            bst_report('Error', sProcess, sInput, 'Lowest frequency must be positive (default: 2 Hz).');
+            continue;
+        end
+        if flo >= fhiEff
+            bst_report('Error', sProcess, sInput, sprintf('Lowest frequency (%.1f Hz) must be below the highest (%.1f Hz).', flo, fhiEff));
+            continue;
         end
         Freqs = logspace(log10(flo), log10(fhiEff), nfq);
 

@@ -15,5 +15,6 @@ assert(isequal(sProcess.OutputTypes, {'timefreq'}), 'OutputTypes must be {timefr
 for f = {'flo','fhi','nfreqs','morletfc','morletfwhmtc'}
     assert(isfield(sProcess.options, f{1}), 'Missing option: %s', f{1});
 end
+assert(isfield(sProcess.options, 'label_info'), 'Missing label_info option.');
 fprintf('ALL TESTS PASSED: test_process_eigenmodes_wavelet_options\n');
 end
