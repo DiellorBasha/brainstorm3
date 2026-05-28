@@ -1171,6 +1171,15 @@ switch (lower(action))
                     gui_component('MenuItem', jPopup, [], 'Display', IconLoader.ICON_DISPLAY, [], @(h,ev)view_surface(filenameRelative));
                 end
 
+                % === EIGENMODES (cortex only) ===
+                if strcmpi(nodeType, 'cortex')
+                    AddSeparator(jPopup);
+                    if ~bst_get('ReadOnly')
+                        gui_component('MenuItem', jPopup, [], 'Compute eigenmodes', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@process_eigenmodes, 'ComputeInteractive', iSubject, filenameRelative));
+                    end
+                    gui_component('MenuItem', jPopup, [], 'View eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_eigenmodes, filenameRelative));
+                end
+
                 % === SET SURFACE TYPE ===
                 if ~bst_get('ReadOnly') && (length(bstNodes) == 1)
                     jItemSetSurfType = gui_component('Menu', jPopup, [], 'Set surface type', IconLoader.ICON_SURFACE, [], []);
