@@ -91,8 +91,18 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.selectsubj.Comment = 'Names of subjects to import (empty=all):';
     sProcess.options.selectsubj.Type    = 'text';
     sProcess.options.selectsubj.Value   = '';
-    % Option: Number of vertices
-    sProcess.options.nvertices.Comment = 'Number of vertices (cortex): ';
+    % Cortex downsampling method (icosphere is FreeSurfer-only; reducepatch is the legacy path)
+    sProcess.options.downsamplemethod.Comment = {'Reducepatch', 'Icosphere', 'Cortex downsampling:'; ...
+                                                 'reducepatch', 'icosphere', ''};
+    sProcess.options.downsamplemethod.Type    = 'radio_linelabel';
+    sProcess.options.downsamplemethod.Value   = 'icosphere';
+    % Icosphere resolution level (used only when method = icosphere)
+    sProcess.options.icolevel.Comment = {'ico3', 'ico4', 'ico5', 'ico6', 'Icosphere level:'; ...
+                                         'ico3', 'ico4', 'ico5', 'ico6', ''};
+    sProcess.options.icolevel.Type    = 'radio_linelabel';
+    sProcess.options.icolevel.Value   = 'ico5';
+    % Option: Number of vertices (reducepatch path only)
+    sProcess.options.nvertices.Comment = 'Number of vertices (cortex, reducepatch): ';
     sProcess.options.nvertices.Type    = 'value';
     sProcess.options.nvertices.Value   = {15000, '', 0};
     % MNI normalization
@@ -119,6 +129,21 @@ end
 %% ===== FORMAT COMMENT =====
 function Comment = FormatComment(sProcess) %#ok<DEFNU>
     Comment = sProcess.Comment;
+end
+
+
+%% ===== GET ICOSPHERE VERTEX COUNT =====
+% Total cortex vertex count (both hemispheres) for a FreeSurfer/MNE icosphere level.
+% import_anatomy_fs takes round(nVertices/2) per hemisphere and tess_downsize snaps to
+% the nearest ico count, so returning the exact total makes the chosen level explicit.
+function n = GetIcoVertexCount(level) %#ok<DEFNU>
+    switch lower(level)
+        case 'ico3', n = 1284;
+        case 'ico4', n = 5124;
+        case 'ico5', n = 20484;
+        case 'ico6', n = 81924;
+        otherwise,   error('Unknown icosphere level: %s (expected ico3/ico4/ico5/ico6).', level);
+    end
 end
 
 
