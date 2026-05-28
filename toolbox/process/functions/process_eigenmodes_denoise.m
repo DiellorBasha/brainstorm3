@@ -98,6 +98,31 @@ function OutputFiles = Run(sProcess, sInputsA, sInputsB) %#ok<DEFNU>
     SnrThresh = sProcess.options.snrthresh.Value{1};
     FloorFrac = sProcess.options.floorfrac.Value{1};
 
+    S = process_eigenmodes_denoise('GetCoeffsAndPSD', sProcess, sInputsA, sInputsB, nModesOpt, WinLen);
+    if isempty(S), return; end
+
+    % ===== COMBINE =====
+    Out = bst_eigenmodes_noisefloor(S.Pdata, S.Nnoise, 'Alpha', Alpha, 'Floor', FloorFrac, 'SnrThresh', SnrThresh);
+
+    % ===== SAVE =====
+    RowNames = cell(S.K,1);
+    for k = 1:S.K, RowNames{k} = sprintf('Mode %d (lam=%.1f)', k, S.lambdas(k)); end
+    [sStudyOut, iStudyOut] = bst_get('Study', sInputsA(1).iStudy);
+    StudyDir = bst_fileparts(file_fullpath(sStudyOut.FileName));
+
+    OutputFiles{end+1} = SaveTF(Out.SNR, S.Freqs, RowNames, S.Time, StudyDir, iStudyOut, ...
+        sprintf('EigenSNR (%d modes) | %s', S.K, sInputsA(1).Comment), 'timefreq_eigensnr', S.SurfaceFile); %#ok<AGROW>
+    OutputFiles{end+1} = SaveTF(Out.CleanPSD, S.Freqs, RowNames, S.Time, StudyDir, iStudyOut, ...
+        sprintf('EigenCleanPSD (%d modes, a=%.1f) | %s', S.K, Alpha, sInputsA(1).Comment), 'timefreq_eigencleanpsd', S.SurfaceFile); %#ok<AGROW>
+
+    bst_report('Info', sProcess, sInputsA, sprintf('Denoise: %d modes (condition %.1f), median reliable-mode cutoff K*=%d at SNR>=%.1f.', ...
+        S.K, S.Info.ConditionNumber, round(median(Out.Kstar)), SnrThresh));
+end
+
+
+%% ===== SHARED: COMMON-CHANNEL KERNEL, COEFFICIENTS, DATA/NOISE PSDs =====
+function S = GetCoeffsAndPSD(sProcess, sInputsA, sInputsB, nModesOpt, WinLen) %#ok<DEFNU>
+    S = [];
     % ===== DATA STUDY: head model, surface, eigenmodes, gain =====
     [sStudyA,~,~,~] = bst_get('Study', sInputsA(1).iStudy);
     if isempty(sStudyA.iHeadModel) || sStudyA.iHeadModel < 1
@@ -191,25 +216,20 @@ function OutputFiles = Run(sProcess, sInputsA, sInputsB) %#ok<DEFNU>
         bst_report('Error', sProcess, sInputsA, 'Data and empty-room PSD frequency grids differ (different sampling rate or window).');
         return;
     end
-    Pdata  = reshape(TFd, K, []);
-    Nnoise = reshape(TFn, K, []);
 
-    % ===== COMBINE =====
-    Out = bst_eigenmodes_noisefloor(Pdata, Nnoise, 'Alpha', Alpha, 'Floor', FloorFrac, 'SnrThresh', SnrThresh);
-
-    % ===== SAVE =====
-    RowNames = cell(K,1);
-    for k = 1:K, RowNames{k} = sprintf('Mode %d (lam=%.1f)', k, lambdas(k)); end
-    [sStudyOut, iStudyOut] = bst_get('Study', sInputsA(1).iStudy);
-    StudyDir = bst_fileparts(file_fullpath(sStudyOut.FileName));
-
-    OutputFiles{end+1} = SaveTF(Out.SNR, Fv, RowNames, DA.Time, StudyDir, iStudyOut, ...
-        sprintf('EigenSNR (%d modes) | %s', K, sInputsA(1).Comment), 'timefreq_eigensnr', SurfaceFile); %#ok<AGROW>
-    OutputFiles{end+1} = SaveTF(Out.CleanPSD, Fv, RowNames, DA.Time, StudyDir, iStudyOut, ...
-        sprintf('EigenCleanPSD (%d modes, a=%.1f) | %s', K, Alpha, sInputsA(1).Comment), 'timefreq_eigencleanpsd', SurfaceFile); %#ok<AGROW>
-
-    bst_report('Info', sProcess, sInputsA, sprintf('Denoise: %d modes (condition %.1f), median reliable-mode cutoff K*=%d at SNR>=%.1f.', ...
-        K, Info.ConditionNumber, round(median(Out.Kstar)), SnrThresh));
+    % ===== PACK =====
+    S = struct();
+    S.Coeffs      = thD;                  % [K x nTime] data coefficient time series
+    S.Pdata       = reshape(TFd, K, []);  % [K x nFreq]
+    S.Nnoise      = reshape(TFn, K, []);  % [K x nFreq]
+    S.Freqs       = Fv(:)';               % [1 x nFreq]
+    S.lambdas     = lambdas;              % [K x 1]
+    S.Phi         = Phi;                  % [nVert x K]
+    S.SurfaceFile = SurfaceFile;
+    S.K           = K;
+    S.Time        = DA.Time;              % [1 x nTime]
+    S.sfreq       = sfA;
+    S.Info        = Info;
 end
 
 
