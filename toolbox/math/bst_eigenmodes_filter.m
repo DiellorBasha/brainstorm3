@@ -9,7 +9,8 @@ function Filtered = bst_eigenmodes_filter(Eigenmodes, Data, MassMatrix, FilterTy
 %     Eigenmodes : struct from in_tess_eigenmodes (uses .Vectors, .Values)
 %     Data       : [nVertices x nTime] scalar field(s) on the mesh
 %     MassMatrix : [nVertices x nVertices] sparse mass matrix (from tess_laplacian)
-%     FilterType : 'lowpass','highpass','bandpass','heat','inverse_heat','custom'
+%     FilterType : 'lowpass','highpass','bandpass','heat','inverse_heat','tikhonov','custom'
+%                  (see bst_eigenmodes_filter_gain for the transfer functions)
 %
 % OPTIONS:
 %     CutoffMode, ModeRange, DiffusionTime, MaxGain, TransferFn (see code)
@@ -78,26 +79,10 @@ function Filtered = bst_eigenmodes_filter(Eigenmodes, Data, MassMatrix, FilterTy
 %
 % Authors: Diellor Basha, 2026
 
-%% ===== PARSE INPUTS =====
-CutoffMode    = 50;
-ModeRange     = [20, 80];
-DiffusionTime = 0.01;
-MaxGain       = 10;
-TransferFn    = [];
-for i = 1:2:length(varargin)
-    switch lower(varargin{i})
-        case 'cutoffmode',    CutoffMode    = varargin{i+1};
-        case 'moderange',     ModeRange     = varargin{i+1};
-        case 'diffusiontime', DiffusionTime = varargin{i+1};
-        case 'maxgain',       MaxGain       = varargin{i+1};
-        case 'transferfn',    TransferFn    = varargin{i+1};
-    end
-end
-
-Phi     = double(Eigenmodes.Vectors);   % [nV x nModes]
-lambdas = double(Eigenmodes.Values(:));  % [nModes x 1]
+%% ===== EXTRACT EIGENMODES =====
+Phi     = double(Eigenmodes.Vectors);    % [nV x nModes]
+lambdas = double(Eigenmodes.Values(:));   % [nModes x 1]
 nV      = size(Phi, 1);
-nModes  = size(Phi, 2);
 
 %% ===== VALIDATE =====
 Data = double(Data);
@@ -108,41 +93,8 @@ if (size(MassMatrix, 1) ~= nV) || (size(MassMatrix, 2) ~= nV)
     error('MassMatrix must be %dx%d.', nV, nV);
 end
 
-%% ===== BUILD TRANSFER FUNCTION =====
-h = zeros(nModes, 1);
-switch lower(FilterType)
-    case 'lowpass'
-        c = min(CutoffMode, nModes);
-        h(1:c) = 1;
-    case 'highpass'
-        c = max(1, min(CutoffMode, nModes));
-        h(c:end) = 1;
-    case 'bandpass'
-        k1 = max(1, ModeRange(1));
-        k2 = min(nModes, ModeRange(2));
-        h(k1:k2) = 1;
-    case 'heat'
-        if DiffusionTime <= 0
-            error('DiffusionTime must be positive (got %g).', DiffusionTime);
-        end
-        h = exp(-DiffusionTime * lambdas);
-    case 'inverse_heat'
-        if DiffusionTime <= 0
-            error('DiffusionTime must be positive (got %g).', DiffusionTime);
-        end
-        h = min(exp(DiffusionTime * lambdas), MaxGain);
-    case 'custom'
-        if isempty(TransferFn) || ~isa(TransferFn, 'function_handle')
-            error('Custom filter requires a TransferFn option (function handle).');
-        end
-        h = TransferFn(lambdas);
-        if numel(h) ~= nModes
-            error('TransferFn must return a vector of length %d (got %d).', nModes, numel(h));
-        end
-        h = h(:);
-    otherwise
-        error('Unknown filter type: %s. Use lowpass, highpass, bandpass, heat, inverse_heat, or custom.', FilterType);
-end
+%% ===== TRANSFER FUNCTION (shared single source) =====
+h = bst_eigenmodes_filter_gain(lambdas, FilterType, varargin{:});
 
 %% ===== APPLY: u_filtered = Phi * (h .* (Phi' * M * u)) =====
 Coeffs   = Phi' * (MassMatrix * Data);
