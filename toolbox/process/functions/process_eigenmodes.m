@@ -261,54 +261,46 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInt
 end
 
 
-%% ===== COMPUTE/INTERACTIVE =====
-function ComputeInteractive(iSubject, iSurface) %#ok<DEFNU>
-% Called from the GUI when the user right-clicks a surface.
-%
-% USAGE: process_eigenmodes('ComputeInteractive', iSubject, iSurface)
-
-    % Get subject
-    sSubject = bst_get('Subject', iSubject);
-    if isempty(sSubject) || isempty(sSubject.Surface)
+%% ===== COMPUTE INTERACTIVE (called from the cortex right-click menu) =====
+function ComputeInteractive(iSubject, SurfaceFile) %#ok<DEFNU>
+    % Ask number of eigenmodes
+    [res, isCancel] = java_dialog('input', 'Number of eigenmodes:', 'Compute eigenmodes', [], '300');
+    if isCancel || isempty(res)
         return;
     end
-    if nargin < 2 || isempty(iSurface)
-        iSurface = sSubject.iCortex;
-    end
-    if isempty(iSurface) || iSurface < 1 || iSurface > length(sSubject.Surface)
-        java_dialog('error', 'No valid surface selected.', 'Compute eigenmodes');
+    nModes = str2double(res);
+    if isnan(nModes) || (nModes < 1)
+        bst_error('Number of eigenmodes must be a positive integer.', 'Compute eigenmodes', 0);
         return;
     end
-    SurfaceFile = sSubject.Surface(iSurface).FileName;
-
-    % Ask for parameters
-    res = java_dialog('input', ...
-        {'Number of eigenmodes:', 'Mass matrix type (barycentric/voronoi/galerkin):'}, ...
-        'Compute eigenmodes', [], ...
-        {'300', 'barycentric'});
-    if isempty(res)
+    nModes = round(nModes);
+    % Ask mass matrix type (combo returns the selected string, [] if cancelled)
+    MassType = java_dialog('combo', 'Mass matrix type:', 'Compute eigenmodes', [], ...
+                           {'barycentric', 'voronoi', 'galerkin'});
+    if isempty(MassType)
         return;
     end
-    nModes   = str2double(res{1});
-    MassType = strtrim(lower(res{2}));
-    if isnan(nModes) || nModes < 1
-        java_dialog('error', 'Invalid number of modes.', 'Compute eigenmodes');
-        return;
+    % Confirm overwrite if eigenmodes already exist on this surface
+    [~, isComputed] = in_tess_eigenmodes(SurfaceFile);
+    if isComputed
+        isOverwrite = java_dialog('confirm', ...
+            'Eigenmodes already exist for this surface. Overwrite?', 'Compute eigenmodes');
+        if ~isOverwrite
+            return;
+        end
     end
-    if ~ismember(MassType, {'barycentric', 'voronoi', 'galerkin'})
-        java_dialog('error', 'Invalid mass type. Use barycentric, voronoi, or galerkin.', 'Compute eigenmodes');
-        return;
-    end
-
-    % Compute
+    % Compute: RemoveDC=true, Repair=false, isInteractive=true (manifold prompt handled in Compute)
     errMsg = Compute(SurfaceFile, nModes, MassType, true, false, true);
     if ~isempty(errMsg)
-        java_dialog('error', errMsg, 'Compute eigenmodes');
+        bst_error(errMsg, 'Compute eigenmodes', 0);
         return;
     end
-
-    % Reload subject
+    % Reload the subject so the database reflects the new eigenmodes
     db_reload_subjects(iSubject);
+    % Confirmation
+    java_dialog('msgbox', ...
+        sprintf('Computed %d eigenmodes (%s mass) on:\n%s', nModes, MassType, SurfaceFile), ...
+        'Compute eigenmodes');
 end
 
 
