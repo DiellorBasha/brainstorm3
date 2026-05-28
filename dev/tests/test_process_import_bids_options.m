@@ -23,10 +23,12 @@ assert(strcmp(sProcess.options.icolevel.Type,         'radio_linelabel'), 'icole
 assert(strcmp(sProcess.options.downsamplemethod.Value, 'icosphere'), 'Default downsamplemethod must be icosphere.');
 assert(strcmp(sProcess.options.icolevel.Value,         'ico5'),      'Default icolevel must be ico5.');
 
-% GetIcoVertexCount mappings (total cortex vertices)
+% GetIcoVertexCount returns a numeric scalar total-vertex count per level
+n5 = process_import_bids('GetIcoVertexCount', 'ico5');
+assert(isnumeric(n5) && isscalar(n5), 'GetIcoVertexCount must return a numeric scalar.');
 assert(process_import_bids('GetIcoVertexCount', 'ico3') == 1284,  'ico3 -> 1284');
 assert(process_import_bids('GetIcoVertexCount', 'ico4') == 5124,  'ico4 -> 5124');
-assert(process_import_bids('GetIcoVertexCount', 'ico5') == 20484, 'ico5 -> 20484');
+assert(n5 == 20484, 'ico5 -> 20484');
 assert(process_import_bids('GetIcoVertexCount', 'ico6') == 81924, 'ico6 -> 81924');
 
 % Unknown level errors

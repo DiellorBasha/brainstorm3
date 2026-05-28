@@ -97,8 +97,8 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.downsamplemethod.Type    = 'radio_linelabel';
     sProcess.options.downsamplemethod.Value   = 'icosphere';
     % Icosphere resolution level (used only when method = icosphere)
-    sProcess.options.icolevel.Comment = {'ico3', 'ico4', 'ico5', 'ico6', 'Icosphere level:'; ...
-                                         'ico3', 'ico4', 'ico5', 'ico6', ''};
+    sProcess.options.icolevel.Comment = {'ico3 (1284)', 'ico4 (5124)', 'ico5 (20484)', 'ico6 (81924)', 'Icosphere level:'; ...
+                                         'ico3',         'ico4',         'ico5',          'ico6',          ''};
     sProcess.options.icolevel.Type    = 'radio_linelabel';
     sProcess.options.icolevel.Value   = 'ico5';
     % Option: Number of vertices (reducepatch path only)
@@ -133,9 +133,10 @@ end
 
 
 %% ===== GET ICOSPHERE VERTEX COUNT =====
-% Total cortex vertex count (both hemispheres) for a FreeSurfer/MNE icosphere level.
-% import_anatomy_fs takes round(nVertices/2) per hemisphere and tess_downsize snaps to
-% the nearest ico count, so returning the exact total makes the chosen level explicit.
+% Total cortex vertex count (both hemispheres) for a FreeSurfer/MNE icosphere level
+% (ico3..ico6 = 1284/5124/20484/81924 total = 2x the 642/2562/10242/40962 per-hemisphere counts).
+% When this total is passed to import_anatomy_fs as nVertices, it computes round(nVertices/2)
+% per hemisphere, which snaps exactly to the chosen ico count.
 function n = GetIcoVertexCount(level) %#ok<DEFNU>
     switch lower(level)
         case 'ico3', n = 1284;
