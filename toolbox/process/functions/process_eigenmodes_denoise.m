@@ -3,6 +3,7 @@ function varargout = process_eigenmodes_denoise( varargin )
 %
 % USAGE:  sProcess = process_eigenmodes_denoise('GetDescription')
 %       OutputFiles = process_eigenmodes_denoise('Run', sProcess, sInputsA, sInputsB)
+%                 S = process_eigenmodes_denoise('GetCoeffsAndPSD', sProcess, sInputsA, sInputsB, nModesOpt, WinLen)
 %
 % DESCRIPTION:
 %     Files A = data recording(s) (must have a surface head model + eigenmodes).
@@ -203,6 +204,7 @@ function S = GetCoeffsAndPSD(sProcess, sInputsA, sInputsB, nModesOpt, WinLen) %#
     end
     Phi     = double(Em.Vectors(:, 1:K));
     lambdas = double(Em.Values(1:K));
+    lambdas = lambdas(:);
     [A, Info] = bst_eigenmodes_transform(Gain(iCommonA, :), Phi);   % [K x nCh]
 
     % ===== COEFFICIENTS + WELCH PSDs (density, same window) =====
