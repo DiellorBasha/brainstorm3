@@ -74,3 +74,82 @@ end
 function iNext = StepMode(iMode, delta, nModes)
     iNext = min(max(round(iMode) + round(delta), 1), max(nModes, 1));
 end
+
+
+%% ===== GUI: open the surface figure and wire up mode browsing =====
+function hFig = ViewFigure(SurfaceFile, iMode)
+    hFig = [];
+    if (nargin < 2) || isempty(iMode)
+        iMode = 1;
+    end
+    % Load eigenmodes embedded in the surface file
+    [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
+    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
+        bst_error(['No eigenmodes found on this surface.' 10 ...
+                   'Right-click the cortex and run "Compute eigenmodes" first.'], ...
+                   'View eigenmodes', 0);
+        return;
+    end
+    nModes = size(Eig.Vectors, 2);
+    iMode  = StepMode(iMode, 0, nModes);   % clamp into range
+
+    % Open a transient surface figure (no database node)
+    [hFig, iDS, iFig] = view_surface(SurfaceFile, 0, [], 'NewFigure', 0); %#ok<ASGLU>
+    if isempty(hFig)
+        bst_error('Could not open the surface figure.', 'View eigenmodes', 0);
+        return;
+    end
+    % Register the source colormap so the overlay is colormapped (+ colorbar)
+    bst_colormaps('AddColormapToFigure', hFig, 'source');
+    % Figure name + default view
+    set(hFig, 'Name', ['Eigenmodes: ' SurfaceFile]);
+    figure_3d('SetStandardView', hFig, 'left');
+    % Legend (bottom-left), mirrors view_leadfield_sensitivity
+    hLabel = uicontrol('Style', 'text', 'String', '...', 'Units', 'Pixels', ...
+        'Position', [6 0 520 20], 'HorizontalAlignment', 'left', ...
+        'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
+        'ForegroundColor', [.9 .9 .9], 'BackgroundColor', [0 0 0], 'Parent', hFig);
+    % Hook the keyboard callback (preserve the original for unhandled keys)
+    KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
+    set(hFig, 'KeyPressFcn', @KeyPress_Callback);
+    % Initial render
+    UpdateMode();
+
+    % ===== NESTED: render the current mode onto the surface =====
+    function UpdateMode()
+        d = GetModeDisplay(Eig, iMode);
+        TessInfo = getappdata(hFig, 'Surface');
+        TessInfo(1).DataSource.Type     = 'Source';
+        TessInfo(1).DataSource.FileName = SurfaceFile;   % real DB file -> satisfies CLim guard
+        TessInfo(1).Data                = d.Data;
+        TessInfo(1).DataMinMax          = d.CLim;
+        TessInfo(1).DataLimitValue      = d.CLim;
+        setappdata(hFig, 'Surface', TessInfo);
+        panel_surface('UpdateSurfaceColormap', hFig);
+        set(hLabel, 'String', d.Label);
+    end
+
+    % ===== NESTED: keyboard navigation =====
+    function KeyPress_Callback(h, keyEvent)
+        switch (keyEvent.Key)
+            case 'leftarrow'
+                iMode = StepMode(iMode, -1, nModes);   UpdateMode();
+            case 'rightarrow'
+                iMode = StepMode(iMode, +1, nModes);   UpdateMode();
+            case 'pageup'
+                iMode = StepMode(iMode, +10, nModes);  UpdateMode();
+            case 'pagedown'
+                iMode = StepMode(iMode, -10, nModes);  UpdateMode();
+            case 'h'
+                java_dialog('msgbox', ...
+                    ['Eigenmode viewer shortcuts:' 10 10 ...
+                     '   Left / Right arrow  :  previous / next mode' 10 ...
+                     '   Page Up / Page Down :  +/- 10 modes' 10 ...
+                     '   H                   :  this help'], 'Eigenmode viewer');
+            otherwise
+                if ~isempty(KeyPressFcn_bak)
+                    KeyPressFcn_bak(h, keyEvent);
+                end
+        end
+    end
+end
