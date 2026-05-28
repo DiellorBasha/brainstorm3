@@ -138,7 +138,8 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         Mout.Description  = M.Description;
         Mout.SurfaceFile  = M.SurfaceFile;
         Mout.Comment      = sprintf('EigenFilt [%s] | %s', FilterType, sInput.Comment);
-        Mout.nAvg         = 1;
+        if isfield(M, 'nAvg') && ~isempty(M.nAvg), Mout.nAvg = M.nAvg; else, Mout.nAvg = 1; end
+        if isfield(M, 'Leff') && ~isempty(M.Leff), Mout.Leff = M.Leff; end
         Mout = bst_history('add', Mout, 'eigenmodes_coeffsfilter', Mout.Comment);
         OutFile = bst_process('GetNewFilename', StudyDir, 'matrix_eigenfilt');
         bst_save(OutFile, Mout, 'v6');
@@ -156,13 +157,16 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             ResMat.Time          = M.Time;
             ResMat.SurfaceFile   = M.SurfaceFile;
             ResMat.HeadModelType = 'surface';
+            ResMat.ColormapType  = 'source';
             ResMat.Comment       = sprintf('EigenFilt recon [%s] | %s', FilterType, sInput.Comment);
-            ResMat.nAvg          = 1;
+            if isfield(M, 'nAvg') && ~isempty(M.nAvg), ResMat.nAvg = M.nAvg; else, ResMat.nAvg = 1; end
+            if isfield(M, 'Leff') && ~isempty(M.Leff), ResMat.Leff = M.Leff; end
             ResMat = bst_history('add', ResMat, 'eigenmodes_coeffsfilter', ResMat.Comment);
             OutFile2 = bst_process('GetNewFilename', StudyDir, 'results_eigenfilt');
             bst_save(OutFile2, ResMat, 'v6');
             db_add_data(iStudyOut, OutFile2, ResMat);
-            OutputFiles{end+1} = file_short(OutFile2); %#ok<AGROW>
+            % Recon is a DB sidecar (visible in the tree); not added to OutputFiles
+            % because OutputTypes is {'matrix'} (mixing types breaks pipeline chaining).
         end
 
         bst_report('Info', sProcess, sInput, sprintf('Filtered %d eigenmode coefficients with %s.', K, FilterType));
