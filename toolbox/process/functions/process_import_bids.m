@@ -137,7 +137,7 @@ end
 % (ico3..ico6 = 1284/5124/20484/81924 total = 2x the 642/2562/10242/40962 per-hemisphere counts).
 % When this total is passed to import_anatomy_fs as nVertices, it computes round(nVertices/2)
 % per hemisphere, which snaps exactly to the chosen ico count.
-function n = GetIcoVertexCount(level) %#ok<DEFNU>
+function n = GetIcoVertexCount(level)
     switch lower(level)
         case 'ico3', n = 1284;
         case 'ico4', n = 5124;
@@ -154,7 +154,7 @@ end
 % other format we fall back to reducepatch and return a non-empty warning string.
 % DEFERRED: extend icosphere to import_anatomy_cat/bs/bv/civet (they share the same per-hemisphere
 % reducepatch pattern). Pure / no side effects -> unit-testable.
-function [nVertArg, methodArg, warnMsg] = ResolveAnatDownsample(anatFormat, downsampleMethod, icoLevel, nVertices) %#ok<DEFNU>
+function [nVertArg, methodArg, warnMsg] = ResolveAnatDownsample(anatFormat, downsampleMethod, icoLevel, nVertices)
     warnMsg = '';
     if strcmpi(downsampleMethod, 'icosphere')
         if strcmpi(anatFormat, 'FreeSurfer')
@@ -186,9 +186,9 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         bst_report('Error', sProcess, [], errorMessage);
         return
     end
-    % Number of vertices
+    % Number of vertices (validated only for the reducepatch path; icosphere ignores it)
     OPTIONS.nVertices = sProcess.options.nvertices.Value{1};
-    if isempty(OPTIONS.nVertices) || (OPTIONS.nVertices < 50)
+    if ~strcmpi(sProcess.options.downsamplemethod.Value, 'icosphere') && (isempty(OPTIONS.nVertices) || (OPTIONS.nVertices < 50))
         bst_report('Error', sProcess, [], 'Invalid number of vertices.');
         return;
     end
@@ -527,7 +527,7 @@ function [RawFiles, Messages, OrigFiles] = ImportBidsDataset(BidsDir, OPTIONS)
             if isempty(OPTIONS.nVertices)
                 iMethod = java_dialog('radio', 'Cortex downsampling method:', 'Import BIDS dataset', [], ...
                     {'<HTML><B>reducepatch</B>: Matlab decimation to ~N vertices', ...
-                     '<HTML><B>icosphere</B>: FreeSurfer/MNE-style uniform grid (FreeSurfer only)'}, 2);
+                     '<HTML><B>icosphere</B>: FreeSurfer/MNE-style uniform grid (FreeSurfer only)'}, 2);   % default selection: icosphere
                 if isempty(iMethod)
                     return;
                 end
@@ -537,13 +537,13 @@ function [RawFiles, Messages, OrigFiles] = ImportBidsDataset(BidsDir, OPTIONS)
                         {'ico3  -   1284 vertices', ...
                          'ico4  -   5124 vertices', ...
                          'ico5  -  20484 vertices', ...
-                         'ico6  -  81924 vertices'}, 3);
+                         'ico6  -  81924 vertices'}, 3);   % default selection: ico5
                     if isempty(iLevel)
                         return;
                     end
                     icoVals = {'ico3', 'ico4', 'ico5', 'ico6'};
                     OPTIONS.IcoLevel  = icoVals{iLevel};
-                    OPTIONS.nVertices = GetIcoVertexCount(OPTIONS.IcoLevel);   % satisfies the "asked once" sentinel
+                    OPTIONS.nVertices = GetIcoVertexCount(OPTIONS.IcoLevel);   % satisfies the "asked once" sentinel; also the reducepatch fallback count for any non-FreeSurfer subject
                 else
                     OPTIONS.DownsampleMethod = 'reducepatch';
                     OPTIONS.nVertices = java_dialog('input', 'Number of vertices on the cortex surface:', 'Import BIDS dataset', [], '15000');
