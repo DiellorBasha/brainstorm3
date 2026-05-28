@@ -17,13 +17,16 @@ if ~brainstorm('status')
     brainstorm nogui
 end
 
-% Disposable, repeatable protocol — delete first so rerunning is safe
+% Delete first: makes reruns idempotent and cleans up any protocol left behind by a
+% previous run that aborted mid-way (an assertion failure skips the end-of-run delete).
 gui_brainstorm('DeleteProtocol', OPT.ProtocolName);
 gui_brainstorm('CreateProtocol', OPT.ProtocolName, 0, 0);
 bst_report('Start');
 
-% Ensure the process registry reflects the current on-disk GetDescription (force reload so
-% any stale cached process list is replaced with the one that includes downsamplemethod/icolevel).
+% Force-reload the process registry from disk so any stale cached entry for
+% process_import_bids (e.g. from a session started before this branch added the
+% downsamplemethod/icolevel options) is replaced before CallProcess runs. Without
+% this, sProcess.options.downsamplemethod can be missing and Run errors.
 panel_process_select('ParseProcessFolder', 1);
 
 % Run the real importer with DEFAULT downsampling (do NOT set downsamplemethod/icolevel —
@@ -36,6 +39,8 @@ bst_process('CallProcess', 'process_import_bids', [], [], ...
 % Find the imported subject's cortex using the proven idiom from test_omega_icosphere_sourcemap:
 %   bst_get('Subject', iSubject) -> sSubject.iCortex -> sSubject.Surface(iCortex).FileName
 ProtocolSubjects = bst_get('ProtocolSubjects');
+% The DeleteProtocol above guarantees this protocol holds only the just-imported
+% subject, so the first subject with a cortex surface is sub-0002's.
 iCortexSubj = [];
 for iS = 1:numel(ProtocolSubjects.Subject)
     if ~isempty(ProtocolSubjects.Subject(iS).iCortex) && ...
@@ -76,6 +81,13 @@ results.pass = (nVertices == 20484) && (nComp == 2) && isequal(logical(isManifol
 
 fprintf('Cortex: %s\n  vertices=%d (expect 20484), faces=%d, components=%d (expect 2), manifold=%d (expect 1)\n', ...
     sSubject.Name, nVertices, nFaces, nComp, isManifold);
+
+% Save the report before teardown so a failure leaves diagnostics behind (non-fatal).
+try
+    bst_report('Save', []);
+catch
+    % non-fatal
+end
 
 % Tear down the disposable protocol
 gui_brainstorm('DeleteProtocol', OPT.ProtocolName);
