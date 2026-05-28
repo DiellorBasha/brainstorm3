@@ -41,5 +41,17 @@ assert(Outr.Kstar(1) == 21, 'Kstar ramp wrong (got %d, expected 21).', Outr.Ksta
 OutZ = bst_eigenmodes_noisefloor(N, N, 'SnrThresh', 2);
 assert(all(OutZ.Kstar == 0), 'Kstar must be 0 when no mode meets the threshold.');
 
+% --- Gain shaping: GainFloor raises the floor, Alpha lowers the gain ---
+Gbase = bst_eigenmodes_noisefloor(Pdata, N);                       % Alpha=1, GainFloor=0
+Gflr  = bst_eigenmodes_noisefloor(Pdata, N, 'GainFloor', 0.2);
+assert(all(Gflr.Gain(:) >= 0.2 - 1e-12), 'GainFloor should raise the gain floor.');
+assert(all(Gflr.Gain(:) <= 1 + 1e-12),   'Gain must stay <= 1.');
+Gov = bst_eigenmodes_noisefloor(Pdata, N, 'Alpha', 2);
+assert(all(Gov.Gain(:) <= Gbase.Gain(:) + 1e-12), 'Over-subtraction (Alpha>1) should not increase the gain.');
+% GainFloor outside [0,1] errors
+threwGF = false;
+try, bst_eigenmodes_noisefloor(Pdata, N, 'GainFloor', 1.5); catch, threwGF = true; end
+assert(threwGF, 'GainFloor outside [0,1] should error.');
+
 fprintf('ALL TESTS PASSED: test_eigenmodes_noisefloor_pure\n');
 end

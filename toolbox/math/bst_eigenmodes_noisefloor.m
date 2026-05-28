@@ -14,7 +14,7 @@ function Out = bst_eigenmodes_noisefloor(Pdata, Nnoise, varargin)
 %     Products:
 %       SNR(k,f)      = Pdata / Nnoise
 %       CleanPSD(k,f) = max(Pdata - Alpha*Nnoise, Floor*Nnoise)   (spectral subtraction)
-%       Gain(k,f)     = max(Pdata - Nnoise, 0) / Pdata            (Wiener gain in [0,1])
+%       Gain(k,f)     = max(max(Pdata - Alpha*Nnoise, 0)/Pdata, GainFloor)  (Wiener gain in [0,1])
 %       Kstar(f)      = largest mode index k with SNR(k,f) >= SnrThresh (0 if none)
 %
 % INPUTS:
@@ -24,6 +24,7 @@ function Out = bst_eigenmodes_noisefloor(Pdata, Nnoise, varargin)
 % OPTIONS (name-value):
 %     'Alpha'     : over-subtraction factor (>=1), default 1.
 %     'Floor'     : spectral floor as a fraction of Nnoise, default 0.
+%     'GainFloor' : lower bound for the Wiener gain (in [0,1]), default 0.
 %     'SnrThresh' : linear SNR threshold for the reliable-mode cutoff, default 1.
 %
 % OUTPUTS:
@@ -53,13 +54,20 @@ function Out = bst_eigenmodes_noisefloor(Pdata, Nnoise, varargin)
 % Authors: Diellor Basha, 2026
 
 %% ===== PARSE OPTIONS =====
-Alpha = 1; Floor = 0; SnrThresh = 1;
+Alpha = 1; Floor = 0; SnrThresh = 1; GainFloor = 0;
 for i = 1:2:numel(varargin)
     switch lower(varargin{i})
         case 'alpha',     Alpha     = varargin{i+1};
         case 'floor',     Floor     = varargin{i+1};
         case 'snrthresh', SnrThresh = varargin{i+1};
+        case 'gainfloor', GainFloor = varargin{i+1};
     end
+end
+if GainFloor < 0 || GainFloor > 1
+    error('bst_eigenmodes_noisefloor: GainFloor must be in [0,1].');
+end
+if Alpha < 0
+    error('bst_eigenmodes_noisefloor: Alpha must be >= 0.');
 end
 
 Pdata  = double(Pdata);
@@ -73,7 +81,7 @@ Nsafe = max(Nnoise, eps);
 Out = struct();
 Out.SNR      = Pdata ./ Nsafe;
 Out.CleanPSD = max(Pdata - Alpha .* Nnoise, Floor .* Nnoise);
-Out.Gain     = max(Pdata - Nnoise, 0) ./ max(Pdata, eps);
+Out.Gain     = max( max(Pdata - Alpha .* Nnoise, 0) ./ max(Pdata, eps), GainFloor );
 
 %% ===== RELIABLE-MODE CUTOFF =====
 [~, nFreq] = size(Pdata);
