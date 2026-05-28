@@ -61,8 +61,13 @@ end
 
 
 %% ===== FORMAT COMMENT =====
-function Comment = FormatComment(sProcess) %#ok<DEFNU,INUSD>
-    Comment = 'Eigenmode dispersion (wave vs diffusion)';
+function Comment = FormatComment(sProcess) %#ok<DEFNU>
+    mpf = sProcess.options.minpowerfrac.Value{1};
+    if mpf > 0
+        Comment = sprintf('Eigenmode dispersion (wave vs diffusion, minpow=%.2g)', mpf);
+    else
+        Comment = 'Eigenmode dispersion (wave vs diffusion)';
+    end
 end
 
 
