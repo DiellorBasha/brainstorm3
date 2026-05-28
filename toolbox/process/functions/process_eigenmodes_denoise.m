@@ -60,7 +60,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.noisewin.Type     = 'value';
     sProcess.options.noisewin.Value    = {2, 's', 2};
 
-    sProcess.options.alpha.Comment     = 'Over-subtraction factor alpha (>=1): ';
+    sProcess.options.alpha.Comment     = 'Over-subtraction factor alpha (>=0, >1 over-subtracts): ';
     sProcess.options.alpha.Type        = 'value';
     sProcess.options.alpha.Value       = {1, '', 2};
 
