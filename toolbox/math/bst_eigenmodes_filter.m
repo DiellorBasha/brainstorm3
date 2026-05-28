@@ -13,7 +13,8 @@ function Filtered = bst_eigenmodes_filter(Eigenmodes, Data, MassMatrix, FilterTy
 %                  (see bst_eigenmodes_filter_gain for the transfer functions)
 %
 % OPTIONS:
-%     CutoffMode, ModeRange, DiffusionTime, MaxGain, TransferFn (see code)
+%     CutoffMode, ModeRange, DiffusionTime, MaxGain, RegBeta, TransferFn
+%     (all forwarded to bst_eigenmodes_filter_gain — see that function for defaults)
 %
 % SEE ALSO: bst_eigenmodes_project, in_tess_eigenmodes, tess_eigenmodes, tess_laplacian
 %
@@ -44,6 +45,10 @@ function Filtered = bst_eigenmodes_filter(Eigenmodes, Data, MassMatrix, FilterTy
 %     'inverse_heat' — Inverse heat kernel: h(lambda_k) = exp(+t * lambda_k),
 %                  clamped to avoid amplifying high-frequency noise beyond a
 %                  MaxGain factor. Used for spatial sharpening / deblurring.
+%
+%     'tikhonov' — Tikhonov regularisation: h(lambda_k) = 1 / (1 + beta * lambda_k).
+%                  Smooth, monotone low-pass; 'RegBeta' option (default 1).
+%                  RegBeta = 0 is the identity.
 %
 %     'custom'   — User-supplied transfer function h(lambda_k) via the
 %                  'TransferFn' option. Must be a function handle mapping

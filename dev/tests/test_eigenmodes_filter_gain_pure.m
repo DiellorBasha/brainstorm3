@@ -39,5 +39,16 @@ threw = false;
 try, bst_eigenmodes_filter_gain(lam, 'bogus'); catch, threw = true; end
 assert(threw, 'unknown filter type should error.');
 
+
+% Guard error paths.
+threwH = false;  try, bst_eigenmodes_filter_gain(lam, 'heat', 'DiffusionTime', 0);          catch, threwH = true;  end
+assert(threwH, 'heat with DiffusionTime<=0 should error.');
+threwIH = false; try, bst_eigenmodes_filter_gain(lam, 'inverse_heat', 'DiffusionTime', 0);  catch, threwIH = true; end
+assert(threwIH, 'inverse_heat with DiffusionTime<=0 should error.');
+threwT = false;  try, bst_eigenmodes_filter_gain(lam, 'tikhonov', 'RegBeta', -1);           catch, threwT = true;  end
+assert(threwT, 'tikhonov with RegBeta<0 should error.');
+threwC = false;  try, bst_eigenmodes_filter_gain(lam, 'custom', 'TransferFn', @(l) [1;2]);  catch, threwC = true;  end
+assert(threwC, 'custom with wrong-length output should error.');
+
 fprintf('ALL TESTS PASSED: test_eigenmodes_filter_gain_pure\n');
 end
