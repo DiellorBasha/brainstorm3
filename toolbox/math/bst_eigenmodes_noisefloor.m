@@ -22,7 +22,7 @@ function Out = bst_eigenmodes_noisefloor(Pdata, Nnoise, varargin)
 %     Nnoise : [K x nFreq] empty-room PSD, same size and frequency grid.
 %
 % OPTIONS (name-value):
-%     'Alpha'     : over-subtraction factor (>=1), default 1.
+%     'Alpha'     : over-subtraction factor (>=0; values >1 over-subtract), default 1.
 %     'Floor'     : spectral floor as a fraction of Nnoise, default 0.
 %     'GainFloor' : lower bound for the Wiener gain (in [0,1]), default 0.
 %     'SnrThresh' : linear SNR threshold for the reliable-mode cutoff, default 1.

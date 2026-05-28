@@ -43,6 +43,9 @@ assert(all(OutZ.Kstar == 0), 'Kstar must be 0 when no mode meets the threshold.'
 
 % --- Gain shaping: GainFloor raises the floor, Alpha lowers the gain ---
 Gbase = bst_eigenmodes_noisefloor(Pdata, N);                       % Alpha=1, GainFloor=0
+% Back-compat: defaults reproduce the prior Gain formula exactly.
+GainOld = max(Pdata - N, 0) ./ max(Pdata, eps);
+assert(max(abs(Gbase.Gain(:) - GainOld(:))) < 1e-12, 'Default Gain must reproduce the prior formula.');
 Gflr  = bst_eigenmodes_noisefloor(Pdata, N, 'GainFloor', 0.2);
 assert(all(Gflr.Gain(:) >= 0.2 - 1e-12), 'GainFloor should raise the gain floor.');
 assert(all(Gflr.Gain(:) <= 1 + 1e-12),   'Gain must stay <= 1.');
