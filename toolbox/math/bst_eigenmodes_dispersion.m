@@ -16,7 +16,7 @@ function Out = bst_eigenmodes_dispersion(P, lambdas, Freqs, varargin)
 %         BANDWIDTH w(k) scales as lambda_k. Weighted through-origin fit
 %         w = b*lambda gives diffusivity alpha = 2*pi*b (proportional).
 %
-%     Regime = the model with the higher weighted R^2. Subtraction is on power.
+%     Regime = the model with the higher weighted R^2.
 %     c is in m/s when lambdas are metric LBO eigenvalues (Brainstorm surfaces
 %     are in metres); the regime decision and R^2 are unit-independent.
 %
