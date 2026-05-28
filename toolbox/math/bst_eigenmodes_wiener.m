@@ -68,6 +68,9 @@ end
 if numel(GainFreqs) ~= size(Gain, 2)
     error('bst_eigenmodes_wiener: GainFreqs length (%d) must match the number of Gain columns (%d).', numel(GainFreqs), size(Gain,2));
 end
+if numel(GainFreqs) < 2 || any(diff(GainFreqs) <= 0)
+    error('bst_eigenmodes_wiener: GainFreqs must be strictly ascending with at least 2 points.');
+end
 
 %% ===== MIRROR (edge handling) =====
 domirror = Mirror && (nTime >= 2);

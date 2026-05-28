@@ -54,6 +54,9 @@ assert(threwRow, 'Row mismatch between Gain and Coeffs should error.');
 threwLen = false;
 try, bst_eigenmodes_wiener(Coeffs, sfreq, ones(K, nGF), GainFreqs(1:end-1)); catch, threwLen = true; end
 assert(threwLen, 'GainFreqs length not matching Gain columns should error.');
+threwOrd = false;
+try, bst_eigenmodes_wiener(Coeffs, sfreq, ones(K, nGF), fliplr(GainFreqs)); catch, threwOrd = true; end
+assert(threwOrd, 'Non-ascending GainFreqs should error.');
 
 fprintf('ALL TESTS PASSED: test_eigenmodes_wiener_pure\n');
 end
