@@ -8,9 +8,10 @@ function [W, Freqs] = bst_eigenmodes_wavelet(Coeffs, sfreq, Freqs, varargin)
 %     Applies the complex Morlet continuous wavelet transform to each eigenmode
 %     coefficient time series, producing the time-resolved (lambda, omega, t)
 %     tensor W_k(s,t). The result is COMPLEX: |W| is amplitude, arg(W) is phase.
-%     This wraps Brainstorm's validated morlet_transform (squared='n', i.e. the
-%     un-squared complex coefficients). morlet_transform already returns the
-%     Brainstorm timefreq convention [K x nTime x nFreq] directly.
+%     This wraps Brainstorm's validated morlet_transform (squared='n', the
+%     un-squared complex coefficients), which returns the coefficients in the
+%     [K x nTime x nFreq] timefreq convention; the conjugate is applied so
+%     phase follows the standard positive-rotation analytic-signal convention.
 %
 % INPUTS:
 %     Coeffs : [K x nTime] eigenmode coefficient time series.
@@ -62,7 +63,11 @@ Coeffs = double(Coeffs);
 
 %% ===== FREQUENCY GRID =====
 if nargin < 3 || isempty(Freqs)
-    Freqs = logspace(log10(2), log10(min(100, 0.4*sfreq)), 40);
+    fhiDefault = min(100, 0.4*sfreq);
+    if fhiDefault <= 2
+        error('bst_eigenmodes_wavelet: sampling rate too low for the default 2 Hz frequency floor; pass an explicit Freqs vector.');
+    end
+    Freqs = logspace(log10(2), log10(fhiDefault), 40);
 end
 Freqs = Freqs(:)';
 
