@@ -199,6 +199,8 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     OPTIONS.isGroupSessions  = sProcess.options.groupsessions.Value;
     OPTIONS.MniMethod        = sProcess.options.mni.Value;
     OPTIONS.RegisterMethod   = sProcess.options.anatregister.Value;
+    OPTIONS.DownsampleMethod = sProcess.options.downsamplemethod.Value;
+    OPTIONS.IcoLevel         = sProcess.options.icolevel.Value;
     
     % === IMPORT DATASET ===
     % Import dataset
@@ -237,7 +239,9 @@ function [RawFiles, Messages, OrigFiles] = ImportBidsDataset(BidsDir, OPTIONS)
         'SelectedSubjects', [], ...
         'isGroupSessions',  1, ...
         'MniMethod',        'maff8', ...  % {'maff8','segment','no'}
-        'RegisterMethod',   'spm12');     % {'smp12','no'}
+        'RegisterMethod',   'spm12', ...  % {'smp12','no'}
+        'DownsampleMethod', 'icosphere', ...  % {'reducepatch','icosphere'}
+        'IcoLevel',         'ico5');          % {'ico3','ico4','ico5','ico6'}
     OPTIONS = struct_copy_fields(OPTIONS, Def_OPTIONS, 0);
 
     % ===== GET THE BIDS FOLDER =====
@@ -518,13 +522,36 @@ function [RawFiles, Messages, OrigFiles] = ImportBidsDataset(BidsDir, OPTIONS)
         end
         % Import segmentation
         if ~isSkipAnat && ~isempty(SubjectAnatDir{iSubj})
-            % Ask for number of vertices (so it is not asked multiple times)
+            % Ask the cortex downsampling method/level once (so it is not asked per subject).
+            % nVertices empty is the "not yet specified" sentinel for interactive callers.
             if isempty(OPTIONS.nVertices)
-                OPTIONS.nVertices = java_dialog('input', 'Number of vertices on the cortex surface:', 'Import FreeSurfer folder', [], '15000');
-                if isempty(OPTIONS.nVertices)
+                iMethod = java_dialog('radio', 'Cortex downsampling method:', 'Import BIDS dataset', [], ...
+                    {'<HTML><B>reducepatch</B>: Matlab decimation to ~N vertices', ...
+                     '<HTML><B>icosphere</B>: FreeSurfer/MNE-style uniform grid (FreeSurfer only)'}, 2);
+                if isempty(iMethod)
                     return;
                 end
-                OPTIONS.nVertices = str2double(OPTIONS.nVertices);
+                if (iMethod == 2)
+                    OPTIONS.DownsampleMethod = 'icosphere';
+                    iLevel = java_dialog('radio', 'Icosphere resolution (total cortex vertices):', 'Import BIDS dataset', [], ...
+                        {'ico3  -   1284 vertices', ...
+                         'ico4  -   5124 vertices', ...
+                         'ico5  -  20484 vertices', ...
+                         'ico6  -  81924 vertices'}, 3);
+                    if isempty(iLevel)
+                        return;
+                    end
+                    icoVals = {'ico3', 'ico4', 'ico5', 'ico6'};
+                    OPTIONS.IcoLevel  = icoVals{iLevel};
+                    OPTIONS.nVertices = GetIcoVertexCount(OPTIONS.IcoLevel);   % satisfies the "asked once" sentinel
+                else
+                    OPTIONS.DownsampleMethod = 'reducepatch';
+                    OPTIONS.nVertices = java_dialog('input', 'Number of vertices on the cortex surface:', 'Import BIDS dataset', [], '15000');
+                    if isempty(OPTIONS.nVertices)
+                        return;
+                    end
+                    OPTIONS.nVertices = str2double(OPTIONS.nVertices);
+                end
             end
             % If there are fiducials defined: record these, to use them when importing FreeSurfer (or other) segmentations
             if ~isempty(SubjectFidMriFile{iSubj})
@@ -533,18 +560,26 @@ function [RawFiles, Messages, OrigFiles] = ImportBidsDataset(BidsDir, OPTIONS)
                 sMriFid = [];
             end
 
+            % Resolve the cortex downsampling for this subject's anatomy format.
+            % (Icosphere is FreeSurfer-only; other formats fall back to reducepatch + warning.)
+            [nVertArg, methodArg, anatWarn] = ResolveAnatDownsample(SubjectAnatFormat{iSubj}, OPTIONS.DownsampleMethod, OPTIONS.IcoLevel, OPTIONS.nVertices);
+            if ~isempty(anatWarn)
+                anatWarn = [anatWarn ' (subject "' SubjectName{iSubj} '")'];
+                Messages = [Messages, 10, anatWarn];
+                disp(['BST> ' anatWarn]);
+            end
             % Import subject anatomy
             switch (SubjectAnatFormat{iSubj})
                 case 'FreeSurfer'
-                    errorMsg = import_anatomy_fs(iSubject, SubjectAnatDir{iSubj}, OPTIONS.nVertices, isInteractiveAnat, sMriFid, 0);
+                    errorMsg = import_anatomy_fs(iSubject, SubjectAnatDir{iSubj}, nVertArg, isInteractiveAnat, sMriFid, 0, 1, 0, methodArg);
                 case 'CAT12'
-                    errorMsg = import_anatomy_cat(iSubject, SubjectAnatDir{iSubj}, OPTIONS.nVertices, isInteractiveAnat, sMriFid, 1, 2, 1);
+                    errorMsg = import_anatomy_cat(iSubject, SubjectAnatDir{iSubj}, nVertArg, isInteractiveAnat, sMriFid, 1, 2, 1);
                 case 'BrainSuite'
-                    errorMsg = import_anatomy_bs(iSubject, SubjectAnatDir{iSubj}, OPTIONS.nVertices, isInteractiveAnat, sMriFid);
+                    errorMsg = import_anatomy_bs(iSubject, SubjectAnatDir{iSubj}, nVertArg, isInteractiveAnat, sMriFid);
                 case 'BrainVISA'
-                    errorMsg = import_anatomy_bv(iSubject, SubjectAnatDir{iSubj}, OPTIONS.nVertices, isInteractiveAnat, sMriFid);
+                    errorMsg = import_anatomy_bv(iSubject, SubjectAnatDir{iSubj}, nVertArg, isInteractiveAnat, sMriFid);
                 case 'CIVET'
-                    errorMsg = import_anatomy_civet(iSubject, SubjectAnatDir{iSubj}, OPTIONS.nVertices, isInteractiveAnat, sMriFid, 0);
+                    errorMsg = import_anatomy_civet(iSubject, SubjectAnatDir{iSubj}, nVertArg, isInteractiveAnat, sMriFid, 0);
                 otherwise
                     errorMsg = ['Invalid file format: ' SubjectAnatFormat{iSubj}];
             end
