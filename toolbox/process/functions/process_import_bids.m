@@ -148,6 +148,32 @@ function n = GetIcoVertexCount(level) %#ok<DEFNU>
 end
 
 
+%% ===== RESOLVE ANATOMY DOWNSAMPLE =====
+% Decide the (nVertices, Method) to pass to the anatomy importer for one subject, given the
+% requested downsampling and the subject's anatomy format. Icosphere is FreeSurfer-only; for any
+% other format we fall back to reducepatch and return a non-empty warning string.
+% DEFERRED: extend icosphere to import_anatomy_cat/bs/bv/civet (they share the same per-hemisphere
+% reducepatch pattern). Pure / no side effects -> unit-testable.
+function [nVertArg, methodArg, warnMsg] = ResolveAnatDownsample(anatFormat, downsampleMethod, icoLevel, nVertices) %#ok<DEFNU>
+    warnMsg = '';
+    if strcmpi(downsampleMethod, 'icosphere')
+        if strcmpi(anatFormat, 'FreeSurfer')
+            nVertArg  = GetIcoVertexCount(icoLevel);
+            methodArg = 'icosphere';
+        else
+            % Icosphere not implemented for this importer yet -> reducepatch fallback + warning
+            nVertArg  = nVertices;
+            methodArg = 'reducepatch';
+            warnMsg   = sprintf(['Icosphere downsampling is currently FreeSurfer-only; ' ...
+                'anatomy format "%s" imported with reducepatch at %d vertices.'], anatFormat, nVertices);
+        end
+    else
+        nVertArg  = nVertices;
+        methodArg = 'reducepatch';
+    end
+end
+
+
 %% ===== RUN =====
 function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     OutputFiles = {};
