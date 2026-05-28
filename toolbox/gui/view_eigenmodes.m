@@ -84,7 +84,7 @@ function hFig = ViewFigure(SurfaceFile, iMode)
     end
     % Load eigenmodes embedded in the surface file
     [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
-    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
+    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors) || ~isfield(Eig, 'Values')
         bst_error(['No eigenmodes found on this surface.' 10 ...
                    'Right-click the cortex and run "Compute eigenmodes" first.'], ...
                    'View eigenmodes', 0);
@@ -119,6 +119,7 @@ function hFig = ViewFigure(SurfaceFile, iMode)
     function UpdateMode()
         d = GetModeDisplay(Eig, iMode);
         TessInfo = getappdata(hFig, 'Surface');
+        TessInfo(1).ColormapType        = 'source';   % render eigenmode with the source palette (not anatomy)
         TessInfo(1).DataSource.Type     = 'Source';
         TessInfo(1).DataSource.FileName = SurfaceFile;   % real DB file -> satisfies CLim guard
         TessInfo(1).Data                = d.Data;
