@@ -19,9 +19,10 @@ assert(nv == 20484 && strcmp(m, 'icosphere') && isempty(w), 'FreeSurfer icospher
 [nv, m, w] = process_import_bids('ResolveAnatDownsample', 'FreeSurfer', 'reducepatch', 'ico5', 15000);
 assert(nv == 15000 && strcmp(m, 'reducepatch') && isempty(w), 'FreeSurfer reducepatch must pass through 15000/reducepatch.');
 
-% CAT12 + icosphere -> reducepatch fallback + warning
+% CAT12 + icosphere -> reducepatch fallback + warning (warning names the format and vertex count)
 [nv, m, w] = process_import_bids('ResolveAnatDownsample', 'CAT12', 'icosphere', 'ico5', 15000);
-assert(nv == 15000 && strcmp(m, 'reducepatch') && ~isempty(w), 'Non-FreeSurfer icosphere must fall back to reducepatch with a warning.');
+assert(nv == 15000 && strcmp(m, 'reducepatch'), 'Non-FreeSurfer icosphere must fall back to reducepatch.');
+assert(~isempty(w) && contains(w, 'CAT12') && contains(w, '15000'), 'Warning must name the format and the vertex count.');
 
 % CAT12 + reducepatch -> passthrough, no warning
 [nv, m, w] = process_import_bids('ResolveAnatDownsample', 'CAT12', 'reducepatch', 'ico5', 12000);

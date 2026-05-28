@@ -168,6 +168,7 @@ function [nVertArg, methodArg, warnMsg] = ResolveAnatDownsample(anatFormat, down
                 'anatomy format "%s" imported with reducepatch at %d vertices.'], anatFormat, nVertices);
         end
     else
+        % reducepatch: icoLevel is unused here (the caller always passes it; ignored)
         nVertArg  = nVertices;
         methodArg = 'reducepatch';
     end
