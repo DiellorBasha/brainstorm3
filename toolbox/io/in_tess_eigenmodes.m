@@ -46,5 +46,17 @@ Eigenmodes = TessMat.Eigenmodes;
 if isfield(Eigenmodes, 'Vectors') && isa(Eigenmodes.Vectors, 'single')
     Eigenmodes.Vectors = double(Eigenmodes.Vectors);
 end
+% Backward compatibility: older files have no per-hemisphere metadata.
+% Treat them as a single component (rank = column index).
+nK = size(Eigenmodes.Vectors, 2);
+if ~isfield(Eigenmodes, 'Component') || isempty(Eigenmodes.Component)
+    Eigenmodes.Component = ones(nK, 1);
+end
+if ~isfield(Eigenmodes, 'CompRank') || isempty(Eigenmodes.CompRank)
+    Eigenmodes.CompRank = (1:nK)';
+end
+if ~isfield(Eigenmodes, 'nComponents') || isempty(Eigenmodes.nComponents)
+    Eigenmodes.nComponents = max(Eigenmodes.Component);
+end
 isComputed = true;
 end
