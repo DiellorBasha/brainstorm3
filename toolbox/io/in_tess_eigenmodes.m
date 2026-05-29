@@ -56,7 +56,7 @@ if ~isfield(Eigenmodes, 'CompRank') || isempty(Eigenmodes.CompRank)
     Eigenmodes.CompRank = (1:nK)';
 end
 if ~isfield(Eigenmodes, 'nComponents') || isempty(Eigenmodes.nComponents)
-    Eigenmodes.nComponents = max(Eigenmodes.Component);
+    Eigenmodes.nComponents = max(Eigenmodes.Component(:));
 end
 isComputed = true;
 end
