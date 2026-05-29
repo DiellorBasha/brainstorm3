@@ -145,121 +145,62 @@ if nModes > maxModes
     nModes = maxModes;
 end
 
-%% ===== STEP 2: ASSEMBLE OPERATORS =====
+%% ===== STEP 2: WHOLE-MESH OPERATORS (for return + orthonormality reference) =====
 if Verbose
     fprintf('BST> tess_eigenmodes: Assembling L and M (%s mass)...\n', MassType);
 end
-tAssembly = tic;
 [L, M] = tess_laplacian(Vertices, Faces, 'MassType', MassType);
+
+%% ===== STEP 3: SPLIT INTO CONNECTED COMPONENTS =====
+% Each disconnected component (e.g. a cortical hemisphere) is a separate
+% manifold; its Laplace-Beltrami operator must be solved independently. Solving
+% the union as one block-diagonal operator interleaves components by eigenvalue
+% and, for near-degenerate eigenvalues (near-symmetric hemispheres), lets eigs
+% return meaningless cross-component mixtures.
+compId = conncomp(graph(tess_vertconn(Vertices, Faces)));   % [1 x nV]
+nComp  = max(compId);
 if Verbose
-    fprintf('BST> tess_eigenmodes: Assembly done (%.2f s). L: %dx%d, nnz=%d\n', ...
-        toc(tAssembly), size(L,1), size(L,2), nnz(L));
+    fprintf('BST> tess_eigenmodes: %d connected component(s).\n', nComp);
 end
 
-%% ===== STEP 3: SOLVE GENERALIZED EIGENVALUE PROBLEM =====
-% L * phi = lambda * M * phi
-%
-% We request a few extra modes to account for DC modes that will be removed.
-nExtra = 5;  % extra modes to request (for DC removal + convergence margin)
-nRequest = min(nModes + nExtra, nV - 1);
-
-if Verbose
-    fprintf('BST> tess_eigenmodes: Solving for %d eigenmodes (sigma=%.1e)...\n', ...
-        nRequest, Sigma);
+%% ===== STEP 4: SOLVE PER COMPONENT AND ASSEMBLE =====
+VectorsAll = zeros(nV, 0);
+ValuesAll  = zeros(0, 1);
+Component  = zeros(0, 1);
+CompRank   = zeros(0, 1);
+nRemoved   = 0;
+for c = 1:nComp
+    vIdx = find(compId == c);
+    nvc  = numel(vIdx);
+    % Sub-mesh: faces fully inside this component, vertex indices remapped to 1..nvc
+    faceMask = all(ismember(Faces, vIdx), 2);
+    remap = zeros(nV, 1);
+    remap(vIdx) = 1:nvc;
+    Fsub = remap(Faces(faceMask, :));
+    Vsub = Vertices(vIdx, :);
+    % Cap modes to this component's size
+    nModesC = min(nModes, nvc - 2);
+    [Uc, lambdasC, nRemC] = SolveComponent(Vsub, Fsub, nModesC, MassType, ...
+        RemoveDC, Sigma, Tolerance, MaxIter, Verbose);
+    % Zero-pad into full vertex space and append
+    Ufull = zeros(nV, size(Uc, 2));
+    Ufull(vIdx, :) = Uc;
+    VectorsAll = [VectorsAll, Ufull];                              %#ok<AGROW>
+    ValuesAll  = [ValuesAll;  lambdasC(:)];                        %#ok<AGROW>
+    Component  = [Component;  c * ones(numel(lambdasC), 1)];       %#ok<AGROW>
+    CompRank   = [CompRank;   (1:numel(lambdasC))'];               %#ok<AGROW>
+    nRemoved   = nRemoved + nRemC;
 end
 
-opts = struct();
-opts.tol = Tolerance;
-opts.maxit = MaxIter;
-opts.disp = 0;  % suppress eigs output
-
-tEigs = tic;
-try
-    [U, D] = eigs(L, M, nRequest, Sigma, opts);
-catch ME
-    % If shift-invert fails (e.g., singular matrix), try 'smallestabs'
-    if Verbose
-        fprintf('BST> tess_eigenmodes: Shift-invert failed (%s). Trying smallestabs...\n', ME.message);
-    end
-    [U, D] = eigs(L, M, nRequest, 'smallestabs', opts);
-end
-eigTime = toc(tEigs);
-
-% Extract eigenvalues and sort ascending
-lambdas = diag(D);
-[lambdas, sortIdx] = sort(real(lambdas));
-U = real(U(:, sortIdx));
-
-if Verbose
-    fprintf('BST> tess_eigenmodes: Eigensolve done (%.1f s). ', eigTime);
-    nConverged = length(lambdas);
-    if nConverged < nRequest
-        fprintf('WARNING: Only %d/%d modes converged.\n', nConverged, nRequest);
-    else
-        fprintf('%d modes converged.\n', nConverged);
-    end
-end
-
-%% ===== STEP 4: REMOVE DC MODES =====
-nRemoved = 0;
-if RemoveDC
-    % DC modes have eigenvalues ≈ 0 (within numerical tolerance).
-    % For two-component meshes (L/R hemispheres), there are 2 DC modes.
-    dcThreshold = max(abs(Sigma) * 10, 1e-6);
-    dcMask = abs(lambdas) < dcThreshold;
-    nRemoved = sum(dcMask);
-
-    if nRemoved > 0
-        lambdas = lambdas(~dcMask);
-        U = U(:, ~dcMask);
-        if Verbose
-            fprintf('BST> tess_eigenmodes: Removed %d DC mode(s) (threshold=%.1e).\n', ...
-                nRemoved, dcThreshold);
-        end
-    end
-end
-
-% Trim to requested number of modes
-if length(lambdas) > nModes
-    lambdas = lambdas(1:nModes);
-    U = U(:, 1:nModes);
-end
-
-%% ===== STEP 5: M-ORTHONORMALIZE =====
-% Enforce U' * M * U = I (may drift from exact orthonormality due to
-% finite Arnoldi iteration tolerance).
-if Verbose
-    G = U' * M * U;
-    orthErr = norm(G - eye(size(G)), 'fro');
-    fprintf('BST> tess_eigenmodes: Pre-normalization orthogonality error: %.2e\n', orthErr);
-end
-
-U = mOrthonormalize(U, M);
-
-if Verbose
-    G = U' * M * U;
-    orthErr = norm(G - eye(size(G)), 'fro');
-    fprintf('BST> tess_eigenmodes: Post-normalization orthogonality error: %.2e\n', orthErr);
-end
-
-%% ===== STEP 6: CLAMP SMALL NEGATIVE EIGENVALUES =====
-% Due to numerical precision, some eigenvalues near zero may be slightly
-% negative. Clamp these to zero.
-nClamped = sum(lambdas < 0);
-if nClamped > 0
-    lambdas(lambdas < 0) = 0;
-    if Verbose
-        fprintf('BST> tess_eigenmodes: Clamped %d slightly negative eigenvalue(s) to 0.\n', nClamped);
-    end
-end
-
-%% ===== STEP 7: PACKAGE OUTPUT =====
+%% ===== STEP 5: PACKAGE OUTPUT =====
 totalTime = toc(tStart);
-
 Eigenmodes = struct();
-Eigenmodes.Vectors     = U;
-Eigenmodes.Values      = lambdas;
-Eigenmodes.nModes      = length(lambdas);
+Eigenmodes.Vectors     = VectorsAll;
+Eigenmodes.Values      = ValuesAll;
+Eigenmodes.nModes      = numel(ValuesAll);
+Eigenmodes.Component   = Component;
+Eigenmodes.CompRank    = CompRank;
+Eigenmodes.nComponents = nComp;
 Eigenmodes.MassType    = MassType;
 Eigenmodes.Sigma       = Sigma;
 Eigenmodes.Tolerance   = Tolerance;
@@ -267,10 +208,45 @@ Eigenmodes.nRemoved    = nRemoved;
 Eigenmodes.ComputeTime = totalTime;
 
 if Verbose
-    fprintf('BST> tess_eigenmodes: Done. %d modes, lambda range [%.2f, %.2f], total %.1f s.\n', ...
-        Eigenmodes.nModes, lambdas(1), lambdas(end), totalTime);
+    fprintf('BST> tess_eigenmodes: Done. %d modes across %d component(s), total %.1f s.\n', ...
+        Eigenmodes.nModes, nComp, totalTime);
 end
 
+end
+
+
+%% ===== HELPER: SOLVE ONE COMPONENT =====
+function [U, lambdas, nRemoved] = SolveComponent(Vertices, Faces, nModes, MassType, RemoveDC, Sigma, Tolerance, MaxIter, Verbose)
+    [L, M] = tess_laplacian(Vertices, Faces, 'MassType', MassType);
+    nV = size(Vertices, 1);
+    nExtra   = 5;
+    nRequest = min(nModes + nExtra, nV - 1);
+    opts = struct('tol', Tolerance, 'maxit', MaxIter, 'disp', 0);
+    try
+        [U, D] = eigs(L, M, nRequest, Sigma, opts);
+    catch
+        [U, D] = eigs(L, M, nRequest, 'smallestabs', opts);
+    end
+    lambdas = real(diag(D));
+    [lambdas, sortIdx] = sort(lambdas);
+    U = real(U(:, sortIdx));
+    % Remove DC modes (one per closed component)
+    nRemoved = 0;
+    if RemoveDC
+        dcThreshold = max(abs(Sigma) * 10, 1e-6);
+        dcMask = abs(lambdas) < dcThreshold;
+        nRemoved = sum(dcMask);
+        lambdas = lambdas(~dcMask);
+        U = U(:, ~dcMask);
+    end
+    % Trim to requested count
+    if numel(lambdas) > nModes
+        lambdas = lambdas(1:nModes);
+        U = U(:, 1:nModes);
+    end
+    % M-orthonormalize and clamp tiny negatives
+    U = mOrthonormalize(U, M);
+    lambdas(lambdas < 0) = 0;
 end
 
 
