@@ -23,12 +23,13 @@ mode-frequency spectrum asks *how each spatial pattern oscillates in time*.
 
 Two new batch processes under **Sources → Frequency**, mirroring the option panels
 and UI of the existing `process_psd` / `process_fft`, both delegating to one shared
-engine. The engine builds the mode coefficient time series in memory (via a **mode
-kernel** that folds the eigenmode projection into the imaging kernel), then hands
-the matrix to `bst_timefreq` exactly the way the existing scout/cluster path does
-(`DataToProcess = {matrix}` + `RowNames`/`TimeVector`/`nComponents`/`SurfaceFile`).
-The output is a standard timefreq/spectrum file that opens in Brainstorm's existing
-`figure_spectrum` line viewer with no custom display code this round.
+engine. The engine reproduces `bst_timefreq`'s source-input branch (read the
+windowed sensor data + bad segments exactly as it does), then makes the **identical
+`bst_psd` call** standard source PSD makes — substituting only the **mode kernel**
+(`Φ'·M·ImagingKernel`) for the imaging kernel and mode labels for the row names — and
+packages the result into a standard timefreq/spectrum file. That file opens in
+Brainstorm's existing `figure_spectrum` line viewer with no custom display code this
+round.
 
 **Self-contained — no edits to shared/core files** (`bst_timefreq`, `bst_psd`,
 `process_psd`, `process_fft` are reused unchanged). This keeps the upstream-merge
@@ -45,11 +46,17 @@ valid because the FFT is linear: `FFT(K·sensors) = K·FFT(sensors)`.
 
 The mode coefficient is the same kind of linear map of the sensors,
 `coeff(t) = (Φ'·M·K)·F(t) = ModeKernel·F(t)`, so `FFT(coeff) = ModeKernel·FFT(sensors)`.
-Therefore **building the mode coefficient time series first and running PSD/FFT on it
-yields the identical result** to substituting `ModeKernel` for `ImagingKernel` inside
-`bst_psd`. Our self-contained path (build `coeff`, feed the in-memory matrix to
-`bst_timefreq`) is exact, not an approximation. We chose it over a guarded
-`bst_timefreq` edit specifically to avoid touching core files.
+Therefore **substituting `ModeKernel` for `ImagingKernel` in the `bst_psd` call gives
+the mode-coefficient spectrum directly** — exact, not an approximation.
+
+We realize this by calling `bst_psd` ourselves with the same arguments
+`bst_timefreq` uses (same windowed `F`, same `BadSegments`, same Welch options),
+only swapping the kernel. This is **self-contained** (no edits to `bst_timefreq` /
+`bst_psd` / `process_psd` / `process_fft`) **and** preserves Brainstorm's exact
+behavior — crucially the bad-segment exclusion — so the mode-frequency spectrum is
+guaranteed consistent with the source time-frequency spectrum on the same data.
+(We deliberately do **not** use the simpler in-memory-matrix path through
+`bst_timefreq`, because that path drops raw bad-segment handling and would diverge.)
 
 ## Tech Stack
 
@@ -109,8 +116,10 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
 
 - `toolbox/process/functions/process_eigenmodes_freq.m` — *shared engine, not listed
   in the menu (no `GetDescription`).* `Run(sProcess, sInputs, Method)`:
-  validates inputs, builds the mode coefficient time series in memory, assembles
-  `tfOPTIONS`, calls `bst_timefreq`, tags the output. `Method ∈ {'psd','fft'}`.
+  validates inputs, reads the windowed sensor data + bad segments the same way
+  `bst_timefreq`'s source branch does, builds the mode kernel, calls `bst_psd`
+  (substituting the mode kernel for the imaging kernel), and saves the result as a
+  timefreq file. `Method ∈ {'psd','fft'}`.
 
 - `toolbox/process/functions/process_eigenmodes_psd.m` — *listed process.*
   `GetDescription` mirrors `process_psd` options (time window, window length,
@@ -121,9 +130,11 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
   `GetDescription` mirrors `process_fft` options (time window) plus "Number of
   modes". `Run` → `process_eigenmodes_freq('Run', sProcess, sInputs, 'fft')`.
 
-**Reused unchanged:** `bst_eigenmodes_project`, `in_tess_eigenmodes`,
-`tess_laplacian`, `bst_timefreq`, and the saved `Eigenmodes.MassMatrix` / `MassType`
-(skip recomputing the mass matrix when present).
+**Reused unchanged (called, not edited):** `bst_psd` (the actual spectral compute +
+bad-segment skipping + kernel application), `in_tess_eigenmodes`, `tess_laplacian`,
+`in_fread` / `panel_record('GetBadSegments')` (the windowed-read + bad-segment
+pattern mirrored from `bst_timefreq`'s `ReadRawRecordings`), and the saved
+`Eigenmodes.MassMatrix` / `MassType` (skip recomputing the mass matrix when present).
 
 ---
 
@@ -145,32 +156,32 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
 4. **Time window** — from the `timewindow` option; default whole time for
    imported/epoched, user-selected for raw.
 
-5. **Build mode coefficient time series (in memory, capped at nModes):**
-   - *Kernel result* (`ImagingKernel` non-empty): bounded **windowed** read of the
-     sensor data `F` for the selected window (raw-safe — never the whole recording);
-     `ModeKernel = bst_eigenmodes_modekernel(Eig, M, ImagingKernel, nModes)`;
-     `coeff = ModeKernel · F(GoodChannel, window)`.
-   - *Full result* (`ImageGridAmp` present, no kernel): load `ImageGridAmp` for the
-     window; `P = bst_eigenmodes_modekernel(Eig, M, [], nModes)` (= `Φ'·M`);
-     `coeff = P · ImageGridAmp(:, window)`.
-   - `coeff` is `[nModes × nTimeWindow]`.
+5. **Read sensor data + bad segments for the window** (mirroring
+   `bst_timefreq.m:346‑380` + `ReadRawRecordings`):
+   - *Kernel result* (`ImagingKernel` non-empty): from the associated `DataFile`,
+     load `sFile`/`ChannelMat`; compute `SamplesBounds` from the time window;
+     `[F, TimeVector] = in_fread(...)` (raw — bounded read, never the whole file) or
+     `F = sMat.F` (imported); restrict `F = F(GoodChannel, :)`; obtain
+     `BadSegments` via `panel_record('GetBadSegments', ...)` exactly as the standard
+     path does. Build `ModeKernel = bst_eigenmodes_modekernel(Eig, M, ImagingKernel, nModes)`.
+   - *Full result* (`ImageGridAmp` present, no kernel): `F = ImageGridAmp(:, window)`
+     (the sources themselves); `ModeKernel = bst_eigenmodes_modekernel(Eig, M, [], nModes)`
+     (= `Φ'·M`); `BadSegments` per the standard imported-data path.
 
-6. **Run the engine:**
-   - `tfOPTIONS = bst_timefreq();` (defaults), then set `Method`, and map options
-     (PSD: `WinLength`, `WinOverlap`, `PowerUnits`, `WinFunc`, `TimeWindow`;
-     FFT: `TimeWindow`).
-   - `DataToProcess = {coeff}`; `tfOPTIONS.TimeVector = windowTimeVector`;
-     `tfOPTIONS.ListFiles = {File}`; `tfOPTIONS.nComponents = 1`;
-     `tfOPTIONS.SurfaceFile = {SurfaceFile}`;
-     `tfOPTIONS.RowNames = { {'Mode 1 (λ=…)', …, 'Mode K (λ=…)'} }`;
-     output as a single file (`Output = 'all'`).
-   - Mark the result as a generic named-signal spectrum (`DataType = 'matrix'`) so
-     rows are treated as named modes (not sources) in the viewers.
-   - `[OutputFiles, Messages, isError] = bst_timefreq(DataToProcess, tfOPTIONS);`
-     surface messages via `bst_report`.
+6. **Compute the spectrum via the identical `bst_psd` call** standard source PSD/FFT
+   makes, swapping only the kernel:
+   - PSD: `[TF, Freqs, Nwin] = bst_psd(F, sfreq, WinLength, WinOverlap, BadSegments, ModeKernel, WinFunc, PowerUnits, IsRelative);`
+   - FFT: `[TF, Freqs] = bst_psd(F, sfreq, [], 0, BadSegments, ModeKernel, [], PowerUnits);`
+   - Because `bst_psd` skips bad-segment windows *before* applying the kernel
+     (`bst_psd.m:157`), bad-segment treatment is bit-for-bit identical to a source
+     PSD. `TF` is `[nModes × 1 × nFreq]`.
 
-7. **History / comment** — record method, #modes, mass type, eigenvalue range,
-   source file, and time window on the output file.
+7. **Package + save** as a standard timefreq file (model the save on
+   `process_eigenmodes_spectrum`'s output + Brainstorm's `timefreq` template):
+   `RowNames = {'Mode 1 (λ=…)', …}`, `Freqs`, `Method`, `nComponents = 1`,
+   `SurfaceFile`, `DataType = 'matrix'` (rows treated as named modes, not sources),
+   `DataFile = ''`; `db_add_data` into the input's study. History records method,
+   #modes, mass type, eigenvalue range, source file, and time window.
 
 ---
 
@@ -205,6 +216,13 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
   the output timefreq file has shape `[nModes × 1 × nFreq]`, correct RowNames
   (mode labels), a sane ascending positive frequency vector, and finite power.
   Prints `ALL TESTS PASSED`.
+- **Parity test (the key correctness check)** — the linear relation
+  `mode = Φ'·M · source` holds on the **complex** spectrum (power is nonlinear), so
+  run both with **FFT, measure = 'none'** (complex): standard source FFT
+  (`process_fft`) → `X_src`, mode FFT → `X_mode`; assert
+  `X_mode == (Φ'·M) · X_src` to numerical tolerance. Repeat on a raw file **with a
+  marked bad segment** — equality there proves the bad-segment windows excluded are
+  identical. Prints `ALL TESTS PASSED`.
 - **Manual GUI validation** by the user afterward (the usual loop): compute
   eigenmodes → run "Mode-frequency spectrum (PSD/FFT)" on a source result →
   open the power-spectrum lines view.
@@ -222,16 +240,20 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
   empty by default and an empty window means the whole file is read in one bounded
   `in_fread`, exactly like `process_psd`/`process_fft`. Imported/epoched data uses
   the full epoch. (No special guard; behavior matches the existing frequency tools.)
-- **Bad-segment exclusion (raw):** because we feed the mode coefficient time series
-  to `bst_timefreq` via the in-memory matrix path (rather than letting it read the
-  raw file itself), automatic bad-segment exclusion is **not** inherited in v1. This
-  matches the "light" scope; a later round can pass `BadSegments` through if needed.
+- **Bad-segment exclusion (raw):** must match standard Brainstorm exactly —
+  otherwise the mode-frequency spectrum would diverge from the source
+  time-frequency spectrum on the same data. Guaranteed here by passing the same
+  `BadSegments` into the same `bst_psd` call the source path uses (only the kernel
+  differs). The plan must verify parity against a source PSD on a raw file with a
+  marked bad segment.
 - **Mode capping vs available modes:** request 300 but a surface may have fewer;
   clamp and report.
 - **Mass-matrix provenance:** prefer the saved `Eigenmodes.MassMatrix`; only
   recompute when absent, and use the recorded `MassType` so the projection matches
   how the eigenmodes were built.
-- **DataType for in-memory matrices:** ensure `bst_timefreq` tags the output so it
-  opens in the spectrum viewer with per-mode rows (mirror the scout/cluster path).
+- **Output tagging:** since we build/save the timefreq file ourselves, set the
+  fields (`DataType = 'matrix'`, `RowNames` = mode labels, `Method`, `Freqs`) so the
+  file opens in the spectrum viewer with per-mode rows (model on a standard PSD
+  timefreq struct + `process_eigenmodes_spectrum`'s save).
 - **Frequency resolution / window length** come from the standard PSD panel; no new
   validation beyond what `process_psd` already does.
