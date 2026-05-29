@@ -90,6 +90,13 @@ function hFig = ViewFigure(ResultsFile)
             bst_progress('stop');
             return;
         end
+        % Materialize the kernel/grid matrices: LoadResultsFile loads only metadata,
+        % so ImagingKernel/ImageGridAmp and nComponents are empty until this runs
+        % (mirrors panel_surface's UpdateSurfaceData path for the cortex display).
+        if isempty(GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp) && ...
+           isempty(GlobalData.DataSet(iDS).Results(iResult).ImagingKernel)
+            bst_memory('LoadResultsMatrix', iDS, iResult);
+        end
         % Surface associated with the source model.
         SurfaceFile = GlobalData.DataSet(iDS).Results(iResult).SurfaceFile;
         if isempty(SurfaceFile)
