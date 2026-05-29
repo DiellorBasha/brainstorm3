@@ -539,6 +539,8 @@ function UpdateFigureName(hFig)
             else
                 figureName = 'Video';
             end
+        case 'EigenSpectrum'
+            figureName = ['Eigenspectrum: ' figureName];
         otherwise
             error(['Invalid figure type : ', FigureId.Type]);
     end

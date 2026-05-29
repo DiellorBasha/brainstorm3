@@ -458,8 +458,12 @@ function Figures = GetFigureGroups(isSkipMriViewer)
                 if strcmpi(get(dsFigs(iFig).hFigure,'WindowStyle'), 'docked')
                     continue;
                 end
-                % Add figure to the list
-                Figures(iFigureGroups).(['f' dsFigs(iFig).Id.Type]) = [Figures(iFigureGroups).(['f' dsFigs(iFig).Id.Type]), dsFigs(iFig).hFigure];
+                % Add figure to the list (route unregistered figure types to the 'fOther' bucket)
+                fFieldType = ['f' dsFigs(iFig).Id.Type];
+                if ~isfield(Figures, fFieldType)
+                    fFieldType = 'fOther';
+                end
+                Figures(iFigureGroups).(fFieldType) = [Figures(iFigureGroups).(fFieldType), dsFigs(iFig).hFigure];
                 Figures(iFigureGroups).VerticalWeight = 1;
                 Figures(iFigureGroups).nFigures = Figures(iFigureGroups).nFigures + 1;
             end
