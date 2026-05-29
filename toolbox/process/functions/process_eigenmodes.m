@@ -227,11 +227,11 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInt
         end
     end
 
-    % Progress bar
-    bst_progress('start', 'Eigenmodes', 'Computing Laplace-Beltrami eigenmodes...', 0, 100);
+    % Progress bar: the eigensolver gives no progress feedback, so use an
+    % indeterminate (marquee) bar -- the 3-arg 'start' form omits the bounds.
+    bst_progress('start', 'Eigenmodes', 'Computing Laplace-Beltrami eigenmodes...');
 
     % Compute eigenmodes
-    bst_progress('set', 10);
     try
         [Eigenmodes, ~, ~, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, ...
             'nModes',    nModes, ...
@@ -246,7 +246,6 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInt
     end
 
     % Save to surface file
-    bst_progress('set', 90);
     bst_progress('text', 'Saving eigenmodes to surface file...');
     try
         out_tess_eigenmodes(SurfaceFile, Eigenmodes, Vertices, Faces, true);
@@ -256,7 +255,6 @@ function errMsg = Compute(SurfaceFile, nModes, MassType, RemoveDC, Repair, isInt
         return;
     end
 
-    bst_progress('set', 100);
     bst_progress('stop');
 end
 
