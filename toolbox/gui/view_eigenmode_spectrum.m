@@ -162,7 +162,6 @@ function hFig = ViewFigure(ResultsFile)
         setappdata(hFig, 'ResultsFile', ResultsFile);
         setappdata(hFig, 'AxisMode',    'eigenvalue');
         setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
-        setappdata(hFig, 'AvgCache',    []);
         % First plot + show + select.
         UpdateFigurePlot(hFig);
         set(hFig, 'Visible', 'on');
@@ -200,27 +199,31 @@ function hFig = CreateFigure(FigureId)
 end
 
 
-%% ===== GUI: redraw the spectrum at the current global time (lazy) =====
+%% ===== GUI: redraw the eigenspectrum at the current global time =====
+% Mirrors "Display on cortex": project the SINGLE current-time per-vertex scalar
+% field (the same map the cortex colormap shows) onto the eigenmodes. No window
+% average -- that single-column projection is ~4 ms, so stepping is as fast as the
+% cortex display.
 function UpdateFigurePlot(hFig)
     global GlobalData;
-    iDS     = getappdata(hFig, 'iDS');
-    iResult = getappdata(hFig, 'iResult');
-    Eig     = getappdata(hFig, 'Eig');
-    M       = getappdata(hFig, 'MassMatrix');
-    Info    = getappdata(hFig, 'SpecInfo');
+    iDS      = getappdata(hFig, 'iDS');
+    iResult  = getappdata(hFig, 'iResult');
+    Eig      = getappdata(hFig, 'Eig');
+    M        = getappdata(hFig, 'MassMatrix');
+    Info     = getappdata(hFig, 'SpecInfo');
     AxisMode = getappdata(hFig, 'AxisMode');
     if isempty(iDS) || isempty(Eig)
         return;
     end
-    % Realized vertex scalar field at the current time (lazy; valid for raw).
+    % Current cortical activation: per-vertex scalar at the current time index.
     S = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');   % [nVert x 1]
     if isempty(S)
         return;
     end
+    % Project to eigenmodes; power split by hemisphere.
     ThetaCol = bst_eigenmodes_project(Eig, S, M);          % [nModes x 1]
-    pw  = ComputeModalPower(ThetaCol, Info.Component);
-    ax  = GetSpectrumAxis(Info.Values, AxisMode);
-    avg = GetWindowAverageLazy(hFig, iDS, iResult, Eig, M); % [nModes x 1] or [] if unavailable
+    pw   = ComputeModalPower(ThetaCol, Info.Component);
+    ax   = GetSpectrumAxis(Info.Values, AxisMode);
     Comp = Info.Component(:);
     xL = ax.x(Comp == 1);  xR = ax.x(Comp == 2);
     % Draw (collect handles so the legend only labels curves actually present).
@@ -229,16 +232,10 @@ function UpdateFigurePlot(hFig)
     hold(hAxes, 'on');
     hLines = []; labels = {};
     if ~isempty(xL)
-        hLines(end+1) = plot(hAxes, xL, pw.left, '-', 'Color', [0.85 0.2 0.2], 'LineWidth', 1.5); labels{end+1} = 'Left (t)';
-        if ~isempty(avg)
-            hLines(end+1) = plot(hAxes, xL, avg(Comp == 1), '--', 'Color', [0.85 0.2 0.2], 'LineWidth', 0.75); labels{end+1} = 'Left (avg)';
-        end
+        hLines(end+1) = plot(hAxes, xL, pw.left,  '-', 'Color', [0.85 0.2 0.2], 'LineWidth', 1.0); labels{end+1} = 'Left';
     end
     if ~isempty(xR)
-        hLines(end+1) = plot(hAxes, xR, pw.right, '-', 'Color', [0.2 0.3 0.85], 'LineWidth', 1.5); labels{end+1} = 'Right (t)';
-        if ~isempty(avg)
-            hLines(end+1) = plot(hAxes, xR, avg(Comp == 2), '--', 'Color', [0.2 0.3 0.85], 'LineWidth', 0.75); labels{end+1} = 'Right (avg)';
-        end
+        hLines(end+1) = plot(hAxes, xR, pw.right, '-', 'Color', [0.2 0.3 0.85], 'LineWidth', 1.0); labels{end+1} = 'Right';
     end
     hold(hAxes, 'off');
     xlabel(hAxes, ax.label);
@@ -253,33 +250,6 @@ function UpdateFigurePlot(hFig)
     end
     title(hAxes, sprintf('Eigenspectrum  |  t = %s  |  L=%d R=%d modes  |  [e/w axis, arrows step time]', ...
           tStr, numel(xL), numel(xR)), 'Interpreter', 'tex');
-end
-
-
-%% ===== GUI: window-averaged modal power over the loaded page (cached) =====
-function avg = GetWindowAverageLazy(hFig, iDS, iResult, Eig, M)
-    global GlobalData;
-    avg = [];
-    tw = [];
-    if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow.Time)
-        tw = GlobalData.UserTimeWindow.Time;
-    end
-    % Reuse the cached average while the loaded time window is unchanged.
-    cache = getappdata(hFig, 'AvgCache');
-    if ~isempty(cache) && isequal(cache.tw, tw)
-        avg = cache.avg;
-        return;
-    end
-    try
-        Swin = bst_memory('GetResultsValues', iDS, iResult, [], 'UserTimeWindow');   % [nVert x nWin]
-        if ~isempty(Swin)
-            Theta = bst_eigenmodes_project(Eig, Swin, M);
-            avg = GetWindowAverage(Theta, []);
-        end
-    catch
-        avg = [];   % overlay omitted if the window cannot be read
-    end
-    setappdata(hFig, 'AvgCache', struct('tw', tw, 'avg', avg));
 end
 
 
