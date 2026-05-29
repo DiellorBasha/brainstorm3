@@ -1827,6 +1827,10 @@ switch (lower(action))
                             gui_component('MenuItem', jMenuActivations, [], 'No cortex available', IconLoader.ICON_WARNING, [], []);
                         end
                     end
+                    % === VIEW EIGENSPECTRUM ===
+                    if ismember(sStudy.Result(iResult).HeadModelType, {'surface', 'mixed'}) && ~isempty(sSubject) && ~isempty(sSubject.iCortex)
+                        gui_component('MenuItem', jMenuActivations, [], 'View eigenspectrum', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
+                    end
                     % === DISPLAY ON MRI ===
                     % Find anatomy volumes (exclude atlases)
                     if ~isempty(sSubject.Anatomy)
