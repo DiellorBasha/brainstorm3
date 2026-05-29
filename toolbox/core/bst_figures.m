@@ -193,6 +193,9 @@ function [hFig, iFig, isNewFig] = CreateFigure(iDS, FigureId, CreateMode, Constr
             case 'Video'
                 hFig = figure_video('CreateFigure', FigureId);
                 FigHandles = db_template('DisplayHandlesVideo');
+            case 'EigenSpectrum'
+                hFig = view_eigenmode_spectrum('CreateFigure', FigureId);
+                FigHandles = db_template('DisplayHandlesTimeSeries');
             otherwise
                 error(['Invalid figure type : ', FigureId.Type]);
         end
@@ -968,6 +971,8 @@ function FireCurrentTimeChanged(ForceTime)
                     figure_timefreq('CurrentTimeChangedCallback', sFig.hFigure);
                 case 'Spectrum'
                     figure_spectrum('CurrentTimeChangedCallback', sFig.hFigure);
+                case 'EigenSpectrum'
+                    view_eigenmode_spectrum('CurrentTimeChangedCallback', sFig.hFigure);
                 case 'Pac'
                     figure_pac('CurrentTimeChangedCallback', sFig.hFigure);
                 case 'Connect'
