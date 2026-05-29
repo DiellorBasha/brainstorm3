@@ -5,7 +5,6 @@ function varargout = view_eigenmode_spectrum(varargin)
 %         pw   = view_eigenmode_spectrum('ComputeModalPower', ThetaCol, Component)
 %         ax   = view_eigenmode_spectrum('GetSpectrumAxis', Values, mode)
 %         avg  = view_eigenmode_spectrum('GetWindowAverage', Theta, iWin)
-%         Th   = view_eigenmode_spectrum('CollapseProject', Eig, ImageGridAmp, nComp, M)
 %
 % Projects the realized vertex source map onto the surface LBO eigenmodes and
 % displays power per mode (Left/Right hemisphere curves) vs eigenvalue (or
@@ -33,8 +32,7 @@ function varargout = view_eigenmode_spectrum(varargin)
 % Authors: Diellor Basha, 2026
 
 methodNames = {'ComputeModalPower', 'GetSpectrumAxis', 'GetWindowAverage', ...
-               'CollapseProject', 'CreateFigure', 'UpdateFigurePlot', ...
-               'CurrentTimeChangedCallback'};
+               'CreateFigure', 'UpdateFigurePlot', 'CurrentTimeChangedCallback'};
 if (nargin >= 1) && ischar(varargin{1}) && ismember(varargin{1}, methodNames)
     [varargout{1:nargout}] = feval(varargin{:});
     return;
@@ -80,83 +78,60 @@ function avg = GetWindowAverage(Theta, iWin)
 end
 
 
-%% ===== CORE: realized vertex field -> eigenmode coefficients =====
-% ImageGridAmp: [nComp*nVert x nTime] source matrix (kernel already applied).
-% nComp: 1 (constrained, signed) or 2/3 (unconstrained -> rms magnitude per vertex).
-% M: [nVert x nVert] sparse mass matrix for the eigenbasis Eig.Vectors.
-function Theta = CollapseProject(Eig, ImageGridAmp, nComp, M)
-    if (nComp == 3) || (nComp == 2)
-        S = bst_source_orient([], nComp, [], ImageGridAmp, 'rms');   % [nVert x nTime]
-    else
-        S = ImageGridAmp;                                            % [nVert x nTime]
-    end
-    Theta = bst_eigenmodes_project(Eig, S, M);                       % [nModes x nTime]
-end
-
-
-%% ===== IO: load realized source map + eigenmodes -> coefficients =====
-% Returns Theta [nModes x nTime] and Info (Values/Component/CompRank/Time/SurfaceFile).
-% Returns Theta=[] (after a bst_error) when the surface has no eigenmodes.
-function [Theta, Info] = GetActivationCoeffs(ResultsFile)
-    Theta = [];
-    Info  = [];
-    % Realized vertex source map (kernel applied on the fly).
-    ResultsMat = in_bst_results(ResultsFile, 1);
-    if ~isfield(ResultsMat, 'SurfaceFile') || isempty(ResultsMat.SurfaceFile)
-        bst_error('This source file has no associated surface.', 'Eigenspectrum', 0);
-        return;
-    end
-    % Eigenmodes on that surface.
-    [Eig, isComputed] = in_tess_eigenmodes(ResultsMat.SurfaceFile);
-    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
-        bst_error(['No eigenmodes found on this surface.' 10 ...
-                   'Right-click the cortex and run "Compute eigenmodes" first.'], 'Eigenspectrum', 0);
-        return;
-    end
-    % Mass matrix consistent with the stored mass type.
-    % Older eigenmode files may not store MassType; default to barycentric.
-    if ~isfield(Eig, 'MassType') || isempty(Eig.MassType)
-        Eig.MassType = 'barycentric';
-    end
-    sSurf = in_tess_bst(ResultsMat.SurfaceFile);
-    [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
-    % Project. Only surface models with 1 (constrained) or 2/3 (unconstrained)
-    % orientations per vertex are supported; reject anything else (e.g. mixed
-    % head models, nComponents==0) before the projection would error.
-    nComp = ResultsMat.nComponents;
-    nVert = size(Eig.Vectors, 1);
-    if ~ismember(nComp, [1 2 3]) || (size(ResultsMat.ImageGridAmp, 1) ~= nComp * nVert)
-        bst_error(['Eigenspectrum supports surface source models with 1 or 3 ' 10 ...
-                   'orientations per vertex. This result is not compatible ' 10 ...
-                   '(for example, a mixed head model).'], 'Eigenspectrum', 0);
-        return;
-    end
-    Theta = CollapseProject(Eig, ResultsMat.ImageGridAmp, nComp, M);
-    Info = struct('Values',      Eig.Values(:), ...
-                  'Component',   Eig.Component(:), ...
-                  'CompRank',    Eig.CompRank(:), ...
-                  'Time',        ResultsMat.Time, ...
-                  'SurfaceFile', ResultsMat.SurfaceFile);
-end
-
-
 %% ===== GUI: open the spectrum figure registered in the source map's dataset =====
 function hFig = ViewFigure(ResultsFile)
+    global GlobalData;
     hFig = [];
     bst_progress('start', 'Eigenspectrum', 'Loading source activations...');
     try
-        % Coefficients first (fails fast with a friendly error if no eigenmodes).
-        [Theta, Info] = GetActivationCoeffs(ResultsFile);
-        if isempty(Theta)
-            bst_progress('stop');
-            return;
-        end
-        % Load the results into a dataset so the global time cursor spans this file.
-        [iDS, ~] = bst_memory('LoadResultsFile', ResultsFile);
+        % Load the source result into a dataset (kernel link OK, including raw).
+        [iDS, iResult] = bst_memory('LoadResultsFile', ResultsFile);
         if isempty(iDS)
             bst_progress('stop');
             return;
         end
+        % Surface associated with the source model.
+        SurfaceFile = GlobalData.DataSet(iDS).Results(iResult).SurfaceFile;
+        if isempty(SurfaceFile)
+            bst_progress('stop');
+            bst_error('This source file has no associated surface.', 'Eigenspectrum', 0);
+            return;
+        end
+        % Eigenmodes on that surface.
+        [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
+        if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
+            bst_progress('stop');
+            bst_error(['No eigenmodes found on this surface.' 10 ...
+                       'Right-click the cortex and run "Compute eigenmodes" first.'], 'Eigenspectrum', 0);
+            return;
+        end
+        % Older eigenmode files may not store MassType; default to barycentric.
+        if ~isfield(Eig, 'MassType') || isempty(Eig.MassType)
+            Eig.MassType = 'barycentric';
+        end
+        % Reject head models we cannot project (e.g. mixed, nComponents==0).
+        nComp = GlobalData.DataSet(iDS).Results(iResult).nComponents;
+        if ~ismember(nComp, [1 2 3])
+            bst_progress('stop');
+            bst_error(['Eigenspectrum supports surface source models with 1 or 3' 10 ...
+                       'orientations per vertex (not mixed head models).'], 'Eigenspectrum', 0);
+            return;
+        end
+        % Mass matrix consistent with the stored mass type.
+        sSurf = in_tess_bst(SurfaceFile);
+        [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
+        nVert = size(Eig.Vectors, 1);
+        % Probe the current time: confirms the source grid matches the eigenmode surface
+        % AND that the realized (lazy) field is available for this result.
+        Sprobe = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');
+        if isempty(Sprobe) || (size(Sprobe, 1) ~= nVert)
+            bst_progress('stop');
+            bst_error(['The source grid does not match the eigenmode surface' 10 ...
+                       '(expected ' num2str(nVert) ' vertices).'], 'Eigenspectrum', 0);
+            return;
+        end
+        % Static if the result has <= 2 time samples.
+        TimeVector = bst_memory('GetTimeVector', iDS, iResult, 'UserTimeWindow');
         % Create a managed figure of our type, always a fresh one.
         FigureId = db_template('FigureId');
         FigureId.Type     = 'EigenSpectrum';
@@ -167,12 +142,19 @@ function hFig = ViewFigure(ResultsFile)
             bst_progress('stop');
             return;
         end
-        % Stash everything the redraw needs.
-        setappdata(hFig, 'Theta',       Theta);
-        setappdata(hFig, 'SpecInfo',    Info);
+        % Stash what the lazy redraw needs (no precomputed all-time matrix).
+        setappdata(hFig, 'iDS',         iDS);
+        setappdata(hFig, 'iResult',     iResult);
+        setappdata(hFig, 'Eig',         Eig);
+        setappdata(hFig, 'MassMatrix',  M);
+        setappdata(hFig, 'SpecInfo',    struct('Values', Eig.Values(:), ...
+                                               'Component', Eig.Component(:), ...
+                                               'CompRank', Eig.CompRank(:), ...
+                                               'SurfaceFile', SurfaceFile));
         setappdata(hFig, 'ResultsFile', ResultsFile);
         setappdata(hFig, 'AxisMode',    'eigenvalue');
-        setappdata(hFig, 'isStatic',    size(Theta, 2) <= 2);
+        setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
+        setappdata(hFig, 'AvgCache',    []);
         % First plot + show + select.
         UpdateFigurePlot(hFig);
         set(hFig, 'Visible', 'on');
@@ -210,42 +192,45 @@ function hFig = CreateFigure(FigureId)
 end
 
 
-%% ===== GUI: redraw the spectrum at the current global time =====
+%% ===== GUI: redraw the spectrum at the current global time (lazy) =====
 function UpdateFigurePlot(hFig)
     global GlobalData;
-    Theta    = getappdata(hFig, 'Theta');
-    Info     = getappdata(hFig, 'SpecInfo');
+    iDS     = getappdata(hFig, 'iDS');
+    iResult = getappdata(hFig, 'iResult');
+    Eig     = getappdata(hFig, 'Eig');
+    M       = getappdata(hFig, 'MassMatrix');
+    Info    = getappdata(hFig, 'SpecInfo');
     AxisMode = getappdata(hFig, 'AxisMode');
-    if isempty(Theta)
+    if isempty(iDS) || isempty(Eig)
         return;
     end
-    % Current time -> column index.
-    Time = Info.Time;
-    if isempty(GlobalData) || isempty(GlobalData.UserTimeWindow.CurrentTime) || (numel(Time) < 2)
-        iTime = 1;
-    else
-        iTime = bst_closest(GlobalData.UserTimeWindow.CurrentTime, Time);
+    % Realized vertex scalar field at the current time (lazy; valid for raw).
+    S = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');   % [nVert x 1]
+    if isempty(S)
+        return;
     end
-    iTime = max(1, min(iTime, size(Theta, 2)));
-    % Power split + axis + full-window average overlay.
-    pw  = ComputeModalPower(Theta(:, iTime), Info.Component);
+    ThetaCol = bst_eigenmodes_project(Eig, S, M);          % [nModes x 1]
+    pw  = ComputeModalPower(ThetaCol, Info.Component);
     ax  = GetSpectrumAxis(Info.Values, AxisMode);
-    avg = GetWindowAverage(Theta, []);
+    avg = GetWindowAverageLazy(hFig, iDS, iResult, Eig, M); % [nModes x 1] or [] if unavailable
     Comp = Info.Component(:);
     xL = ax.x(Comp == 1);  xR = ax.x(Comp == 2);
-    aL = avg(Comp == 1);   aR = avg(Comp == 2);
     % Draw (collect handles so the legend only labels curves actually present).
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesEigenSpectrum');
     cla(hAxes);
     hold(hAxes, 'on');
     hLines = []; labels = {};
     if ~isempty(xL)
-        hLines(end+1) = plot(hAxes, xL, pw.left, '-',  'Color', [0.85 0.2 0.2], 'LineWidth', 1.5); labels{end+1} = 'Left (t)';
-        hLines(end+1) = plot(hAxes, xL, aL,      '--', 'Color', [0.85 0.2 0.2], 'LineWidth', 0.75); labels{end+1} = 'Left (avg)';
+        hLines(end+1) = plot(hAxes, xL, pw.left, '-', 'Color', [0.85 0.2 0.2], 'LineWidth', 1.5); labels{end+1} = 'Left (t)';
+        if ~isempty(avg)
+            hLines(end+1) = plot(hAxes, xL, avg(Comp == 1), '--', 'Color', [0.85 0.2 0.2], 'LineWidth', 0.75); labels{end+1} = 'Left (avg)';
+        end
     end
     if ~isempty(xR)
-        hLines(end+1) = plot(hAxes, xR, pw.right, '-',  'Color', [0.2 0.3 0.85], 'LineWidth', 1.5); labels{end+1} = 'Right (t)';
-        hLines(end+1) = plot(hAxes, xR, aR,       '--', 'Color', [0.2 0.3 0.85], 'LineWidth', 0.75); labels{end+1} = 'Right (avg)';
+        hLines(end+1) = plot(hAxes, xR, pw.right, '-', 'Color', [0.2 0.3 0.85], 'LineWidth', 1.5); labels{end+1} = 'Right (t)';
+        if ~isempty(avg)
+            hLines(end+1) = plot(hAxes, xR, avg(Comp == 2), '--', 'Color', [0.2 0.3 0.85], 'LineWidth', 0.75); labels{end+1} = 'Right (avg)';
+        end
     end
     hold(hAxes, 'off');
     xlabel(hAxes, ax.label);
@@ -253,13 +238,40 @@ function UpdateFigurePlot(hFig)
     if ~isempty(hLines)
         legend(hAxes, hLines, labels, 'Location', 'northeast');
     end
-    if (numel(Time) >= 1)
-        tStr = sprintf('%1.3f s', Time(iTime));
+    if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
+        tStr = sprintf('%1.3f s', GlobalData.UserTimeWindow.CurrentTime);
     else
         tStr = 'n/a';
     end
     title(hAxes, sprintf('Eigenspectrum  |  t = %s  |  L=%d R=%d modes  |  [e/w axis, arrows step time]', ...
           tStr, numel(xL), numel(xR)), 'Interpreter', 'tex');
+end
+
+
+%% ===== GUI: window-averaged modal power over the loaded page (cached) =====
+function avg = GetWindowAverageLazy(hFig, iDS, iResult, Eig, M)
+    global GlobalData;
+    avg = [];
+    tw = [];
+    if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow.Time)
+        tw = GlobalData.UserTimeWindow.Time;
+    end
+    % Reuse the cached average while the loaded time window is unchanged.
+    cache = getappdata(hFig, 'AvgCache');
+    if ~isempty(cache) && isequal(cache.tw, tw)
+        avg = cache.avg;
+        return;
+    end
+    try
+        Swin = bst_memory('GetResultsValues', iDS, iResult, [], 'UserTimeWindow');   % [nVert x nWin]
+        if ~isempty(Swin)
+            Theta = bst_eigenmodes_project(Eig, Swin, M);
+            avg = GetWindowAverage(Theta, []);
+        end
+    catch
+        avg = [];   % overlay omitted if the window cannot be read
+    end
+    setappdata(hFig, 'AvgCache', struct('tw', tw, 'avg', avg));
 end
 
 
