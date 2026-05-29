@@ -78,3 +78,17 @@ function avg = GetWindowAverage(Theta, iWin)
     end
     avg = mean(abs(Theta(:, iWin)) .^ 2, 2);
 end
+
+
+%% ===== CORE: realized vertex field -> eigenmode coefficients =====
+% ImageGridAmp: [nComp*nVert x nTime] source matrix (kernel already applied).
+% nComp: 1 (constrained, signed) or 2/3 (unconstrained -> rms magnitude per vertex).
+% M: [nVert x nVert] sparse mass matrix for the eigenbasis Eig.Vectors.
+function Theta = CollapseProject(Eig, ImageGridAmp, nComp, M)
+    if (nComp == 3) || (nComp == 2)
+        S = bst_source_orient([], nComp, [], ImageGridAmp, 'rms');   % [nVert x nTime]
+    else
+        S = ImageGridAmp;                                            % [nVert x nTime]
+    end
+    Theta = bst_eigenmodes_project(Eig, S, M);                       % [nModes x nTime]
+end
