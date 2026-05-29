@@ -32,7 +32,8 @@ function varargout = view_eigenmode_spectrum(varargin)
 % Authors: Diellor Basha, 2026
 
 methodNames = {'ComputeModalPower', 'GetSpectrumAxis', 'GetWindowAverage', 'BuildModeSpectrum', ...
-               'CreateFigure', 'UpdateFigurePlot', 'CurrentTimeChangedCallback'};
+               'CreateFigure', 'UpdateFigurePlot', 'CurrentTimeChangedCallback', ...
+               'SetAxisMode', 'SetPowerMode'};
 if (nargin >= 1) && ischar(varargin{1}) && ismember(varargin{1}, methodNames)
     [varargout{1:nargout}] = feval(varargin{:});
     return;
@@ -85,11 +86,27 @@ end
 %   'eigenvalue' -> per-rank eigenvalue (averaged across hemispheres present)
 %   'wavelength' -> 2*pi/sqrt(eigenvalue)
 % Missing (hemisphere lacks a given rank) entries are NaN so the line skips them.
-function spec = BuildModeSpectrum(Info, ThetaCol, xmode)
+% powerMode selects the amplitude shown: 'power' (|theta|^2), 'magnitude' (|theta|),
+% or 'log' (10*log10 power, dB). Default 'power'.
+function spec = BuildModeSpectrum(Info, ThetaCol, xmode, powerMode)
+    if (nargin < 4) || isempty(powerMode)
+        powerMode = 'power';
+    end
     Comp = Info.Component(:);
     Rank = Info.CompRank(:);
     Val  = Info.Values(:);
-    p    = abs(ThetaCol(:)) .^ 2;
+    a    = abs(ThetaCol(:));
+    switch lower(powerMode)
+        case 'power'
+            p = a .^ 2;            spec.ylabel = 'Modal power |\theta_k|^2';
+        case 'magnitude'
+            p = a;                 spec.ylabel = 'Modal magnitude |\theta_k|';
+        case 'log'
+            pw = a .^ 2; pw(pw <= 0) = eps;
+            p = 10 * log10(pw);    spec.ylabel = 'Modal power (dB)';
+        otherwise
+            error('Unknown power mode: %s', powerMode);
+    end
     K    = max(Rank);
     F    = nan(2, K);
     lam  = nan(1, K);
@@ -117,7 +134,16 @@ function spec = BuildModeSpectrum(Info, ThetaCol, xmode)
         otherwise
             error('Unknown x-axis mode: %s', xmode);
     end
-    spec.F         = F;
+    % figure_timeseries requires a finite, ASCENDING x-vector (it sets XLim from the
+    % ends). Drop unusable modes (e.g. wavelength of lambda<=0 -> NaN) and sort
+    % ascending, reordering the power columns to match (wavelength is descending in rank).
+    xv    = spec.x(:)';
+    valid = ~isnan(xv) & ~isinf(xv);
+    xv    = xv(valid);
+    F     = F(:, valid);
+    [xv, iSort] = sort(xv, 'ascend');
+    spec.x = xv;
+    spec.F = F(:, iSort);
     spec.rowLabels = {'Left', 'Right'};
 end
 
@@ -210,6 +236,7 @@ function hFig = ViewFigure(ResultsFile)
                                                'SurfaceFile', SurfaceFile));
         setappdata(hFig, 'ResultsFile', ResultsFile);
         setappdata(hFig, 'AxisMode',    'eigenvalue');
+        setappdata(hFig, 'PowerMode',   'power');
         setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
         % figure_timeseries display state: its engine provides butterfly/column,
         % log/linear scales, gain and zoom buttons; we drive the plotting with our
@@ -306,8 +333,10 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     if isempty(S)
         return;
     end
+    PowerMode = getappdata(hFig, 'PowerMode');
+    if isempty(PowerMode), PowerMode = 'power'; end
     ThetaCol = bst_eigenmodes_project(Eig, S, M);              % [nModes x 1]
-    spec = BuildModeSpectrum(Info, ThetaCol, AxisMode);        % .F [2 x K], .x [1 x K], .label
+    spec = BuildModeSpectrum(Info, ThetaCol, AxisMode, PowerMode);   % .F [2 x K], .x [1 x K], .label, .ylabel
     % The shared x-vector is the mode axis (NOT seconds); store it for figure_timeseries callbacks.
     setappdata(hFig, 'TimeVector', spec.x);
     % Layout from the menu's display mode:
@@ -339,7 +368,7 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
     for k = 1:numel(hAxes)
         xlabel(hAxes(k), spec.label, 'Interpreter', 'tex');
-        ylabel(hAxes(k), 'Modal power |\theta_k|^2');
+        ylabel(hAxes(k), spec.ylabel, 'Interpreter', 'tex');
     end
     % Hide the vertical "current time" cursor: it is positioned in seconds and is
     % meaningless on a mode/eigenvalue axis.
@@ -381,6 +410,20 @@ function UpdateFigurePlot(hFig, isFastUpdate)
 end
 
 
+%% ===== GUI: x-axis mode (eigenvalue/index/wavelength) — from menu or e/k/w keys =====
+function SetAxisMode(hFig, mode)
+    setappdata(hFig, 'AxisMode', mode);
+    UpdateFigurePlot(hFig, 0);
+end
+
+
+%% ===== GUI: amplitude mode (power/magnitude/log) — from the Amplitude menu =====
+function SetPowerMode(hFig, mode)
+    setappdata(hFig, 'PowerMode', mode);
+    UpdateFigurePlot(hFig, 0);
+end
+
+
 %% ===== GUI: global time cursor moved (called by bst_figures FireCurrentTimeChanged) =====
 function CurrentTimeChangedCallback(hFig)
     if getappdata(hFig, 'isStatic')
@@ -394,14 +437,11 @@ end
 function FigureKeyPressedCallback(hFig, ev)
     switch (ev.Key)
         case 'e'
-            setappdata(hFig, 'AxisMode', 'eigenvalue');
-            UpdateFigurePlot(hFig, 0);
+            SetAxisMode(hFig, 'eigenvalue');
         case 'k'
-            setappdata(hFig, 'AxisMode', 'index');
-            UpdateFigurePlot(hFig, 0);
+            SetAxisMode(hFig, 'index');
         case 'w'
-            setappdata(hFig, 'AxisMode', 'wavelength');
-            UpdateFigurePlot(hFig, 0);
+            SetAxisMode(hFig, 'wavelength');
         otherwise
             % Standard shortcuts (arrows = step time, gain, etc.).
             figure_timeseries('FigureKeyPressedCallback', hFig, ev);

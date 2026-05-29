@@ -51,7 +51,14 @@ assert(isequal(spec.x(:)', [1 2 3]), 'index x must be 1..K');
 specE = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'eigenvalue');
 assert(isequal(specE.x(:)', [1 4 9]), 'eigenvalue x must be per-rank lambda');
 specW = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'wavelength');
-assert(max(abs(specW.x(:)' - 2*pi./sqrt([1 4 9]))) < 1e-12, 'wavelength x wrong');
+assert(issorted(specW.x), 'x-vector must be ascending (figure_timeseries requirement)');
+assert(max(abs(sort(specW.x(:)') - sort(2*pi./sqrt([1 4 9])))) < 1e-12, 'wavelength x values wrong');
+% power modes change the y-quantity + label
+specMag = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'index', 'magnitude');
+assert(isequal(specMag.F(1,:), [1 2 3]), 'magnitude = |theta| per rank');   % |1|,|2|,|3|
+assert(~isempty(strfind(specMag.ylabel, 'magnitude')), 'magnitude ylabel');
+specLog = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'index', 'log');
+assert(max(abs(specLog.F(1,:) - 10*log10([1 4 9]))) < 1e-12, 'log = 10*log10(power)');
 
 fprintf('ALL TESTS PASSED: test_view_eigenmode_spectrum_pure\n');
 end

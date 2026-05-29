@@ -2565,10 +2565,41 @@ function DisplayConfigMenu(hFig, jParent)
             jItem = gui_component('CheckBoxMenuItem', jMenu, [], 'Log scale', [], [], @(h,ev)SetScaleModeX(hFig, newMode));
             jItem.setSelected(isSel);
         end
+        % Eigenspectrum: choose the x-axis quantity
+        if strcmpi(FigureId.Type, 'EigenSpectrum')
+            jMenu.addSeparator();
+            curAxis = getappdata(hFig, 'AxisMode');
+            jGrpX  = ButtonGroup();
+            jAxEig = gui_component('RadioMenuItem', jMenu, [], 'Eigenvalue', [], [], @(h,ev)view_eigenmode_spectrum('SetAxisMode', hFig, 'eigenvalue'));
+            jAxIdx = gui_component('RadioMenuItem', jMenu, [], 'Mode index (k)', [], [], @(h,ev)view_eigenmode_spectrum('SetAxisMode', hFig, 'index'));
+            jAxWav = gui_component('RadioMenuItem', jMenu, [], 'Wavelength', [], [], @(h,ev)view_eigenmode_spectrum('SetAxisMode', hFig, 'wavelength'));
+            jGrpX.add(jAxEig); jGrpX.add(jAxIdx); jGrpX.add(jAxWav);
+            switch curAxis
+                case 'eigenvalue', jAxEig.setSelected(1);
+                case 'index',      jAxIdx.setSelected(1);
+                case 'wavelength', jAxWav.setSelected(1);
+            end
+        end
     end
-    
+
     % === Y: AMPLITUDE ===
     jMenu = gui_component('Menu', jPopup, [], 'Amplitude', IconLoader.ICON_Y);
+        % Eigenspectrum: choose the amplitude measure
+        if strcmpi(FigureId.Type, 'EigenSpectrum')
+            curPow = getappdata(hFig, 'PowerMode');
+            if isempty(curPow), curPow = 'power'; end
+            jGrpP = ButtonGroup();
+            jPwP  = gui_component('RadioMenuItem', jMenu, [], 'Power', [], [], @(h,ev)view_eigenmode_spectrum('SetPowerMode', hFig, 'power'));
+            jPwM  = gui_component('RadioMenuItem', jMenu, [], 'Magnitude', [], [], @(h,ev)view_eigenmode_spectrum('SetPowerMode', hFig, 'magnitude'));
+            jPwL  = gui_component('RadioMenuItem', jMenu, [], 'Log (dB)', [], [], @(h,ev)view_eigenmode_spectrum('SetPowerMode', hFig, 'log'));
+            jGrpP.add(jPwP); jGrpP.add(jPwM); jGrpP.add(jPwL);
+            switch curPow
+                case 'power',     jPwP.setSelected(1);
+                case 'magnitude', jPwM.setSelected(1);
+                case 'log',       jPwL.setSelected(1);
+            end
+            jMenu.addSeparator();
+        end
         % Auto-scale amplitude
         if ~isempty(TsInfo) && ~isempty(TsInfo.FileName) && ismember(file_gettype(TsInfo.FileName), {'data','matrix'}) && ~strcmpi(GlobalData.DataSet(iDS).Measures.DataType, 'stat')
             jAutoScale = gui_component('CheckboxMenuItem', jMenu, [], 'Auto-scale amplitude', [], [], @(h,ev)SetAutoScale(hFig, ev.getSource().isSelected()));
@@ -4031,7 +4062,9 @@ function CreateScaleButtons(iDS, iFig)
     end
     h11 = bst_javacomponent(hFig, 'button', [], [], iconFlipY, 'Flip Y axis', @(h,ev)SetProperty(hFig, 'FlipYAxis'), 'ButtonFlipY');
     % Visible / not visible
-    if isRaw
+    % (EigenSpectrum: keep the horizontal zoom buttons even though the dataset is raw --
+    %  they zoom the eigenmode x-axis, like the frequency zoom on a Spectrum figure.)
+    if isRaw && ~strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.Type, 'EigenSpectrum')
         set([h1 h2], 'Visible', 'off');
     end
     if (isempty(TsInfo) || isempty(TsInfo.FileName) || ~ismember(file_gettype(TsInfo.FileName), {'data','matrix'}) || strcmpi(GlobalData.DataSet(iDS).Measures.DataType, 'stat'))
