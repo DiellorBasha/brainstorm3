@@ -38,5 +38,20 @@ avgWin = view_eigenmode_spectrum('GetWindowAverage', T, [1 2]);
 assert(abs(avgWin(1) - mean([1 4]))  < 1e-12, 'row1 window mean wrong');
 assert(abs(avgWin(2) - mean([0 0]))  < 1e-12, 'row2 window mean wrong');
 
+% ---- BuildModeSpectrum: [2 x K] L/R matrix + shared x-vector per axis mode ----
+% Two components (L,R), 3 ranks each. Theta values chosen so power = index is obvious.
+Info = struct('Component', [1;1;1;2;2;2], 'CompRank', [1;2;3;1;2;3], ...
+              'Values',    [1;4;9;1;4;9]);           % lambda = k^2 -> wavelength 2pi/k
+Theta = [1; 2; 3; 4; 5; 6];                          % power = Theta.^2
+spec = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'index');
+assert(isequal(size(spec.F), [2 3]), 'F must be [2 x K]');
+assert(isequal(spec.F(1,:), [1 4 9]),   'Left power per rank wrong');     % 1^2,2^2,3^2
+assert(isequal(spec.F(2,:), [16 25 36]), 'Right power per rank wrong');   % 4^2,5^2,6^2
+assert(isequal(spec.x(:)', [1 2 3]), 'index x must be 1..K');
+specE = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'eigenvalue');
+assert(isequal(specE.x(:)', [1 4 9]), 'eigenvalue x must be per-rank lambda');
+specW = view_eigenmode_spectrum('BuildModeSpectrum', Info, Theta, 'wavelength');
+assert(max(abs(specW.x(:)' - 2*pi./sqrt([1 4 9]))) < 1e-12, 'wavelength x wrong');
+
 fprintf('ALL TESTS PASSED: test_view_eigenmode_spectrum_pure\n');
 end

@@ -31,7 +31,7 @@ function varargout = view_eigenmode_spectrum(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-methodNames = {'ComputeModalPower', 'GetSpectrumAxis', 'GetWindowAverage', ...
+methodNames = {'ComputeModalPower', 'GetSpectrumAxis', 'GetWindowAverage', 'BuildModeSpectrum', ...
                'CreateFigure', 'UpdateFigurePlot', 'CurrentTimeChangedCallback'};
 if (nargin >= 1) && ischar(varargin{1}) && ismember(varargin{1}, methodNames)
     [varargout{1:nargout}] = feval(varargin{:});
@@ -75,6 +75,50 @@ function avg = GetWindowAverage(Theta, iWin)
         iWin = 1:size(Theta, 2);
     end
     avg = mean(abs(Theta(:, iWin)) .^ 2, 2);
+end
+
+
+%% ===== PURE: build the [2 x K] L/R power matrix + shared x-vector for an axis mode =====
+% Maps the per-mode coefficients to a 2-signal (Left/Right) x K-rank layout that the
+% figure_timeseries engine can plot. The x-vector is shared by both hemispheres:
+%   'index'      -> within-hemisphere rank k (exact)
+%   'eigenvalue' -> per-rank eigenvalue (averaged across hemispheres present)
+%   'wavelength' -> 2*pi/sqrt(eigenvalue)
+% Missing (hemisphere lacks a given rank) entries are NaN so the line skips them.
+function spec = BuildModeSpectrum(Info, ThetaCol, xmode)
+    Comp = Info.Component(:);
+    Rank = Info.CompRank(:);
+    Val  = Info.Values(:);
+    p    = abs(ThetaCol(:)) .^ 2;
+    K    = max(Rank);
+    F    = nan(2, K);
+    lam  = nan(1, K);
+    for k = 1:K
+        iL = (Comp == 1) & (Rank == k);
+        iR = (Comp == 2) & (Rank == k);
+        if any(iL), F(1, k) = p(find(iL, 1)); end
+        if any(iR), F(2, k) = p(find(iR, 1)); end
+        lk = Val(Rank == k);
+        if ~isempty(lk), lam(k) = mean(lk); end
+    end
+    switch lower(xmode)
+        case 'index'
+            spec.x     = 1:K;
+            spec.label = 'Mode index k';
+        case 'eigenvalue'
+            spec.x     = lam;
+            spec.label = 'Eigenvalue \lambda';
+        case 'wavelength'
+            w = nan(1, K);
+            pos = (lam > 0);
+            w(pos) = 2 * pi ./ sqrt(lam(pos));
+            spec.x     = w;
+            spec.label = 'Spatial wavelength \approx 2\pi/\surd\lambda';
+        otherwise
+            error('Unknown x-axis mode: %s', xmode);
+    end
+    spec.F         = F;
+    spec.rowLabels = {'Left', 'Right'};
 end
 
 
@@ -167,8 +211,23 @@ function hFig = ViewFigure(ResultsFile)
         setappdata(hFig, 'ResultsFile', ResultsFile);
         setappdata(hFig, 'AxisMode',    'eigenvalue');
         setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
+        % figure_timeseries display state: its engine provides butterfly/column,
+        % log/linear scales, gain and zoom buttons; we drive the plotting with our
+        % per-time modal data over a mode x-axis.
+        TsInfo = db_template('TsInfo');
+        TsInfo.DisplayMode   = 'butterfly';
+        TsInfo.LinesLabels   = {'Left', 'Right'};
+        TsInfo.LinesColor    = {[0.85 0.2 0.2; 0.2 0.3 0.85]};   % 1 x nAxes cell of [nLines x 3]
+        TsInfo.ShowEvents    = 0;
+        TsInfo.AutoScaleY    = 1;
+        TsInfo.DefaultFactor = 1;
+        TsInfo.XScale        = 'linear';
+        TsInfo.YScale        = 'linear';
+        setappdata(hFig, 'TsInfo', TsInfo);
+        % Let bst_figures('ReloadFigures') redraw us (e.g. butterfly<->column toggle).
+        setappdata(hFig, 'ReloadCall', {'view_eigenmode_spectrum', 'UpdateFigurePlot', hFig, 0});
         % First plot + show + select.
-        UpdateFigurePlot(hFig);
+        UpdateFigurePlot(hFig, 0);
         set(hFig, 'Visible', 'on');
         bst_figures('SetCurrentFigure', hFig, '2D');
     catch ME
@@ -198,19 +257,20 @@ function hFig = CreateFigure(FigureId)
         'KeyPressFcn',     @FigureKeyPressedCallback);
     setappdata(hFig, 'FigureId', FigureId);
     setappdata(hFig, 'isStatic', 0);
-    % Single axes for the spectrum curves.
-    axes('Parent', hFig, 'Tag', 'AxesEigenSpectrum', 'Units', 'normalized', ...
-         'Position', [0.12 0.13 0.82 0.78]);
+    % Axes are created by figure_timeseries('PlotFigure') (tagged 'AxesGraph').
 end
 
 
 %% ===== GUI: redraw the eigenspectrum at the current global time =====
 % Mirrors "Display on cortex": project the SINGLE current-time per-vertex scalar
-% field (the same map the cortex colormap shows) onto the eigenmodes. No window
-% average -- that single-column projection is ~4 ms, so stepping is as fast as the
-% cortex display.
-function UpdateFigurePlot(hFig)
+% field onto the eigenmodes, then render through the figure_timeseries engine so
+% the standard buttons (butterfly/column, log/linear scales, gain, zoom) all apply.
+% isFastUpdate=1 just refreshes the line data (fast time-stepping); =0 full replot.
+function UpdateFigurePlot(hFig, isFastUpdate)
     global GlobalData;
+    if (nargin < 2) || isempty(isFastUpdate)
+        isFastUpdate = 0;
+    end
     iDS      = getappdata(hFig, 'iDS');
     iResult  = getappdata(hFig, 'iResult');
     Eig      = getappdata(hFig, 'Eig');
@@ -220,41 +280,49 @@ function UpdateFigurePlot(hFig)
     if isempty(iDS) || isempty(Eig)
         return;
     end
-    % Current cortical activation: per-vertex scalar at the current time index.
+    [~, iFig] = bst_figures('GetFigure', hFig);
+    if isempty(iFig)
+        return;
+    end
+    % Current cortical activation (single time index) -> eigenmode coefficients.
     S = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');   % [nVert x 1]
     if isempty(S)
         return;
     end
-    % Project to eigenmodes; power split by hemisphere.
-    ThetaCol = bst_eigenmodes_project(Eig, S, M);          % [nModes x 1]
-    pw   = ComputeModalPower(ThetaCol, Info.Component);
-    ax   = GetSpectrumAxis(Info.Values, AxisMode);
-    Comp = Info.Component(:);
-    xL = ax.x(Comp == 1);  xR = ax.x(Comp == 2);
-    % Draw (collect handles so the legend only labels curves actually present).
-    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesEigenSpectrum');
-    cla(hAxes);
-    hold(hAxes, 'on');
-    hLines = []; labels = {};
-    if ~isempty(xL)
-        hLines(end+1) = plot(hAxes, xL, pw.left,  '-', 'Color', [0.85 0.2 0.2], 'LineWidth', 1.0); labels{end+1} = 'Left';
+    ThetaCol = bst_eigenmodes_project(Eig, S, M);              % [nModes x 1]
+    spec = BuildModeSpectrum(Info, ThetaCol, AxisMode);        % .F [2 x K], .x [1 x K], .label
+    % The shared x-vector is the mode axis (NOT seconds); store it for figure_timeseries callbacks.
+    setappdata(hFig, 'TimeVector', spec.x);
+    % Render via the figure_timeseries engine (creates axes/lines/scale-buttons on full replot).
+    figure_timeseries('PlotFigure', iDS, iFig, {spec.F}, spec.x, isFastUpdate, []);
+    % Adapt the time-series defaults to a modal spectrum: x-axis label + Y label.
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+    for k = 1:numel(hAxes)
+        xlabel(hAxes(k), spec.label, 'Interpreter', 'tex');
+        ylabel(hAxes(k), 'Modal power |\theta_k|^2');
     end
-    if ~isempty(xR)
-        hLines(end+1) = plot(hAxes, xR, pw.right, '-', 'Color', [0.2 0.3 0.85], 'LineWidth', 1.0); labels{end+1} = 'Right';
+    % Hide the vertical "current time" cursor: it is positioned in seconds and is
+    % meaningless on a mode/eigenvalue axis.
+    Handles = GlobalData.DataSet(iDS).Figure(iFig).Handles;
+    if isfield(Handles, 'hCursor') && ~isempty(Handles.hCursor) && all(ishandle(Handles.hCursor))
+        set(Handles.hCursor, 'Visible', 'off');
     end
-    hold(hAxes, 'off');
-    xlabel(hAxes, ax.label);
-    ylabel(hAxes, 'Modal power |\theta_k|^2');
-    if ~isempty(hLines)
-        legend(hAxes, hLines, labels, 'Location', 'northeast');
+    % Keep only the Left/Right data lines in the legend (exclude cursor/baseline).
+    for h = findobj(hAxes, 'Type', 'line')'
+        if ~strcmp(get(h, 'Tag'), 'DataLine')
+            set(get(get(h, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
+        end
     end
-    if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
+    % Title with the current time + key hints.
+    if ~isempty(GlobalData.UserTimeWindow.CurrentTime)
         tStr = sprintf('%1.3f s', GlobalData.UserTimeWindow.CurrentTime);
     else
         tStr = 'n/a';
     end
-    title(hAxes, sprintf('Eigenspectrum  |  t = %s  |  L=%d R=%d modes  |  [e/w axis, arrows step time]', ...
-          tStr, numel(xL), numel(xR)), 'Interpreter', 'tex');
+    if ~isempty(hAxes)
+        title(hAxes(1), sprintf('Eigenspectrum  |  t = %s  |  x-axis: e=\\lambda  k=index  w=wavelength', tStr), ...
+              'Interpreter', 'tex');
+    end
 end
 
 
@@ -263,20 +331,23 @@ function CurrentTimeChangedCallback(hFig)
     if getappdata(hFig, 'isStatic')
         return;
     end
-    UpdateFigurePlot(hFig);
+    UpdateFigurePlot(hFig, 1);   % fast update: refresh line data only
 end
 
 
-%% ===== GUI: keys — 'e'/'w' toggle axis; arrows step the global time cursor =====
+%% ===== GUI: keys — e/k/w switch x-axis; arrows step the global time cursor =====
 function FigureKeyPressedCallback(hFig, ev)
     global GlobalData;
     switch (ev.Key)
         case 'e'
             setappdata(hFig, 'AxisMode', 'eigenvalue');
-            UpdateFigurePlot(hFig);
+            UpdateFigurePlot(hFig, 0);
+        case 'k'
+            setappdata(hFig, 'AxisMode', 'index');
+            UpdateFigurePlot(hFig, 0);
         case 'w'
             setappdata(hFig, 'AxisMode', 'wavelength');
-            UpdateFigurePlot(hFig);
+            UpdateFigurePlot(hFig, 0);
         case {'leftarrow', 'rightarrow', 'uparrow', 'downarrow', 'pageup', 'pagedown'}
             if isempty(GlobalData) || isempty(GlobalData.UserTimeWindow.SamplingRate)
                 return;
