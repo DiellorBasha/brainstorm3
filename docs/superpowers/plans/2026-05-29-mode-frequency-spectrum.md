@@ -27,7 +27,7 @@
 - `toolbox/process/functions/process_eigenmodes_freq.m` — **new, shared engine** (no `GetDescription`, not in the menu). Exposes `Run(sProcess, sInputs, Method)` plus a **pure** `Compute(...)` subfunction (the spectral core, DB-free and unit-testable) and the raw/imported read helpers.
 - `toolbox/process/functions/process_eigenmodes_psd.m` — **new, listed process.** PSD option panel; delegates to the engine.
 - `toolbox/process/functions/process_eigenmodes_fft.m` — **new, listed process.** FFT option panel; delegates to the engine.
-- `dev/tests/test_bst_eigenmodes_modekernel.m` — **new.** Pure unit test for the helper.
+- `dev/tests/test_bst_eigenmodes_modekernel_pure.m` — **new.** Pure unit test for the helper.
 - `dev/tests/test_eigenmodes_freq_compute.m` — **new.** Pure test for the engine's `Compute` (shape, freqs, row labels, and kernel-swap ≡ project-first parity incl. bad segments).
 - `dev/tests/test_eigenmodes_freq_processes.m` — **new.** Validates both processes' `GetDescription`/`FormatComment` (no DB).
 
@@ -37,11 +37,11 @@
 
 **Files:**
 - Create: `toolbox/math/bst_eigenmodes_modekernel.m`
-- Test: `dev/tests/test_bst_eigenmodes_modekernel.m`
+- Test: `dev/tests/test_bst_eigenmodes_modekernel_pure.m`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `dev/tests/test_bst_eigenmodes_modekernel.m`:
+Create `dev/tests/test_bst_eigenmodes_modekernel_pure.m`:
 
 ```matlab
 function test_bst_eigenmodes_modekernel
@@ -85,7 +85,7 @@ end
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run via MATLAB MCP `run_matlab_test_file` on `dev/tests/test_bst_eigenmodes_modekernel.m`.
+Run via MATLAB MCP `run_matlab_test_file` on `dev/tests/test_bst_eigenmodes_modekernel_pure.m`.
 Expected: FAIL — `Unrecognized function or variable 'bst_eigenmodes_modekernel'` (or "not found").
 
 - [ ] **Step 3: Write the implementation**
@@ -158,13 +158,13 @@ end
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run `dev/tests/test_bst_eigenmodes_modekernel.m` via MATLAB MCP.
+Run `dev/tests/test_bst_eigenmodes_modekernel_pure.m` via MATLAB MCP.
 Expected: PASS — prints `ALL TESTS PASSED: test_bst_eigenmodes_modekernel`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add toolbox/math/bst_eigenmodes_modekernel.m dev/tests/test_bst_eigenmodes_modekernel.m
+git add toolbox/math/bst_eigenmodes_modekernel.m dev/tests/test_bst_eigenmodes_modekernel_pure.m
 git commit -m "Mode-frequency: add bst_eigenmodes_modekernel (Phi'*M*Kernel) + test
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
@@ -534,7 +534,7 @@ Expected: PASS — prints `ALL TESTS PASSED: test_eigenmodes_freq_compute`.
 
 - [ ] **Step 5: Run the Task 1 test again to confirm no regression**
 
-Run `dev/tests/test_bst_eigenmodes_modekernel.m`.
+Run `dev/tests/test_bst_eigenmodes_modekernel_pure.m`.
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -839,7 +839,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Run all four mode-frequency tests**
 
 Run each via MATLAB MCP and confirm each prints its `ALL TESTS PASSED` line:
-- `dev/tests/test_bst_eigenmodes_modekernel.m`
+- `dev/tests/test_bst_eigenmodes_modekernel_pure.m`
 - `dev/tests/test_eigenmodes_freq_compute.m`
 - `dev/tests/test_eigenmodes_freq_processes.m`
 
