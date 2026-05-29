@@ -954,8 +954,10 @@ function FigureZoomLinked(hFig, direction, Factor)
     switch (FigureId.Type)
         case {'DataTimeSeries', 'ResultsTimeSeries'}
             hAllFigs = bst_figures('GetFiguresByType', {'DataTimeSeries', 'ResultsTimeSeries'});
-        case 'Spectrum'
-            hAllFigs = bst_figures('GetFiguresByType', 'Spectrum');
+        case {'Spectrum', 'EigenSpectrum'}
+            hAllFigs = bst_figures('GetFiguresByType', FigureId.Type);
+        otherwise
+            hAllFigs = hFig;
     end
     % Place the input figure in first
     hAllFigs(hAllFigs == hFig) = [];
