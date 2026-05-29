@@ -1,177 +1,141 @@
-# Eigenmode Spectrum: On-the-fly Modal Power Spectrum via an Additive ModeKernel — Design
+# Eigenspectrum of Source Activations: Modal Power-Spectrum Viewer — Design
 
 **Date:** 2026-05-29
-**Status:** Approved design pending spec review
+**Status:** Approved design pending spec review (revised after scope clarification)
 **Follows:** `2026-05-28-eigenmode-perhemisphere-viewer-r2-design.md` (eigenmode compute + viewer, shipped on `feature/eigenmode-context-menus`)
 
 ## Background
 
-The scalar LBO eigenmode pipeline can now compute per-hemisphere eigenmodes on a
-cortex and view them. The next scaffolding step is an **eigenmode spectrum**: take
-Brainstorm's *default* source mapping (min-norm / dSPM / sLORETA — explicitly **not**
-the team's eigenmode source-mapping work), express the source activity in the
-eigenbasis, and view how the source map's energy distributes across spatial
-eigenmodes. This is the spatial analogue of the existing FFT/PSD spectrum and the
-foundation for later, richer eigenmode-based analysis (a 2D mode × temporal-frequency
-map, and eventually eigenmode source mapping).
+Two eigenmode-based capabilities are being built in parallel and must stay **strictly
+isolated**:
 
-### Key facts that shaped the design (from codebase exploration)
+1. **Eigenspectrum analysis (this increment)** — *general and source-agnostic*. Given
+   **any vertex-mapped scalar field** `S [nVert × nTime]`, it views how that field's
+   energy distributes across the cortex's spatial LBO eigenmodes (a spatial spectrum,
+   the analogue of the temporal FFT/PSD). It owns **no kernel** and does **not** modify
+   the results structure. It simply transforms a realized vertex field into eigenmode
+   coefficients and plots the modal power spectrum.
 
-- **Canonical on-the-fly source mapping.** A *kernel-link* results file stores
-  `ImagingKernel [nVertices·nComp × nChannels]` plus a `DataFile` pointer to the
-  recordings; source maps are reconstructed lazily as
-  `ImageGridAmp = ImagingKernel · F(GoodChannel,:)` (`in_bst_results`, LoadFull=1).
-  The global time cursor and all stepping/analysis machinery operate on this.
-- **The eigenmode projection is M-weighted.** For an M-orthonormal eigenbasis
-  `Φ [nVert × K]`, the coefficients of a vertex field `S` are `Θ = Φ'·M·S`
-  (`bst_eigenmodes_project`). The existing eigenmode processes already build the
-  mass matrix `M` consistent with `Eigenmodes.MassType`.
-- **Linearity holds only for constrained sources.** For `nComponents == 1`
-  (one scalar per vertex), `K_vertex` is `[nVert × nCh]` and a single linear
-  transform `ModeKernel = Φ'·M·K_vertex [K × nCh]` is exact. For unconstrained
-  sources the orientation collapse (a norm) is nonlinear and cannot be folded into
-  one matrix — **deferred** to a later increment (planned: a globally consistent
-  tangent reference frame via the vector heat method).
-- **The results structure is extensible.** `db_template('resultsmat')` defines the
-  results fields; downstream code reads specific fields and ignores unknown ones, so
-  an additive optional field is safe.
+2. **Manifold-harmonics source mapping (separate, already implemented)** — a *new kind
+   of inverse* producing results with an `[nEigenmodes × nChannels]` kernel. That work
+   is tested and viewed later, on its own. **It is out of scope here.**
+
+This round delivers (1), scoped to its first and most useful input: **source
+activations** (dSPM / sLORETA / MNE / etc.). Brainstorm's existing "Cortical
+activations → Display on cortex" path already realizes the vertex-mapped scalar field
+and provides the global time cursor we step through; this feature adds the eigenmode
+transform of that same field and a dedicated spectrum view. Other vertex-mapped scalars
+(PET projected to the surface, anatomical overlays, …) are deliberately deferred — the
+projection helper is written source-agnostic so they slot in later with no rework.
+
+### Reused building blocks (confirmed against the codebase)
+
+- **Realized vertex field.** `in_bst_results(ResultsFile, 1)` returns `ImageGridAmp`
+  by applying the shared kernel on the fly (`ImagingKernel · F(GoodChannel,:)`), exactly
+  as cortical display does. For unconstrained models (`nComponents == 3`),
+  `bst_source_orient([], 3, [], ImageGridAmp, 'rms')` collapses orientations to a scalar
+  `[nVert × nTime]` — the same magnitude shown on the cortex.
+- **The eigenmode projection.** `bst_eigenmodes_project(Eigenmodes, Data, MassMatrix)`
+  returns `Coeffs [K × nTime] = Φ'·(M·Data)` — the M-weighted projection. Already
+  unit-tested (`test_eigenmodes_project_pure.m`).
+- **The mass matrix.** `tess_laplacian(Vertices, Faces, 'MassType', MassType)` returns
+  `[L, M]`; we rebuild `M` consistent with `Eigenmodes.MassType` at view time.
+- **Eigenmodes.** `in_tess_eigenmodes(SurfaceFile)` → `Φ`, `Values (λ)`, `Component`
+  (1 = Left, 2 = Right), `CompRank`, `MassType`, `isComputed`.
 
 ## Goals
 
-1. A **one-shot transform** that turns an existing constrained source kernel into an
-   eigenmode kernel `ModeKernel [K × nChannels]`, stored **additively** on the
-   results structure (leaving `ImagingKernel` untouched).
-2. A dedicated **modal power-spectrum viewer**: power per mode vs **eigenvalue**
-   (toggle to spatial wavelength), **left/right hemispheres as separate curves**,
-   with **time stepping** (driven by Brainstorm's global time cursor) **and** a
-   **window-averaged overlay**.
-3. Maximal reuse of the canonical on-the-fly source-mapping machinery; no breakage of
-   any downstream consumer of `ImagingKernel`.
+1. A **pure transform** of a realized vertex scalar field into eigenmode coefficients,
+   handling both constrained (signed scalar) and unconstrained (norm-collapsed) sources.
+2. A dedicated **modal power-spectrum viewer**: power per mode vs **eigenvalue** (toggle
+   to spatial wavelength), **left/right hemispheres as separate curves**, **time
+   stepping** driven by Brainstorm's global time cursor, **and** a **window-averaged
+   overlay**.
+3. Maximal reuse of existing machinery; **no** results-structure change, **no** kernel,
+   no breakage of any existing workflow.
 
 ## Design
 
-### A. Storage — additive `ModeKernel` on the results structure
+### A. Acquire the realized vertex scalar field (reuse)
 
-The eigenmode kernel is stored **alongside** the standard imaging kernel in the same
-(shared kernel-link) results file:
+The viewer obtains the vertex field the same way the cortex display does:
 
-- `ImagingKernel [nVert × nChannels]` — **unchanged**; continues to power all existing
-  vertex-space source visualizations, scouts, stats, exports.
-- `ModeKernel [K × nChannels]` — **new**; `ModeKernel = Φ'·M·ImagingKernel`. Because it
-  is built from the same `ImagingKernel`, `Θ = ModeKernel·F` is provably the M-weighted
-  projection of the default source map `S = ImagingKernel·F` (faithfulness guarantee).
-- `ModeInfo` — **new** companion snapshot captured at transform time so the viewer is
-  self-contained and immune to a later surface recompute changing `K`/ordering:
-  - `.Values [K×1]` — eigenvalues `λ_k` (ascending within each component)
-  - `.Component [K×1]` — hemisphere/component id per mode (1 = Left, 2 = Right)
-  - `.CompRank [K×1]` — within-component rank
-  - `.nComponents` — number of **mesh** connected components (hemispheres), typically 2
-    (distinct from the results file's source-orientation `nComponents`, which the
-    transform requires to be 1)
-  - `.SurfaceFile`, `.MassType` — provenance
-  - `.SourceMethod` — the source method that produced `ImagingKernel` (provenance)
+1. `ResultsMat = in_bst_results(ResultsFile, 1)` → `ImageGridAmp`, `nComponents`,
+   `SurfaceFile`, `Time`.
+2. If `nComponents == 3` (unconstrained): `S = bst_source_orient([], 3, [],
+   ImageGridAmp, 'rms')` → `[nVert × nTime]` scalar (non-negative magnitude). If
+   `nComponents == 1` (constrained): `S = ImageGridAmp` (signed `[nVert × nTime]`).
+3. `[Eig, isComputed] = in_tess_eigenmodes(SurfaceFile)`; **guard `isComputed`**
+   (`bst_error('Run "Compute eigenmodes" on this surface first.')` and return).
+4. Load the surface (`Vertices`, `Faces`), build `M` via
+   `tess_laplacian(Vertices, Faces, 'MassType', Eig.MassType)` (the `M` output only).
 
-`ModeKernel` and `ModeInfo` are registered as optional fields (default `[]`) in
-`db_template('resultsmat')` so they survive any re-save and are documented. Column
-alignment of `ModeKernel` matches `ImagingKernel` (same `GoodChannel`), so the same
-`F(GoodChannel,:)` selection applies.
-
-The node remains an ordinary source-results node (it still has `ImagingKernel`), so it
-keeps all its existing menus and **additionally** offers "Eigenmode spectrum" when
-`ModeKernel` is present. No tree gating is needed to suppress cortical views.
-
-### B. The transform — `process_eigenmodes_kernel.m` + pure core
-
-**Pure core** `toolbox/math/bst_eigenmode_kernel.m`:
+### B. Transform to eigenmode coefficients (reuse + thin wrapper)
 
 ```
-ModeKernel = bst_eigenmode_kernel(Phi, M, Kvertex)
-  Phi      [nVert × K]   M-orthonormal eigenmodes
-  M        [nVert × nVert] sparse mass matrix
-  Kvertex  [nVert × nCh] constrained imaging kernel
-  ->
-  ModeKernel [K × nCh] = Phi' * (M * Kvertex)
+Theta = bst_eigenmodes_project(Eig, S, M);     % [K x nTime] = Phi' * (M * S)
 ```
 
-Headlessly testable; no I/O.
-
-**`ComputeInteractive(iStudy, ResultsFile)`** (mirrors the R2 idiom):
-
-1. Load the results link (`ImagingKernel`, `GoodChannel`, `SurfaceFile`, `DataFile`,
-   `nComponents`, source method).
-2. **Guard `nComponents == 1`** (constrained). Otherwise `bst_error` naming the planned
-   unconstrained support and return (no-op).
-3. Load eigenmodes from `SurfaceFile` (`in_tess_eigenmodes` → `Φ`, `Values`,
-   `Component`, `CompRank`, `nComponents_mesh`, `MassType`). **Guard `isComputed`**;
-   otherwise `bst_error('Run "Compute eigenmodes" first.')` and return.
-4. Build the mass matrix `M` from the surface, consistent with `MassType`, via the
-   same mass-matrix routine the existing eigenmode processes use. *(Implementation
-   note for the plan: if that routine is currently inline in `tess_eigenmodes`, expose
-   a small reusable helper rather than duplicating it.)*
-5. `ModeKernel = bst_eigenmode_kernel(Φ, M, ImagingKernel)`.
-6. Write `ModeKernel` + `ModeInfo` into the results file (additive), save, and
-   `db_reload_studies` so the new capability appears.
-
-If `ModeKernel` already exists on the file, confirm overwrite (decline → no-op).
+A thin wrapper `GetActivationCoeffs(ResultsFile)` performs A+B and returns
+`Theta [K × nTime]` plus the metadata the viewer needs (`Values`, `Component`,
+`CompRank`, `Time`). This keeps the GUI viewer thin and the data path headlessly
+testable. No coefficients are persisted (transient view).
 
 ### C. The viewer — `toolbox/gui/view_eigenmode_spectrum.m`
 
 `hFig = view_eigenmode_spectrum(ResultsFile)`:
 
-1. Load `ModeKernel` + `ModeInfo` from the results file; if absent → `bst_error`
-   directing to run the transform.
-2. Load the linked recordings once and **precompute** `Θ = ModeKernel · F(GoodChannel,:)`
-   `[K × nTime]` (mirrors how kernel-link source figures realize `ImageGridAmp` on
-   open — responsive stepping with no per-step matmul).
-3. Create a Brainstorm-managed figure **registered with the recordings dataset**, so
-   the **global time cursor drives it** (the same time-sync mechanism source/time-series
-   figures use; cf. how `figure_timeseries`/`figure_3d` receive global time updates).
-   On each time change, redraw the spectrum at the current sample.
-4. Render, per current time `t`:
-   - power per mode `p_k = |θ_k(t)|²`, split by `ModeInfo.Component` into **Left** and
-     **Right** curves;
-   - x-axis = eigenvalue `λ_k` (`ModeInfo.Values`), with a toggle to spatial wavelength
-     `≈ 2π/√λ` (`λ ≤ 0` → omitted/"n/a");
-   - a **window-averaged overlay** `mean_t |θ_k|²` over the selected time window
-     (dashed), updated when the window changes (defaults to the full loaded time range;
-     follows the time panel's current selection when one is active).
-5. Legend: current time, window, per-hemisphere mode counts; figure title hints at
-   ←/→ stepping and the eigenvalue/wavelength toggle. Guard all-zero/degenerate scaling.
+1. Compute `Theta [K × nTime]` and metadata via `GetActivationCoeffs` (§A+B). On any
+   failed guard, `bst_error` and return `[]`.
+2. Create a Brainstorm-managed figure **registered with the results/recordings dataset**,
+   so the **global time cursor drives it** (same time-sync mechanism source/time-series
+   figures use; cf. how `figure_timeseries`/`figure_3d` receive global time updates). On
+   each time change, redraw the spectrum at the current sample — no recomputation
+   (`Theta` is precomputed once).
+3. Render, per current time `t`:
+   - power per mode `p_k = |θ_k(t)|²`, split by `Component` into **Left** (Component 1)
+     and **Right** (Component 2) curves;
+   - x-axis = eigenvalue `λ_k` (`Values`), with a toggle to spatial wavelength
+     `≈ 2π/√λ` (`λ ≤ 0` → omitted / "n/a");
+   - a **window-averaged overlay** `mean_t |θ_k|²` (dashed), defaulting to the full
+     loaded time range and following the time panel's current selection when one is
+     active.
+4. Legend: current time, averaging window, per-hemisphere mode counts; figure title
+   hints at ←/→ stepping and the eigenvalue/wavelength toggle. Guard all-zero /
+   degenerate axis scaling.
 
 **Pure helpers (headlessly testable):**
 
 - `GetModalPower(ThetaCol, Component)` → `struct(.left, .right)` power vectors (the
   component split + magnitude-squared).
-- `GetSpectrumAxis(Values, mode)` → `struct(.x, .label)` for `mode ∈ {'eigenvalue','wavelength'}`.
+- `GetSpectrumAxis(Values, mode)` → `struct(.x, .label)` for
+  `mode ∈ {'eigenvalue','wavelength'}` (`λ ≤ 0` handled).
 - `GetWindowAverage(Theta, iWin)` → mean power per mode over the sample window.
 
-### D. Integration (entry points) — `tree_callbacks.m`
+### D. Integration (entry point) — `tree_callbacks.m`
 
-On a **source-results** node that has an `ImagingKernel` and a constrained model
-(`nComponents == 1`), add (gated by `~bst_get('ReadOnly')` for the transform path):
-
-- **"Eigenmode spectrum"** — if the file already has `ModeKernel`, call
-  `view_eigenmode_spectrum(ResultsFile)`; otherwise call
-  `process_eigenmodes_kernel('ComputeInteractive', iStudy, ResultsFile)` (which persists
-  `ModeKernel`) and then open the viewer. A single consolidated item, transform-if-needed
-  then view (mirrors R2's compute-then-auto-open).
+On a **source-results** node (a `'results'`/source node with an `ImagingKernel` or
+`ImageGridAmp`), add a **"View eigenspectrum"** item (always enabled; works read-only)
+that calls `view_eigenmode_spectrum(ResultsFile)`. If the surface has no eigenmodes, the
+viewer shows the friendly error (so the menu build does not read the surface on every
+right-click). The node keeps all its existing menus unchanged; this is purely additive.
 
 ## Data flow
 
 ```
-[default CONSTRAINED source kernel link]   (existing; ImagingKernel [nVert×nCh])
-        │  right-click → "Eigenmode spectrum"
+[source results node]  (dSPM/sLORETA/... ; kernel-link or full)
+        │  right-click → "View eigenspectrum"
         ▼
-ComputeInteractive (if ModeKernel absent):
-   load ImagingKernel, GoodChannel, SurfaceFile, DataFile, nComponents(==1 guard)
-   load Φ, Values, Component, CompRank from SurfaceFile (isComputed guard)
-   build M per MassType
-   ModeKernel = Φ' · (M · ImagingKernel)          [K × nCh]
-   write ModeKernel + ModeInfo into results file; db_reload_studies
+GetActivationCoeffs(ResultsFile):
+   S = in_bst_results(LoadFull=1).ImageGridAmp
+       (nComponents==3 → bst_source_orient 'rms' → [nVert×nTime] scalar;
+        nComponents==1 → signed [nVert×nTime])
+   [Eig,isComputed] = in_tess_eigenmodes(SurfaceFile)        (isComputed guard)
+   [~,M] = tess_laplacian(V, F, 'MassType', Eig.MassType)
+   Theta = bst_eigenmodes_project(Eig, S, M)                 [K × nTime]
         ▼
 view_eigenmode_spectrum:
-   precompute Θ = ModeKernel · F(GoodChannel,:)    [K × nTime]
-   register figure with recordings dataset (global time cursor drives it)
+   register figure with dataset (global time cursor drives it)
    at time t:  p_k = |θ_k(t)|² ; x = λ_k (toggle wavelength)
                curves: Left (Component 1) / Right (Component 2)
                + dashed window-average overlay mean_t |θ_k|²
@@ -180,13 +144,10 @@ view_eigenmode_spectrum:
 
 ## Error handling
 
-- No eigenmodes on the surface → `bst_error` → "Run Compute eigenmodes first."
-- Unconstrained kernel (`nComponents ≠ 1`) → `bst_error` naming the planned unconstrained
-  (vector-heat tangent-frame) support; no-op.
-- Results file without `ImagingKernel`/`DataFile` (not a kernel link) → `bst_error`.
-- `ModeKernel` already present → overwrite confirm; decline → no-op.
-- Viewer on a file lacking `ModeKernel` → `bst_error` directing to the transform.
+- Surface has no eigenmodes → `bst_error` → "Run Compute eigenmodes on this surface first."
+- Results file not loadable as a vertex field / no `SurfaceFile` → `bst_error`.
 - Degenerate (all-zero) power at a time/window → guarded axis scaling.
+- `λ ≤ 0` for the wavelength axis → that mode omitted / shown as "n/a".
 
 ## Testing strategy
 
@@ -194,53 +155,47 @@ Repo idiom: `dev/tests/*.m` printing `ALL TESTS PASSED`, run via the MATLAB MCP
 `evaluate_matlab_code` (not `run_matlab_test_file`); prefix `rng('default')` if the
 session is in legacy-RNG mode.
 
-1. **`test_eigenmode_kernel_pure.m`** (new): on a small synthetic mesh + eigenbasis +
-   random `Kvertex`, assert (a) dimensions `[K × nCh]`; (b) associativity
-   `ModeKernel·F == Φ'·M·(Kvertex·F)`; (c) M-orthonormality identity — feeding a
-   `Kvertex` whose single column is a pure eigenmode field yields a unit coefficient at
-   that mode and ≈0 elsewhere.
-2. **`test_view_eigenmode_spectrum_pure.m`** (new): `GetModalPower` L/R split and
+1. **`test_view_eigenmode_spectrum_pure.m`** (new): `GetModalPower` L/R split and
    magnitude-squared; `GetSpectrumAxis` eigenvalue vs wavelength (incl. `λ ≤ 0`
    handling); `GetWindowAverage` equals the manual mean over a window.
-3. **`test_eigenmode_kernel_transform.m`** (new, in-memory integration): build a tiny
-   synthetic results struct (`ImagingKernel`, `GoodChannel`, `nComponents=1`) + a
-   synthetic recordings matrix; run the transform core; assert `Θ = ModeKernel·F` equals
-   the projected default source map and that `ModeInfo` carries correct `Values`/`Component`.
-4. **Downstream regression:** re-run the existing eigenmode suite
+2. **`test_eigenmode_spectrum_acquire.m`** (new): on a small synthetic mesh with computed
+   eigenmodes + mass matrix, assert (a) a **constrained** scalar field that *is* a pure
+   eigenmode projects to a unit coefficient at that mode and ≈0 elsewhere; (b) an
+   **unconstrained** `[3·nVert × nTime]` field is norm-collapsed then projected with the
+   correct `[K × nTime]` shape and matches the manual `Φ'·M·rms(·)`. Validates the
+   reused acquire+project composition end-to-end (no GUI).
+3. **Downstream regression:** re-run the existing eigenmode suite
    (`test_eigenmodes_*_pure`, `test_io_eigenmodes_roundtrip`,
    `test_eigenmodes_perhemisphere`, `test_eigenmodes_manifold_gate`, and the
-   `process_eigenmodes_*` option tests) — confirm green.
-5. **Interactive (user):** right-click constrained source result → "Eigenmode spectrum"
-   transforms (first time) and opens; L/R curves update live as the time cursor steps;
-   the window-averaged overlay; the eigenvalue/wavelength toggle; the unconstrained and
-   no-eigenmodes friendly errors.
+   `process_eigenmodes_*` option tests) — confirm green (this increment adds no changes
+   to those paths, so they must remain untouched).
+4. **Interactive (user):** right-click a source result → "View eigenspectrum" opens; L/R
+   curves update live as the global time cursor steps; the window-averaged overlay; the
+   eigenvalue/wavelength toggle; the no-eigenmodes friendly error; both a constrained and
+   an unconstrained source model.
 
 ## Downstream impact & migration
 
-`ImagingKernel` is untouched, so existing source workflows are unaffected. `ModeKernel`
-is purely additive and small (`K·nCh`, e.g. 600×300 ≈ 1.4 MB vs the ~36 MB imaging
-kernel). Older files without `ModeKernel` simply lack the "Eigenmode spectrum" capability
-until the transform is run.
+None. No file format, results structure, or existing process is modified. The feature is
+a transient viewer plus one additive menu item. Source maps without computed surface
+eigenmodes simply show a friendly error pointing to Compute.
 
 ## Out of scope (YAGNI)
 
-- **Unconstrained sources** — deferred to a later increment (globally consistent tangent
-  frame via the vector heat method).
-- **The 2D joint map (mode × temporal frequency)** — deferred, but kept nearly free:
-  the same `ModeKernel·F` coefficient stream can later feed the existing PSD/FFT path to
-  produce a `[K × nFreqs]` `timefreq` rendered by `figure_timefreq`.
-- **Eigenmode → cortex reconstruction (`Φ·Θ`) as a first-class inverse type** — the
-  Option-B "ModeKernel-in-ImagingKernel + on-the-fly inversion" design; revisited when
-  the eigenmode source-mapping work matures (`ModeKernel` is forward-compatible with it).
-- **Surface/source types beyond constrained cortex** for the menu.
+- **Manifold-harmonics source mapping** (the `[nEigenmodes × nChannels]` kernel / new
+  inverse type) — a separate, already-implemented method, tested and viewed later.
+- **Other vertex-mapped scalars** (PET-on-surface, anatomical overlays) — the projection
+  helper is source-agnostic, so these are a later menu-surface extension, not a redesign.
+- **The 2D joint map (mode × temporal frequency)** — deferred; the same `Theta [K×nTime]`
+  coefficient stream can later feed the existing PSD/FFT path to produce a `[K × nFreqs]`
+  `timefreq` rendered by `figure_timefreq`.
+- **Persisting coefficients** — the view is transient; persistence is added only if/when
+  the 2D map or batch analysis needs it.
 
 ## Files touched
 
-- `toolbox/math/bst_eigenmode_kernel.m` — **new** pure transform core.
-- `toolbox/process/functions/process_eigenmodes_kernel.m` — **new** `ComputeInteractive`
-  + thin wrapper around the core; writes `ModeKernel`/`ModeInfo`.
-- `toolbox/gui/view_eigenmode_spectrum.m` — **new** viewer + pure helpers.
-- `toolbox/db/db_template.m` — add optional `ModeKernel`/`ModeInfo` to `resultsmat`.
-- `toolbox/tree/tree_callbacks.m` — "Eigenmode spectrum" item on constrained source-results nodes.
-- `dev/tests/test_eigenmode_kernel_pure.m` (new); `dev/tests/test_view_eigenmode_spectrum_pure.m`
-  (new); `dev/tests/test_eigenmode_kernel_transform.m` (new).
+- `toolbox/gui/view_eigenmode_spectrum.m` — **new** viewer, `GetActivationCoeffs`
+  wrapper, and pure render helpers.
+- `toolbox/tree/tree_callbacks.m` — "View eigenspectrum" item on source-results nodes.
+- `dev/tests/test_view_eigenmode_spectrum_pure.m` (new);
+  `dev/tests/test_eigenmode_spectrum_acquire.m` (new).
