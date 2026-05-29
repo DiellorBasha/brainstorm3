@@ -30,6 +30,27 @@ the matrix to `bst_timefreq` exactly the way the existing scout/cluster path doe
 The output is a standard timefreq/spectrum file that opens in Brainstorm's existing
 `figure_spectrum` line viewer with no custom display code this round.
 
+**Self-contained — no edits to shared/core files** (`bst_timefreq`, `bst_psd`,
+`process_psd`, `process_fft` are reused unchanged). This keeps the upstream-merge
+surface minimal, consistent with the codebase's "add a new `process_eigenmodes_*`"
+pattern.
+
+### Why this reuse is mathematically exact (verified in code)
+
+For a *source* input, `bst_timefreq` already does read-window → (kernel) → Welch/FFT
+(`bst_timefreq.m:346‑380`, calling `bst_psd` at 532/543). Crucially, `bst_psd`
+applies the imaging kernel **after** the FFT, in the frequency domain
+(`bst_psd.m:157‑158`: `TFwin = ImagingKernel * TFwin`, *then* power at 163). This is
+valid because the FFT is linear: `FFT(K·sensors) = K·FFT(sensors)`.
+
+The mode coefficient is the same kind of linear map of the sensors,
+`coeff(t) = (Φ'·M·K)·F(t) = ModeKernel·F(t)`, so `FFT(coeff) = ModeKernel·FFT(sensors)`.
+Therefore **building the mode coefficient time series first and running PSD/FFT on it
+yields the identical result** to substituting `ModeKernel` for `ImagingKernel` inside
+`bst_psd`. Our self-contained path (build `coeff`, feed the in-memory matrix to
+`bst_timefreq`) is exact, not an approximation. We chose it over a guarded
+`bst_timefreq` edit specifically to avoid touching core files.
+
 ## Tech Stack
 
 MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
@@ -192,10 +213,19 @@ MATLAB; Brainstorm process framework (`macro_method` dispatch); `bst_timefreq`
 
 ## Risks / Edge Cases
 
-- **Raw windowed read:** must load only the selected window's sensor data, never the
-  whole recording. The plan must pin the exact bounded-read call (likely `in_bst`
-  with a time window, or `bst_process('LoadInputFile')`), verified against a
-  raw-linked result during implementation.
+- **Raw windowed read:** the engine reads sensor data for the selected window the
+  same way `bst_timefreq` does — load the raw `sFile` descriptor, compute
+  `SamplesBounds` from the time window, single `in_fread` call (replicating the
+  ~5-line `ReadRawRecordings` pattern in `bst_timefreq.m:960`). Memory/cost are
+  identical to a standard PSD/FFT run.
+- **Raw default time window:** mirror standard PSD/FFT — the `timewindow` option is
+  empty by default and an empty window means the whole file is read in one bounded
+  `in_fread`, exactly like `process_psd`/`process_fft`. Imported/epoched data uses
+  the full epoch. (No special guard; behavior matches the existing frequency tools.)
+- **Bad-segment exclusion (raw):** because we feed the mode coefficient time series
+  to `bst_timefreq` via the in-memory matrix path (rather than letting it read the
+  raw file itself), automatic bad-segment exclusion is **not** inherited in v1. This
+  matches the "light" scope; a later round can pass `BadSegments` through if needed.
 - **Mode capping vs available modes:** request 300 but a surface may have fewer;
   clamp and report.
 - **Mass-matrix provenance:** prefer the saved `Eigenmodes.MassMatrix`; only
