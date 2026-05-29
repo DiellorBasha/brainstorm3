@@ -14,7 +14,6 @@ V1 = [ 1 0 0; -1 0 0; 0 1 0; 0 -1 0; 0 0 1; 0 0 -1];
 F1 = [5 1 3; 5 3 2; 5 2 4; 5 4 1; 6 3 1; 6 2 3; 6 4 2; 6 1 4];
 V  = [V1; bsxfun(@plus, V1, [10 0 0])];   % second component offset in x
 F  = [F1; F1 + 6];
-nV = size(V,1);
 
 nModes = 3;
 [Eig, ~, M] = tess_eigenmodes(V, F, 'nModes', nModes, 'Verbose', 0);

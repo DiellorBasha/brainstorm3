@@ -17,10 +17,11 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %
 %     The pipeline:
 %       1. Validate the mesh is manifold (repair only if Repair=true).
-%       2. Assemble L and M via tess_laplacian.
-%       3. Solve the generalized eigenvalue problem via MATLAB eigs.
-%       4. M-orthonormalize the eigenvectors.
-%       5. Package into the Eigenmodes structure.
+%       2. Assemble whole-mesh L and M via tess_laplacian (returned to callers).
+%       3. Split the mesh into connected components.
+%       4. Solve the generalized eigenvalue problem independently per component.
+%       5. Tag each mode with its component id and within-component rank.
+%       6. Package into the Eigenmodes structure.
 %
 % INPUTS:
 %     Vertices : [nVertices x 3] vertex positions
@@ -46,6 +47,9 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %       .Vectors    : [nVertices x nModes] M-orthonormal eigenvectors
 %       .Values     : [nModes x 1] eigenvalues (ascending, >= 0)
 %       .nModes     : Number of modes (after DC removal if applicable)
+%       .Component  : [nModes x 1] connected-component id of each mode
+%       .CompRank   : [nModes x 1] within-component rank of each mode
+%       .nComponents: Number of connected components solved
 %       .MassType   : Mass matrix type used
 %       .Sigma      : Shift parameter used
 %       .Tolerance  : Convergence tolerance used
@@ -57,7 +61,8 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %
 % NOTES:
 %     - For a closed manifold, one DC mode exists (constant function).
-%     - For a cortical surface with two hemispheres, two DC modes exist.
+%     - Each connected component contributes one DC mode; when RemoveDC=true,
+%       nRemoved equals the number of closed components in the surface.
 %     - The eigenvalues are frequencies^2 of the surface harmonics.
 %     - Spectral projection of a scalar field u onto eigenmodes:
 %         c_k = phi_k' * M * u    (M-weighted inner product)
@@ -145,7 +150,7 @@ if nModes > maxModes
     nModes = maxModes;
 end
 
-%% ===== STEP 2: WHOLE-MESH OPERATORS (for return + orthonormality reference) =====
+%% ===== STEP 2: WHOLE-MESH OPERATORS (returned to callers as L, M outputs) =====
 if Verbose
     fprintf('BST> tess_eigenmodes: Assembling L and M (%s mass)...\n', MassType);
 end
@@ -178,7 +183,7 @@ for c = 1:nComp
     remap(vIdx) = 1:nvc;
     Fsub = remap(Faces(faceMask, :));
     Vsub = Vertices(vIdx, :);
-    % Cap modes to this component's size
+    % Cap to this component's size; -2 leaves room for the DC mode + an eigs margin
     nModesC = min(nModes, nvc - 2);
     [Uc, lambdasC, nRemC] = SolveComponent(Vsub, Fsub, nModesC, MassType, ...
         RemoveDC, Sigma, Tolerance, MaxIter, Verbose);
@@ -224,12 +229,18 @@ function [U, lambdas, nRemoved] = SolveComponent(Vertices, Faces, nModes, MassTy
     opts = struct('tol', Tolerance, 'maxit', MaxIter, 'disp', 0);
     try
         [U, D] = eigs(L, M, nRequest, Sigma, opts);
-    catch
+    catch ME
+        if Verbose
+            fprintf('BST> tess_eigenmodes: Shift-invert failed (%s). Trying smallestabs...\n', ME.message);
+        end
         [U, D] = eigs(L, M, nRequest, 'smallestabs', opts);
     end
     lambdas = real(diag(D));
     [lambdas, sortIdx] = sort(lambdas);
     U = real(U(:, sortIdx));
+    if Verbose && (numel(lambdas) < nRequest)
+        fprintf('BST> tess_eigenmodes: Only %d/%d modes converged on this component.\n', numel(lambdas), nRequest);
+    end
     % Remove DC modes (one per closed component)
     nRemoved = 0;
     if RemoveDC
