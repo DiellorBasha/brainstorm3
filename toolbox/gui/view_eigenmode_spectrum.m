@@ -126,10 +126,15 @@ function hFig = ViewFigure(ResultsFile)
                        'orientations per vertex (not mixed head models).'], 'Eigenspectrum', 0);
             return;
         end
-        % Mass matrix consistent with the stored mass type.
-        sSurf = in_tess_bst(SurfaceFile);
-        [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
+        % Mass matrix: reuse the one stored with the eigenmodes (computed once at
+        % "Compute eigenmodes"); fall back to building it for older files without it.
         nVert = size(Eig.Vectors, 1);
+        if isfield(Eig, 'MassMatrix') && ~isempty(Eig.MassMatrix) && isequal(size(Eig.MassMatrix), [nVert, nVert])
+            M = Eig.MassMatrix;
+        else
+            sSurf = in_tess_bst(SurfaceFile);
+            [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
+        end
         % Probe the current time: confirm the source grid matches the eigenmode surface.
         Sprobe = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');
         if isempty(Sprobe) || (size(Sprobe, 1) ~= nVert)

@@ -22,6 +22,8 @@ Em.ComputeTime = 1.23;
 Em.Component   = [ones(8,1); 2*ones(7,1)];   % two components (non-default, to make persistence assertions real)
 Em.CompRank    = [(1:8)'; (1:7)'];            % per-component rank (non-default)
 Em.nComponents = 2;
+[Em.Laplacian, Em.MassMatrix] = tess_laplacian(V, F, 'MassType', Em.MassType);   % whole-mesh operators (sparse)
+Em.LaplacianType = 'Laplace-Beltrami';
 
 tmpDir = tempname; mkdir(tmpDir);
 cleanup = onCleanup(@() rmdir(tmpDir, 's'));
@@ -55,9 +57,18 @@ assert(isequal(Em2.CompRank(:),  Em.CompRank(:)),  'CompRank not preserved.');
 assert(isequal(Em2.nComponents, Em.nComponents), 'nComponents not preserved.');
 fprintf('PASSED: Component/CompRank survive round-trip.\n');
 
+% ----- Whole-mesh operators (MassMatrix, Laplacian) round-trip -----
+assert(isfield(Em2, 'MassMatrix') && isfield(Em2, 'Laplacian'), 'MassMatrix/Laplacian must persist through save/load.');
+assert(issparse(Em2.MassMatrix) && isequal(size(Em2.MassMatrix), [nV, nV]), 'MassMatrix must be sparse [nV x nV].');
+assert(full(max(max(abs(Em2.MassMatrix - Em.MassMatrix)))) < 1e-12, 'MassMatrix changed on round-trip.');
+assert(full(max(max(abs(Em2.Laplacian  - Em.Laplacian))))  < 1e-12, 'Laplacian changed on round-trip.');
+assert(strcmp(Em2.LaplacianType, 'Laplace-Beltrami'), 'LaplacianType not preserved.');
+assert(strcmp(Em2.MassType, Em.MassType), 'MassType not preserved.');
+fprintf('PASSED: MassMatrix/Laplacian (+types) survive round-trip.\n');
+
 % ----- Backward compatibility: a struct WITHOUT the metadata loads with defaults -----
 TessTmp = load(SurfFile);
-TessTmp.Eigenmodes = rmfield(TessTmp.Eigenmodes, intersect({'Component','CompRank','nComponents'}, fieldnames(TessTmp.Eigenmodes)));
+TessTmp.Eigenmodes = rmfield(TessTmp.Eigenmodes, intersect({'Component','CompRank','nComponents','MassMatrix','Laplacian','LaplacianType'}, fieldnames(TessTmp.Eigenmodes)));
 bst_save(SurfFile, TessTmp, 'v7');
 [EigOld, isOld] = in_tess_eigenmodes(SurfFile);
 assert(isOld, 'Old-format eigenmodes must still load.');

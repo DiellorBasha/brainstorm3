@@ -50,7 +50,10 @@ function [Eigenmodes, L, M, Vertices, Faces] = tess_eigenmodes(Vertices, Faces, 
 %       .Component  : [nModes x 1] connected-component id of each mode
 %       .CompRank   : [nModes x 1] within-component rank of each mode
 %       .nComponents: Number of connected components solved
-%       .MassType   : Mass matrix type used
+%       .MassMatrix : [nV x nV] sparse mass matrix (basis is M-orthonormal); stored for reuse
+%       .MassType   : Mass matrix type used ('barycentric'|'voronoi'|'galerkin')
+%       .Laplacian  : [nV x nV] sparse Laplacian (stiffness) matrix; stored for reuse
+%       .LaplacianType: Laplacian operator type ('Laplace-Beltrami')
 %       .Sigma      : Shift parameter used
 %       .Tolerance  : Convergence tolerance used
 %       .nRemoved   : Number of DC modes removed (0 if RemoveDC=false)
@@ -205,9 +208,12 @@ Eigenmodes.Values      = ValuesAll;
 Eigenmodes.nModes      = numel(ValuesAll);
 Eigenmodes.Component   = Component;
 Eigenmodes.CompRank    = CompRank;
-Eigenmodes.nComponents = nComp;
-Eigenmodes.MassType    = MassType;
-Eigenmodes.Sigma       = Sigma;
+Eigenmodes.nComponents   = nComp;
+Eigenmodes.MassMatrix    = M;   % whole-mesh mass matrix [nV x nV] sparse (basis is M-orthonormal)
+Eigenmodes.MassType      = MassType;            % 'barycentric' | 'voronoi' | 'galerkin'
+Eigenmodes.Laplacian     = L;   % whole-mesh Laplacian (stiffness) [nV x nV] sparse (reuse downstream)
+Eigenmodes.LaplacianType = 'Laplace-Beltrami';  % discrete cotangent Laplace-Beltrami operator
+Eigenmodes.Sigma         = Sigma;
 Eigenmodes.Tolerance   = Tolerance;
 Eigenmodes.nRemoved    = nRemoved;
 Eigenmodes.ComputeTime = totalTime;
