@@ -120,8 +120,17 @@ function [Theta, Info] = GetActivationCoeffs(ResultsFile)
     end
     sSurf = in_tess_bst(ResultsMat.SurfaceFile);
     [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
-    % Project.
+    % Project. Only surface models with 1 (constrained) or 2/3 (unconstrained)
+    % orientations per vertex are supported; reject anything else (e.g. mixed
+    % head models, nComponents==0) before the projection would error.
     nComp = ResultsMat.nComponents;
+    nVert = size(Eig.Vectors, 1);
+    if ~ismember(nComp, [1 2 3]) || (size(ResultsMat.ImageGridAmp, 1) ~= nComp * nVert)
+        bst_error(['Eigenspectrum supports surface source models with 1 or 3 ' 10 ...
+                   'orientations per vertex. This result is not compatible ' 10 ...
+                   '(for example, a mixed head model).'], 'Eigenspectrum', 0);
+        return;
+    end
     Theta = CollapseProject(Eig, ResultsMat.ImageGridAmp, nComp, M);
     Info = struct('Values',      Eig.Values(:), ...
                   'Component',   Eig.Component(:), ...
@@ -135,38 +144,44 @@ end
 function hFig = ViewFigure(ResultsFile)
     hFig = [];
     bst_progress('start', 'Eigenspectrum', 'Loading source activations...');
-    % Coefficients first (fails fast with a friendly error if no eigenmodes).
-    [Theta, Info] = GetActivationCoeffs(ResultsFile);
-    if isempty(Theta)
+    try
+        % Coefficients first (fails fast with a friendly error if no eigenmodes).
+        [Theta, Info] = GetActivationCoeffs(ResultsFile);
+        if isempty(Theta)
+            bst_progress('stop');
+            return;
+        end
+        % Load the results into a dataset so the global time cursor spans this file.
+        [iDS, ~] = bst_memory('LoadResultsFile', ResultsFile);
+        if isempty(iDS)
+            bst_progress('stop');
+            return;
+        end
+        % Create a managed figure of our type, always a fresh one.
+        FigureId = db_template('FigureId');
+        FigureId.Type     = 'EigenSpectrum';
+        FigureId.SubType  = '';
+        FigureId.Modality = '';
+        [hFig, ~] = bst_figures('CreateFigure', iDS, FigureId, 'AlwaysCreate', ResultsFile);
+        if isempty(hFig)
+            bst_progress('stop');
+            return;
+        end
+        % Stash everything the redraw needs.
+        setappdata(hFig, 'Theta',       Theta);
+        setappdata(hFig, 'SpecInfo',    Info);
+        setappdata(hFig, 'ResultsFile', ResultsFile);
+        setappdata(hFig, 'AxisMode',    'eigenvalue');
+        setappdata(hFig, 'isStatic',    size(Theta, 2) <= 2);
+        % First plot + show + select.
+        UpdateFigurePlot(hFig);
+        set(hFig, 'Visible', 'on');
+        bst_figures('SetCurrentFigure', hFig, '2D');
+    catch ME
         bst_progress('stop');
+        bst_error(['Could not open the eigenspectrum:' 10 ME.message], 'Eigenspectrum', 0);
         return;
     end
-    % Load the results into a dataset so the global time cursor spans this file.
-    [iDS, ~] = bst_memory('LoadResultsFile', ResultsFile);
-    if isempty(iDS)
-        bst_progress('stop');
-        return;
-    end
-    % Create a managed figure of our type, always a fresh one.
-    FigureId = db_template('FigureId');
-    FigureId.Type     = 'EigenSpectrum';
-    FigureId.SubType  = '';
-    FigureId.Modality = '';
-    [hFig, ~] = bst_figures('CreateFigure', iDS, FigureId, 'AlwaysCreate', ResultsFile);
-    if isempty(hFig)
-        bst_progress('stop');
-        return;
-    end
-    % Stash everything the redraw needs.
-    setappdata(hFig, 'Theta',       Theta);
-    setappdata(hFig, 'SpecInfo',    Info);
-    setappdata(hFig, 'ResultsFile', ResultsFile);
-    setappdata(hFig, 'AxisMode',    'eigenvalue');
-    setappdata(hFig, 'isStatic',    size(Theta, 2) <= 2);
-    % First plot + show + select.
-    UpdateFigurePlot(hFig);
-    set(hFig, 'Visible', 'on');
-    bst_figures('SetCurrentFigure', hFig, '2D');
     bst_progress('stop');
 end
 
@@ -219,18 +234,25 @@ function UpdateFigurePlot(hFig)
     Comp = Info.Component(:);
     xL = ax.x(Comp == 1);  xR = ax.x(Comp == 2);
     aL = avg(Comp == 1);   aR = avg(Comp == 2);
-    % Draw.
+    % Draw (collect handles so the legend only labels curves actually present).
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesEigenSpectrum');
     cla(hAxes);
     hold(hAxes, 'on');
-    plot(hAxes, xL, pw.left,  '-',  'Color', [0.85 0.2 0.2], 'LineWidth', 1.5);
-    plot(hAxes, xR, pw.right, '-',  'Color', [0.2 0.3 0.85], 'LineWidth', 1.5);
-    plot(hAxes, xL, aL, '--', 'Color', [0.85 0.2 0.2], 'LineWidth', 0.75);
-    plot(hAxes, xR, aR, '--', 'Color', [0.2 0.3 0.85], 'LineWidth', 0.75);
+    hLines = []; labels = {};
+    if ~isempty(xL)
+        hLines(end+1) = plot(hAxes, xL, pw.left, '-',  'Color', [0.85 0.2 0.2], 'LineWidth', 1.5); labels{end+1} = 'Left (t)';
+        hLines(end+1) = plot(hAxes, xL, aL,      '--', 'Color', [0.85 0.2 0.2], 'LineWidth', 0.75); labels{end+1} = 'Left (avg)';
+    end
+    if ~isempty(xR)
+        hLines(end+1) = plot(hAxes, xR, pw.right, '-',  'Color', [0.2 0.3 0.85], 'LineWidth', 1.5); labels{end+1} = 'Right (t)';
+        hLines(end+1) = plot(hAxes, xR, aR,       '--', 'Color', [0.2 0.3 0.85], 'LineWidth', 0.75); labels{end+1} = 'Right (avg)';
+    end
     hold(hAxes, 'off');
     xlabel(hAxes, ax.label);
     ylabel(hAxes, 'Modal power |\theta_k|^2');
-    legend(hAxes, {'Left (t)', 'Right (t)', 'Left (avg)', 'Right (avg)'}, 'Location', 'northeast');
+    if ~isempty(hLines)
+        legend(hAxes, hLines, labels, 'Location', 'northeast');
+    end
     if (numel(Time) >= 1)
         tStr = sprintf('%1.3f s', Time(iTime));
     else

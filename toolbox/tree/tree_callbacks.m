@@ -1828,7 +1828,7 @@ switch (lower(action))
                         end
                     end
                     % === VIEW EIGENSPECTRUM ===
-                    if ismember(sStudy.Result(iResult).HeadModelType, {'surface', 'mixed'}) && ~isempty(sSubject) && ~isempty(sSubject.iCortex)
+                    if ismember(sStudy.Result(iResult).HeadModelType, {'surface'}) && ~isempty(sSubject) && ~isempty(sSubject.iCortex)
                         gui_component('MenuItem', jMenuActivations, [], 'View eigenspectrum', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
                     end
                     % === DISPLAY ON MRI ===
