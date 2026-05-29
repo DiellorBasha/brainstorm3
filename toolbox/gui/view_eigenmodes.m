@@ -102,6 +102,13 @@ function hFig = ViewFigure(SurfaceFile, ~)
     % Display via the standard surface-data path (colormap UI works natively)
     hFig = view_surface_data(SurfaceFile, file_short(OutputFile));
     if isempty(hFig)
+        % Display failed: remove the transient result we just registered
+        try
+            file_delete(file_fullpath(OutputFile), 1);
+            db_reload_studies(iStudy);
+        catch
+            % Non-fatal
+        end
         bst_error('Could not open the surface figure.', 'View eigenmodes', 0);
         return;
     end
