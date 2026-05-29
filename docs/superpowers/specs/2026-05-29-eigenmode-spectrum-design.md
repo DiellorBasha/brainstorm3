@@ -87,11 +87,25 @@ testable. No coefficients are persisted (transient view).
 
 1. Compute `Theta [K × nTime]` and metadata via `GetActivationCoeffs` (§A+B). On any
    failed guard, `bst_error` and return `[]`.
-2. Create a Brainstorm-managed figure **registered with the results/recordings dataset**,
-   so the **global time cursor drives it** (same time-sync mechanism source/time-series
-   figures use; cf. how `figure_timeseries`/`figure_3d` receive global time updates). On
-   each time change, redraw the spectrum at the current sample — no recomputation
-   (`Theta` is precomputed once).
+2. Create a Brainstorm-managed figure **registered in the same dataset as the source
+   map** (`GlobalData.DataSet(iDS).Figure`), with a dedicated `Id.Type = 'EigenSpectrum'`,
+   so the **one global time cursor drives it** — the *same* path that drives the cortex
+   "Display on cortex" view. Concretely (confirmed against the code):
+   - `panel_time('SetCurrentTime', …)` (slider, arrow keys, movie, cortex stepping) writes
+     `GlobalData.UserTimeWindow.CurrentTime` and calls `bst_figures('FireCurrentTimeChanged')`
+     (`panel_time.m:251`).
+   - `FireCurrentTimeChanged` (`bst_figures.m:936`) loops over all registered figures and
+     dispatches by `Id.Type` (`bst_figures.m:949`); the cortex view is the `'3DViz'` case →
+     `panel_surface('UpdateSurfaceData')` (`:954`).
+   - **Wiring:** add one `case 'EigenSpectrum'` to that switch calling
+     `view_eigenmode_spectrum('CurrentTimeChangedCallback', sFig.hFigure)` — the established
+     extension point used by `figure_spectrum`/`figure_timefreq` (`:967-970`). The cortex
+     figure and the spectrum figure are then siblings sharing one `CurrentTime`, redrawn in
+     lockstep on every time move.
+
+   On each time change, redraw the spectrum at the current sample only — **no
+   recomputation** (`Theta` is precomputed once on open). Non-static figure, so it animates
+   normally (`isStatic`-skipped figures, `bst_figures.m:945`, are the no-time case).
 3. Render, per current time `t`:
    - power per mode `p_k = |θ_k(t)|²`, split by `Component` into **Left** (Component 1)
      and **Right** (Component 2) curves;
@@ -195,7 +209,9 @@ eigenmodes simply show a friendly error pointing to Compute.
 ## Files touched
 
 - `toolbox/gui/view_eigenmode_spectrum.m` — **new** viewer, `GetActivationCoeffs`
-  wrapper, and pure render helpers.
+  wrapper, pure render helpers, and the `'CurrentTimeChangedCallback'` redraw entry.
+- `toolbox/core/bst_figures.m` — one `case 'EigenSpectrum'` in `FireCurrentTimeChanged`
+  (`~:949` switch) routing time-change events to the viewer's redraw.
 - `toolbox/tree/tree_callbacks.m` — "View eigenspectrum" item on source-results nodes.
 - `dev/tests/test_view_eigenmode_spectrum_pure.m` (new);
   `dev/tests/test_eigenmode_spectrum_acquire.m` (new).
