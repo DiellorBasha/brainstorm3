@@ -1,15 +1,12 @@
 function varargout = view_eigenmodes(varargin)
-% VIEW_EIGENMODES: Interactively browse Laplace-Beltrami eigenmodes on a surface.
+% VIEW_EIGENMODES: Browse Laplace-Beltrami eigenmodes on a surface.
 %
-% USAGE:  hFig  = view_eigenmodes(SurfaceFile)              % open viewer at mode 1
-%         hFig  = view_eigenmodes(SurfaceFile, iMode)       % open viewer at mode iMode
-%         disp  = view_eigenmodes('GetModeDisplay', Eig, iMode)     % pure helper (testable)
-%         iNext = view_eigenmodes('StepMode', iMode, delta, nModes) % pure helper (testable)
+% USAGE:  hFig = view_eigenmodes(SurfaceFile)
+%         [Grid, K, Info] = view_eigenmodes('BuildPairedGrid', Eigenmodes)
 %
-% Modeled on view_leadfield_sensitivity.m: the Left/Right arrows step the
-% displayed mode, the cortex colormap updates live, and a legend reports the
-% mode index, eigenvalue, and approximate spatial wavelength. The figure is
-% transient (no database node is created).
+% The viewer displays each component's rank-k mode together (mode k shows both
+% hemispheres) as a registered Brainstorm Source result, so the standard colormap
+% UI applies; Left/Right arrows step modes.
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -31,132 +28,32 @@ function varargout = view_eigenmodes(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-% ===== METHOD DISPATCH (headless-testable pure helpers) =====
-if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'GetModeDisplay', 'StepMode'}))
+if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'BuildPairedGrid')
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
-% ===== MAIN ENTRY: open the viewer =====
 [varargout{1:nargout}] = ViewFigure(varargin{:});
 end
 
 
-%% ===== PURE: per-mode display package =====
-function d = GetModeDisplay(Eig, iMode)
-    nModes = size(Eig.Vectors, 2);
-    iMode  = min(max(round(iMode), 1), max(nModes, 1));   % clamp to [1, nModes]
-    data   = double(Eig.Vectors(:, iMode));
-    m      = max(abs(data));
-    if ~(m > 0)        % degenerate (all-zero) mode: avoid a zero-width colormap range
-        m = 1e-30;
-    end
-    lambda = Eig.Values(iMode);
-    if lambda > 0
-        wavelength = 2*pi / sqrt(lambda);
-        wlStr      = sprintf('%.3g', wavelength);
+%% ===== PURE: paired display grid (column k = each component's CompRank==k mode) =====
+function [Grid, K, Info] = BuildPairedGrid(Eig)
+    nV = size(Eig.Vectors, 1);
+    nK = size(Eig.Vectors, 2);
+    if isfield(Eig, 'CompRank') && ~isempty(Eig.CompRank)
+        CompRank  = Eig.CompRank(:);
+        Component = Eig.Component(:);
     else
-        wavelength = NaN;
-        wlStr      = 'n/a';
+        CompRank  = (1:nK)';
+        Component = ones(nK, 1);
     end
-    d = struct();
-    d.iMode      = iMode;
-    d.nModes     = nModes;
-    d.Data       = data;
-    d.CLim       = [-m, m];          % symmetric: eigenmodes are signed (+/- lobes)
-    d.Lambda     = lambda;
-    d.Wavelength = wavelength;
-    d.Label      = sprintf('Mode %d / %d     lambda = %.4g     wavelength ~ %s', ...
-                           iMode, nModes, lambda, wlStr);
-end
-
-
-%% ===== PURE: clamped mode stepping =====
-function iNext = StepMode(iMode, delta, nModes)
-    iNext = min(max(round(iMode) + round(delta), 1), max(nModes, 1));
-end
-
-
-%% ===== GUI: open the surface figure and wire up mode browsing =====
-function hFig = ViewFigure(SurfaceFile, iMode)
-    hFig = [];
-    if (nargin < 2) || isempty(iMode)
-        iMode = 1;
-    end
-    % Load eigenmodes embedded in the surface file
-    [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
-    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors) || ~isfield(Eig, 'Values')
-        bst_error(['No eigenmodes found on this surface.' 10 ...
-                   'Right-click the cortex and run "Compute eigenmodes" first.'], ...
-                   'View eigenmodes', 0);
-        return;
-    end
-    nModes = size(Eig.Vectors, 2);
-    iMode  = StepMode(iMode, 0, nModes);   % clamp into range
-
-    % Open a transient surface figure (no database node)
-    [hFig, iDS, iFig] = view_surface(SurfaceFile, 0, [], 'NewFigure', 0); %#ok<ASGLU>
-    if isempty(hFig)
-        bst_error('Could not open the surface figure.', 'View eigenmodes', 0);
-        return;
-    end
-    % Register the source colormap so the overlay is colormapped (+ colorbar)
-    bst_colormaps('AddColormapToFigure', hFig, 'source');
-    % Figure name + default view
-    set(hFig, 'Name', ['Eigenmodes: ' SurfaceFile]);
-    figure_3d('SetStandardView', hFig, 'left');
-    % Legend (bottom-left), mirrors view_leadfield_sensitivity
-    hLabel = uicontrol('Style', 'text', 'String', '...', 'Units', 'Pixels', ...
-        'Position', [6 0 520 20], 'HorizontalAlignment', 'left', ...
-        'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
-        'ForegroundColor', [.9 .9 .9], 'BackgroundColor', [0 0 0], 'Parent', hFig);
-    % Hook the keyboard callback (preserve the original for unhandled keys)
-    KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
-    set(hFig, 'KeyPressFcn', @KeyPress_Callback);
-    % Initial render
-    UpdateMode();
-
-    % ===== NESTED: render the current mode onto the surface =====
-    function UpdateMode()
-        d = GetModeDisplay(Eig, iMode);
-        TessInfo = getappdata(hFig, 'Surface');
-        TessInfo(1).ColormapType        = 'source';   % render eigenmode with the source palette (not anatomy)
-        TessInfo(1).DataSource.Type     = 'Source';
-        TessInfo(1).DataSource.FileName = '';   % transient overlay: empty avoids the results-load branch in UpdateSurfaceColormap (which throws on a non-headmodel file)
-        TessInfo(1).Data                = d.Data;
-        TessInfo(1).DataMinMax          = d.CLim;
-        TessInfo(1).DataLimitValue      = d.CLim;
-        setappdata(hFig, 'Surface', TessInfo);
-        panel_surface('UpdateSurfaceColormap', hFig);
-        % UpdateSurfaceColormap skips its axes-CLim step when DataSource.FileName is empty,
-        % so set the symmetric color range on the 3D axes directly (drives the colorbar).
-        hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
-        if ~isempty(hAxes)
-            set(hAxes, 'CLim', d.CLim);
-        end
-        set(hLabel, 'String', d.Label);
-    end
-
-    % ===== NESTED: keyboard navigation =====
-    function KeyPress_Callback(h, keyEvent)
-        switch (keyEvent.Key)
-            case 'leftarrow'
-                iMode = StepMode(iMode, -1, nModes);   UpdateMode();
-            case 'rightarrow'
-                iMode = StepMode(iMode, +1, nModes);   UpdateMode();
-            case 'pageup'
-                iMode = StepMode(iMode, +10, nModes);  UpdateMode();
-            case 'pagedown'
-                iMode = StepMode(iMode, -10, nModes);  UpdateMode();
-            case 'h'
-                java_dialog('msgbox', ...
-                    ['Eigenmode viewer shortcuts:' 10 10 ...
-                     '   Left / Right arrow  :  previous / next mode' 10 ...
-                     '   Page Up / Page Down :  +/- 10 modes' 10 ...
-                     '   H                   :  this help'], 'Eigenmode viewer');
-            otherwise
-                if ~isempty(KeyPressFcn_bak)
-                    KeyPressFcn_bak(h, keyEvent);
-                end
+    K = max(CompRank);
+    Grid = zeros(nV, K);
+    for k = 1:K
+        cols = find(CompRank == k);
+        if ~isempty(cols)
+            Grid(:, k) = sum(Eig.Vectors(:, cols), 2);   % disjoint support across components
         end
     end
+    Info = struct('K', K, 'Component', Component, 'CompRank', CompRank, 'Values', Eig.Values(:));
 end

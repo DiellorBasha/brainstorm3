@@ -1,7 +1,6 @@
 function test_view_eigenmodes_pure
-% Verify the pure viewer helpers reached through the macro dispatch:
-% GetModeDisplay (data column, symmetric color limits, eigenvalue/wavelength,
-% label, index clamping) and StepMode (clamped stepping).
+% Verify the paired-grid builder: column k holds each component's rank-k mode,
+% summed (disjoint support), so a single display column shows both hemispheres.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
 addpath(repoRoot);
@@ -9,50 +8,31 @@ if ~brainstorm('status')
     brainstorm nogui
 end
 
-% ----- Fabricate a small Eigenmodes struct (as in_tess_eigenmodes returns) -----
-rng(3);
-nVert = 50; K = 8;
+% Fabricate a 2-component Eigenmodes struct: comp 1 on verts 1:4, comp 2 on 5:8
+nV = 8;
 Eig = struct();
-Eig.Vectors  = randn(nVert, K);
-Eig.Values   = sort(abs(randn(K,1))) + 0.1;   % ascending, > 0
-Eig.nModes   = K;
-Eig.MassType = 'barycentric';
+Eig.Vectors = zeros(nV, 4);
+Eig.Vectors(1:4, 1) = [1;2;3;4];     % comp 1, rank 1
+Eig.Vectors(1:4, 2) = [5;6;7;8];     % comp 1, rank 2
+Eig.Vectors(5:8, 3) = [9;10;11;12];  % comp 2, rank 1
+Eig.Vectors(5:8, 4) = [13;14;15;16]; % comp 2, rank 2
+Eig.Values    = [1;2;1;2];
+Eig.Component = [1;1;2;2];
+Eig.CompRank  = [1;2;1;2];
 
-% ----- GetModeDisplay: basic correctness -----
-d = view_eigenmodes('GetModeDisplay', Eig, 3);
-assert(isequal(d.Data, Eig.Vectors(:,3)), 'Data must be the requested mode column.');
-assert(d.iMode == 3 && d.nModes == K, 'iMode/nModes mismatch.');
-m = max(abs(Eig.Vectors(:,3)));
-assert(isequal(d.CLim, [-m, m]), 'CLim must be symmetric [-max|v|, +max|v|].');
-assert(d.CLim(1) < d.CLim(2), 'CLim must be a non-degenerate increasing range.');
-assert(abs(d.Lambda - Eig.Values(3)) < 1e-12, 'Lambda must be Values(iMode).');
-assert(abs(d.Wavelength - 2*pi/sqrt(Eig.Values(3))) < 1e-9, 'Wavelength = 2*pi/sqrt(lambda).');
-assert(ischar(d.Label) && ~isempty(d.Label), 'Label must be a non-empty string.');
+[Grid, K, Info] = view_eigenmodes('BuildPairedGrid', Eig);
+assert(K == 2, 'K must equal the max within-component rank.');
+assert(isequal(size(Grid), [nV, 2]), 'Grid must be [nV x K].');
+% Column 1 = comp1-rank1 (verts 1:4) + comp2-rank1 (verts 5:8)
+assert(isequal(Grid(:,1), [1;2;3;4;9;10;11;12]), 'Paired column 1 wrong.');
+% Column 2 = comp1-rank2 + comp2-rank2
+assert(isequal(Grid(:,2), [5;6;7;8;13;14;15;16]), 'Paired column 2 wrong.');
+assert(Info.K == 2 && numel(Info.Values) == 4, 'Info fields wrong.');
 
-% ----- GetModeDisplay: index clamping -----
-dLo = view_eigenmodes('GetModeDisplay', Eig, -5);
-assert(dLo.iMode == 1, 'iMode below 1 must clamp to 1.');
-dHi = view_eigenmodes('GetModeDisplay', Eig, K+99);
-assert(dHi.iMode == K, 'iMode above K must clamp to K.');
-
-% ----- GetModeDisplay: degenerate (all-zero) mode guard -----
-EigZ = Eig; EigZ.Vectors(:,2) = 0;
-dz = view_eigenmodes('GetModeDisplay', EigZ, 2);
-assert(dz.CLim(1) < dz.CLim(2), 'All-zero mode must still yield a non-degenerate CLim.');
-
-% ----- GetModeDisplay: non-positive eigenvalue -> wavelength n/a -----
-EigN = Eig; EigN.Values(1) = 0;
-dn = view_eigenmodes('GetModeDisplay', EigN, 1);
-assert(isnan(dn.Wavelength), 'lambda<=0 must give NaN wavelength.');
-assert(~isempty(strfind(dn.Label, 'n/a')), 'Label must show n/a for lambda<=0.');
-
-% ----- StepMode: stepping + clamping -----
-assert(view_eigenmodes('StepMode', 3, +1, K) == 4, 'StepMode +1 failed.');
-assert(view_eigenmodes('StepMode', 3, -1, K) == 2, 'StepMode -1 failed.');
-assert(view_eigenmodes('StepMode', 1, -1, K) == 1, 'StepMode must clamp at 1.');
-assert(view_eigenmodes('StepMode', K, +1, K) == K, 'StepMode must clamp at K.');
-assert(view_eigenmodes('StepMode', K-2, +10, K) == K, 'StepMode +10 must clamp at K.');
-assert(view_eigenmodes('StepMode', 3, -10, K) == 1, 'StepMode -10 must clamp at 1.');
+% Single-component fallback (no metadata): each column maps to its own rank
+Eig2 = struct('Vectors', magic(4), 'Values', (1:4)');
+[Grid2, K2] = view_eigenmodes('BuildPairedGrid', Eig2);
+assert(K2 == 4 && isequal(Grid2, magic(4)), 'Single-component grid must pass modes through.');
 
 disp('ALL TESTS PASSED');
 end
