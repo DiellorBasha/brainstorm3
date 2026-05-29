@@ -235,7 +235,7 @@ function hFig = ViewFigure(ResultsFile)
                                                'CompRank', Eig.CompRank(:), ...
                                                'SurfaceFile', SurfaceFile));
         setappdata(hFig, 'ResultsFile', ResultsFile);
-        setappdata(hFig, 'AxisMode',    'eigenvalue');
+        setappdata(hFig, 'AxisMode',    'index');      % default x-axis: mode index k
         setappdata(hFig, 'PowerMode',   'power');
         setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
         % figure_timeseries display state: its engine provides butterfly/column,
@@ -246,7 +246,7 @@ function hFig = ViewFigure(ResultsFile)
         TsInfo.LinesLabels   = {'Left', 'Right'};
         TsInfo.LinesColor    = {[0.85 0.2 0.2; 0.2 0.3 0.85]};   % 1 x nAxes cell of [nLines x 3]
         TsInfo.ShowEvents    = 0;
-        TsInfo.AutoScaleY    = 1;
+        TsInfo.AutoScaleY    = 0;     % fixed Y by default (comparable amplitudes); AS button toggles
         TsInfo.DefaultFactor = 1;
         TsInfo.XScale        = 'linear';
         TsInfo.YScale        = 'linear';
@@ -355,6 +355,16 @@ function UpdateFigurePlot(hFig, isFastUpdate)
         TsInfo.LinesLabels = {'Left', 'Right'};
         TsInfo.AxesLabels  = {};
     end
+    % On a time-step (fast update) capture the current zoom so it isn't reset every frame.
+    keepZoom = isFastUpdate;
+    xlimOld = {}; ylimOld = {};
+    if keepZoom
+        hAxOld = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+        if ~isempty(hAxOld)
+            xlimOld = get(hAxOld, 'XLim');  if ~iscell(xlimOld), xlimOld = {xlimOld}; end
+            ylimOld = get(hAxOld, 'YLim');  if ~iscell(ylimOld), ylimOld = {ylimOld}; end
+        end
+    end
     % Render each axes as butterfly (autoscale-fill); restore the menu-facing display
     % mode afterwards so the butterfly/column radio stays in sync.
     menuMode = TsInfo.DisplayMode;
@@ -407,6 +417,20 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     % Single-axes (butterfly): the engine lays it out full-height -> carve margins.
     % Multi-axes (split): the engine already stacks them with proper margins.
     AdjustAxesMargins(hFig);
+    % Restore the user's zoom on a time-step: X always; Y unless autoscale is enabled.
+    if keepZoom && ~isempty(xlimOld)
+        hAxNew = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+        ts = getappdata(hFig, 'TsInfo');
+        keepY = isempty(ts) || ~ts.AutoScaleY;
+        if numel(hAxNew) == numel(xlimOld)
+            for k = 1:numel(hAxNew)
+                set(hAxNew(k), 'XLim', xlimOld{k});
+                if keepY
+                    set(hAxNew(k), 'YLim', ylimOld{k});
+                end
+            end
+        end
+    end
 end
 
 

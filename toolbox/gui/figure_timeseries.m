@@ -4069,8 +4069,9 @@ function CreateScaleButtons(iDS, iFig)
     if isRaw && ~strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.Type, 'EigenSpectrum')
         set([h1 h2], 'Visible', 'off');
     end
-    if (isempty(TsInfo) || isempty(TsInfo.FileName) || ~ismember(file_gettype(TsInfo.FileName), {'data','matrix'}) || strcmpi(GlobalData.DataSet(iDS).Measures.DataType, 'stat'))
-        set(h5, 'Visible', 'off');
+    if (isempty(TsInfo) || isempty(TsInfo.FileName) || ~ismember(file_gettype(TsInfo.FileName), {'data','matrix'}) || strcmpi(GlobalData.DataSet(iDS).Measures.DataType, 'stat')) ...
+            && ~strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.Type, 'EigenSpectrum')
+        set(h5, 'Visible', 'off');   % keep the auto-scale toggle for EigenSpectrum
     end
     if isempty(TsInfo) || ~strcmpi(TsInfo.DisplayMode, 'column') || ~strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.Type, 'DataTimeSeries')
         set([h7 h8 h9 h10], 'Visible', 'off');
