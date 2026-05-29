@@ -19,9 +19,9 @@ Em.Sigma       = -1e-8;
 Em.Tolerance   = 1e-10;
 Em.nRemoved    = 2;
 Em.ComputeTime = 1.23;
-Em.Component   = ones(15, 1);
-Em.CompRank    = (1:15)';
-Em.nComponents = 1;
+Em.Component   = [ones(8,1); 2*ones(7,1)];   % two components (non-default, to make persistence assertions real)
+Em.CompRank    = [(1:8)'; (1:7)'];            % per-component rank (non-default)
+Em.nComponents = 2;
 
 tmpDir = tempname; mkdir(tmpDir);
 cleanup = onCleanup(@() rmdir(tmpDir, 's'));
@@ -52,6 +52,7 @@ assert(isfield(Em2, 'Component') && isfield(Em2, 'CompRank'), ...
     'Component/CompRank must persist through save/load.');
 assert(isequal(Em2.Component(:), Em.Component(:)), 'Component not preserved.');
 assert(isequal(Em2.CompRank(:),  Em.CompRank(:)),  'CompRank not preserved.');
+assert(isequal(Em2.nComponents, Em.nComponents), 'nComponents not preserved.');
 fprintf('PASSED: Component/CompRank survive round-trip.\n');
 
 % ----- Backward compatibility: a struct WITHOUT the metadata loads with defaults -----
