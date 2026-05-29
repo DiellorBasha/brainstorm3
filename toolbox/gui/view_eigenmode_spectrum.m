@@ -247,6 +247,32 @@ end
 function hFig = CreateFigure(FigureId)
     hFig = figure_timeseries('CreateFigure', FigureId);
     set(hFig, 'Name', 'Eigenspectrum', 'KeyPressFcn', @FigureKeyPressedCallback);
+    % Wrap the engine resize: it lays the axes out full-height (its ShowEvents=0
+    % path leaves no room for our x-tick labels/title); we then carve margins.
+    set(hFig, bst_get('ResizeFunction'), @(h,ev)ResizeCallback(h, ev));
+end
+
+
+%% ===== GUI: resize = engine layout + margins for the mode x-axis label/title =====
+function ResizeCallback(hFig, ev)
+    figure_timeseries('ResizeCallback', hFig, ev);   % buttons + axes (full height)
+    AdjustAxesMargins(hFig);
+end
+
+function AdjustAxesMargins(hFig)
+    Scaling = bst_get('InterfaceScaling') / 100;
+    marginBottom = 45 * Scaling;   % room for x-tick labels + axis label
+    marginTop    = 30 * Scaling;   % room for the title
+    figPos = get(hFig, 'Position');
+    hAxes  = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+    for k = 1:numel(hAxes)
+        if ~ishandle(hAxes(k)), continue; end
+        set(hAxes(k), 'Units', 'pixels');
+        p = get(hAxes(k), 'Position');   % keep engine's left/width (legend + button column)
+        p(2) = marginBottom;
+        p(4) = max(figPos(4) - marginBottom - marginTop, 1);
+        set(hAxes(k), 'Position', p);
+    end
 end
 
 
@@ -312,6 +338,8 @@ function UpdateFigurePlot(hFig, isFastUpdate)
         title(hAxes(1), sprintf('Eigenspectrum  |  t = %s  |  x-axis: e=\\lambda  k=index  w=wavelength', tStr), ...
               'Interpreter', 'tex');
     end
+    % figure_timeseries lays the axes out full-height; carve margins for our labels.
+    AdjustAxesMargins(hFig);
 end
 
 
