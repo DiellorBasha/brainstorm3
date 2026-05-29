@@ -260,19 +260,21 @@ function ResizeCallback(hFig, ev)
 end
 
 function AdjustAxesMargins(hFig)
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+    % Only the single-axes (butterfly) layout needs fixing; the multi-axes (split)
+    % layout is already stacked with proper margins by the engine.
+    if numel(hAxes) ~= 1 || ~ishandle(hAxes)
+        return;
+    end
     Scaling = bst_get('InterfaceScaling') / 100;
     marginBottom = 45 * Scaling;   % room for x-tick labels + axis label
     marginTop    = 30 * Scaling;   % room for the title
     figPos = get(hFig, 'Position');
-    hAxes  = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
-    for k = 1:numel(hAxes)
-        if ~ishandle(hAxes(k)), continue; end
-        set(hAxes(k), 'Units', 'pixels');
-        p = get(hAxes(k), 'Position');   % keep engine's left/width (legend + button column)
-        p(2) = marginBottom;
-        p(4) = max(figPos(4) - marginBottom - marginTop, 1);
-        set(hAxes(k), 'Position', p);
-    end
+    set(hAxes, 'Units', 'pixels');
+    p = get(hAxes, 'Position');    % keep engine's left/width (legend + button column)
+    p(2) = marginBottom;
+    p(4) = max(figPos(4) - marginBottom - marginTop, 1);
+    set(hAxes, 'Position', p);
 end
 
 
@@ -308,8 +310,31 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     spec = BuildModeSpectrum(Info, ThetaCol, AxisMode);        % .F [2 x K], .x [1 x K], .label
     % The shared x-vector is the mode axis (NOT seconds); store it for figure_timeseries callbacks.
     setappdata(hFig, 'TimeVector', spec.x);
-    % Render via the figure_timeseries engine (creates axes/lines/scale-buttons on full replot).
-    figure_timeseries('PlotFigure', iDS, iFig, {spec.F}, spec.x, isFastUpdate, []);
+    % Layout from the menu's display mode:
+    %   'butterfly' -> both hemispheres overlaid in one axes
+    %   'column'    -> split into two stacked axes, each autoscaled to fill
+    TsInfo  = getappdata(hFig, 'TsInfo');
+    isSplit = strcmpi(TsInfo.DisplayMode, 'column');
+    if isSplit
+        F = {spec.F(1, :), spec.F(2, :)};                 % 2 axes (Left, Right)
+        TsInfo.LinesColor  = {[0.85 0.2 0.2], [0.2 0.3 0.85]};
+        TsInfo.LinesLabels = {'Left', 'Right'};
+        TsInfo.AxesLabels  = {'Left', 'Right'};
+    else
+        F = {spec.F};                                     % 1 axes, 2 overlaid lines
+        TsInfo.LinesColor  = {[0.85 0.2 0.2; 0.2 0.3 0.85]};
+        TsInfo.LinesLabels = {'Left', 'Right'};
+        TsInfo.AxesLabels  = {};
+    end
+    % Render each axes as butterfly (autoscale-fill); restore the menu-facing display
+    % mode afterwards so the butterfly/column radio stays in sync.
+    menuMode = TsInfo.DisplayMode;
+    TsInfo.DisplayMode = 'butterfly';
+    setappdata(hFig, 'TsInfo', TsInfo);
+    figure_timeseries('PlotFigure', iDS, iFig, F, spec.x, isFastUpdate, []);
+    TsInfo = getappdata(hFig, 'TsInfo');
+    TsInfo.DisplayMode = menuMode;
+    setappdata(hFig, 'TsInfo', TsInfo);
     % Adapt the time-series defaults to a modal spectrum: x-axis label + Y label.
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
     for k = 1:numel(hAxes)
@@ -318,9 +343,14 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     end
     % Hide the vertical "current time" cursor: it is positioned in seconds and is
     % meaningless on a mode/eigenvalue axis.
+    % Hide the seconds time-cursor on every axes (Handles is a struct array in split mode).
     Handles = GlobalData.DataSet(iDS).Figure(iFig).Handles;
-    if isfield(Handles, 'hCursor') && ~isempty(Handles.hCursor) && all(ishandle(Handles.hCursor))
-        set(Handles.hCursor, 'Visible', 'off');
+    if isfield(Handles, 'hCursor')
+        hc = [Handles.hCursor];
+        hc = hc(ishandle(hc));
+        if ~isempty(hc)
+            set(hc, 'Visible', 'off');
+        end
     end
     % Keep only the Left/Right data lines in the legend (exclude cursor/baseline).
     for h = findobj(hAxes, 'Type', 'line')'
@@ -335,10 +365,18 @@ function UpdateFigurePlot(hFig, isFastUpdate)
         tStr = 'n/a';
     end
     if ~isempty(hAxes)
-        title(hAxes(1), sprintf('Eigenspectrum  |  t = %s  |  x-axis: e=\\lambda  k=index  w=wavelength', tStr), ...
+        % Title on the topmost axes (split mode has two stacked axes).
+        ytop = zeros(1, numel(hAxes));
+        for k = 1:numel(hAxes)
+            pp = get(hAxes(k), 'Position');
+            ytop(k) = pp(2);
+        end
+        [~, iTop] = max(ytop);
+        title(hAxes(iTop), sprintf('Eigenspectrum  |  t = %s  |  x-axis: e=\\lambda  k=index  w=wavelength', tStr), ...
               'Interpreter', 'tex');
     end
-    % figure_timeseries lays the axes out full-height; carve margins for our labels.
+    % Single-axes (butterfly): the engine lays it out full-height -> carve margins.
+    % Multi-axes (split): the engine already stacks them with proper margins.
     AdjustAxesMargins(hFig);
 end
 

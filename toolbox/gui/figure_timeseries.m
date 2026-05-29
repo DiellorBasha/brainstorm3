@@ -2537,10 +2537,12 @@ function DisplayConfigMenu(hFig, jParent)
         end
 
     % === X-AXIS ===
-    if isRaw || strcmpi(FigureId.Type, 'Spectrum')
+    if isRaw || ismember(FigureId.Type, {'Spectrum', 'EigenSpectrum'})
         % Menu name
         if strcmpi(FigureId.Type, 'Spectrum')
             strX = 'Frequency';
+        elseif strcmpi(FigureId.Type, 'EigenSpectrum')
+            strX = 'Eigenmode';
         else
             strX = 'Time';
         end
@@ -2551,7 +2553,7 @@ function DisplayConfigMenu(hFig, jParent)
             jItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, KeyEvent.CTRL_MASK)); 
         end
         % Log scale
-        if strcmpi(FigureId.Type, 'Spectrum')
+        if ismember(FigureId.Type, {'Spectrum', 'EigenSpectrum'})
             switch (TsInfo.XScale)
                 case 'log'
                     newMode = 'linear';
@@ -2668,7 +2670,7 @@ function DisplayConfigMenu(hFig, jParent)
         end
         
     % === EVENTS ===
-    if ~strcmpi(FigureId.Type, 'Spectrum')
+    if ~ismember(FigureId.Type, {'Spectrum', 'EigenSpectrum'})
         jMenu = gui_component('Menu', jPopup, [], 'Events', IconLoader.ICON_EVT_TYPE);
         % Events display mode
         jModeDot = gui_component('RadioMenuItem', jMenu, [], 'Dots', [], [], @(h,ev)SetProperty(hFig, 'ShowEventsMode', 'dot'));
