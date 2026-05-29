@@ -114,6 +114,10 @@ function [Theta, Info] = GetActivationCoeffs(ResultsFile)
         return;
     end
     % Mass matrix consistent with the stored mass type.
+    % Older eigenmode files may not store MassType; default to barycentric.
+    if ~isfield(Eig, 'MassType') || isempty(Eig.MassType)
+        Eig.MassType = 'barycentric';
+    end
     sSurf = in_tess_bst(ResultsMat.SurfaceFile);
     [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
     % Project.
@@ -129,7 +133,6 @@ end
 
 %% ===== GUI: open the spectrum figure registered in the source map's dataset =====
 function hFig = ViewFigure(ResultsFile)
-    global GlobalData;
     hFig = [];
     bst_progress('start', 'Eigenspectrum', 'Loading source activations...');
     % Coefficients first (fails fast with a friendly error if no eigenmodes).
@@ -169,7 +172,7 @@ end
 
 
 %% ===== GUI: build the bare figure (called by bst_figures CreateFigure) =====
-function hFig = CreateFigure(FigureId) %#ok<INUSD>
+function hFig = CreateFigure(FigureId)
     hFig = figure( ...
         'Visible',       'off', ...
         'NumberTitle',   'off', ...
