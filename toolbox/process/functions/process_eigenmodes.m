@@ -263,24 +263,14 @@ end
 
 %% ===== COMPUTE INTERACTIVE (called from the cortex right-click menu) =====
 function ComputeInteractive(iSubject, SurfaceFile) %#ok<DEFNU>
-    % Ask number of eigenmodes
-    [res, isCancel] = java_dialog('input', 'Number of eigenmodes:', 'Compute eigenmodes', [], '300');
-    if isCancel || isempty(res)
-        return;
+    % One consolidated dialog: number of modes + mass type
+    opts = gui_show_dialog('Compute eigenmodes', @panel_eigenmodes_compute);
+    if isempty(opts)
+        return;   % cancelled
     end
-    nModes = str2double(res);
-    if isnan(nModes) || (nModes < 1)
-        bst_error('Number of eigenmodes must be a positive integer.', 'Compute eigenmodes', 0);
-        return;
-    end
-    nModes = round(nModes);
-    % Ask mass matrix type (combo returns the selected string, [] if cancelled)
-    MassType = java_dialog('combo', 'Mass matrix type:', 'Compute eigenmodes', [], ...
-                           {'barycentric', 'voronoi', 'galerkin'});
-    if isempty(MassType)
-        return;
-    end
-    % Confirm overwrite if eigenmodes already exist on this surface
+    nModes   = opts.nModes;
+    MassType = opts.MassType;
+    % Confirm overwrite if eigenmodes already exist
     [~, isComputed] = in_tess_eigenmodes(SurfaceFile);
     if isComputed
         isOverwrite = java_dialog('confirm', ...
@@ -289,18 +279,16 @@ function ComputeInteractive(iSubject, SurfaceFile) %#ok<DEFNU>
             return;
         end
     end
-    % Compute: RemoveDC=true, Repair=false, isInteractive=true (manifold prompt handled in Compute)
+    % Compute (RemoveDC=true, Repair=false, isInteractive=true)
     errMsg = Compute(SurfaceFile, nModes, MassType, true, false, true);
     if ~isempty(errMsg)
         bst_error(errMsg, 'Compute eigenmodes', 0);
         return;
     end
-    % Reload the subject so the database reflects the new eigenmodes
+    % Reflect the new eigenmodes in the database
     db_reload_subjects(iSubject);
-    % Confirmation
-    java_dialog('msgbox', ...
-        sprintf('Computed %d eigenmodes (%s mass) on:\n%s', nModes, MassType, SurfaceFile), ...
-        'Compute eigenmodes');
+    % Visual confirmation: open the viewer on the freshly-computed modes
+    view_eigenmodes(SurfaceFile);
 end
 
 
