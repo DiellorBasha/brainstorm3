@@ -84,27 +84,14 @@ function hFig = ViewFigure(ResultsFile)
     hFig = [];
     bst_progress('start', 'Eigenspectrum', 'Loading source activations...');
     try
-        % Load the source result into a dataset (kernel link OK, including raw).
-        [iDS, iResult] = bst_memory('LoadResultsFile', ResultsFile);
-        if isempty(iDS)
-            bst_progress('stop');
-            return;
-        end
-        % Materialize the kernel/grid matrices: LoadResultsFile loads only metadata,
-        % so ImagingKernel/ImageGridAmp and nComponents are empty until this runs
-        % (mirrors panel_surface's UpdateSurfaceData path for the cortex display).
-        if isempty(GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp) && ...
-           isempty(GlobalData.DataSet(iDS).Results(iResult).ImagingKernel)
-            bst_memory('LoadResultsMatrix', iDS, iResult);
-        end
-        % Surface associated with the source model.
-        SurfaceFile = GlobalData.DataSet(iDS).Results(iResult).SurfaceFile;
-        if isempty(SurfaceFile)
+        % --- Surface + eigenmodes first (metadata only; does NOT load recordings) ---
+        ResHdr = in_bst_results(ResultsFile, 0, 'SurfaceFile');
+        if ~isfield(ResHdr, 'SurfaceFile') || isempty(ResHdr.SurfaceFile)
             bst_progress('stop');
             bst_error('This source file has no associated surface.', 'Eigenspectrum', 0);
             return;
         end
-        % Eigenmodes on that surface.
+        SurfaceFile = ResHdr.SurfaceFile;
         [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
         if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
             bst_progress('stop');
@@ -115,6 +102,21 @@ function hFig = ViewFigure(ResultsFile)
         % Older eigenmode files may not store MassType; default to barycentric.
         if ~isfield(Eig, 'MassType') || isempty(Eig.MassType)
             Eig.MassType = 'barycentric';
+        end
+        % --- Run the standard "cortical activations" machinery ---
+        % Opening the cortex figure sets up the dataset (raw paging/navigation, kernel,
+        % time-stepping), so the eigenspectrum reads the SAME per-page source map the cortex
+        % colormap uses, on the fly -- no full-recording load, correct page advance.
+        hFig3d = view_surface_data(SurfaceFile, ResultsFile);
+        if isempty(hFig3d)
+            bst_progress('stop');
+            return;
+        end
+        % Dataset/result indices the cortex figure just set up (returns existing, no reload).
+        [iDS, iResult] = bst_memory('LoadResultsFile', ResultsFile);
+        if isempty(iDS)
+            bst_progress('stop');
+            return;
         end
         % Reject head models we cannot project (e.g. mixed, nComponents==0).
         nComp = GlobalData.DataSet(iDS).Results(iResult).nComponents;
@@ -128,8 +130,7 @@ function hFig = ViewFigure(ResultsFile)
         sSurf = in_tess_bst(SurfaceFile);
         [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
         nVert = size(Eig.Vectors, 1);
-        % Probe the current time: confirms the source grid matches the eigenmode surface
-        % AND that the realized (lazy) field is available for this result.
+        % Probe the current time: confirm the source grid matches the eigenmode surface.
         Sprobe = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');
         if isempty(Sprobe) || (size(Sprobe, 1) ~= nVert)
             bst_progress('stop');
