@@ -239,25 +239,14 @@ function hFig = ViewFigure(ResultsFile)
 end
 
 
-%% ===== GUI: build the bare figure (called by bst_figures CreateFigure) =====
+%% ===== GUI: build the figure (called by bst_figures CreateFigure) =====
+% Build it THROUGH figure_timeseries so it inherits all the appdata
+% (isPlotEditToolbar, GraphSelection, Colormap, ...) and callbacks (resize,
+% mouse, scroll, display-config menu) the reused engine relies on. Then we just
+% rename it and point keys at our handler (x-axis modes), delegating the rest.
 function hFig = CreateFigure(FigureId)
-    hFig = figure( ...
-        'Visible',       'off', ...
-        'NumberTitle',   'off', ...
-        'IntegerHandle', 'off', ...
-        'MenuBar',       'none', ...
-        'Toolbar',       'figure', ...
-        'DockControls',  'on', ...
-        'Units',         'pixels', ...
-        'Color',         [.9 .9 .9], ...
-        'Pointer',       'arrow', ...
-        'Tag',           'EigenSpectrum', ...
-        'Name',          'Eigenspectrum', ...
-        'CloseRequestFcn', @(h,ev)bst_figures('DeleteFigure', h, ev), ...
-        'KeyPressFcn',     @FigureKeyPressedCallback);
-    setappdata(hFig, 'FigureId', FigureId);
-    setappdata(hFig, 'isStatic', 0);
-    % Axes are created by figure_timeseries('PlotFigure') (tagged 'AxesGraph').
+    hFig = figure_timeseries('CreateFigure', FigureId);
+    set(hFig, 'Name', 'Eigenspectrum', 'KeyPressFcn', @FigureKeyPressedCallback);
 end
 
 
@@ -335,9 +324,8 @@ function CurrentTimeChangedCallback(hFig)
 end
 
 
-%% ===== GUI: keys — e/k/w switch x-axis; arrows step the global time cursor =====
+%% ===== GUI: keys — e/k/w switch x-axis; everything else -> figure_timeseries =====
 function FigureKeyPressedCallback(hFig, ev)
-    global GlobalData;
     switch (ev.Key)
         case 'e'
             setappdata(hFig, 'AxisMode', 'eigenvalue');
@@ -348,18 +336,8 @@ function FigureKeyPressedCallback(hFig, ev)
         case 'w'
             setappdata(hFig, 'AxisMode', 'wavelength');
             UpdateFigurePlot(hFig, 0);
-        case {'leftarrow', 'rightarrow', 'uparrow', 'downarrow', 'pageup', 'pagedown'}
-            if isempty(GlobalData) || isempty(GlobalData.UserTimeWindow.SamplingRate)
-                return;
-            end
-            sr = GlobalData.UserTimeWindow.SamplingRate;
-            t  = GlobalData.UserTimeWindow.CurrentTime;
-            switch (ev.Key)
-                case {'leftarrow', 'downarrow'},  t = t - sr;
-                case {'rightarrow', 'uparrow'},   t = t + sr;
-                case 'pageup',                    t = t + 10 * sr;
-                case 'pagedown',                  t = t - 10 * sr;
-            end
-            panel_time('SetCurrentTime', t);   % moves the one global clock -> redraws all figures
+        otherwise
+            % Standard shortcuts (arrows = step time, gain, etc.).
+            figure_timeseries('FigureKeyPressedCallback', hFig, ev);
     end
 end
