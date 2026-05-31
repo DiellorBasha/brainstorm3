@@ -136,12 +136,25 @@ serves the mass `M` **only for Voronoi** (the only variant the mex exposes today
 
 | `MassType` request | `L` (stiffness) | `M` (mass) |
 |---|---|---|
-| `voronoi`     | nxr | **nxr** |
+| `voronoi`     | nxr | **nxr** (see caveat below) |
 | `barycentric` | nxr | MATLAB fallback |
 | `galerkin`    | nxr | MATLAB fallback |
 
 If the plugin is unavailable, the entire existing MATLAB implementation runs
 unchanged.
+
+> **Validated outcome (parity test, `tess_sphere(642)`):** the stiffness `L`
+> matches the MATLAB assembler to machine epsilon (`max|dL| ≈ 9e-16`) for all
+> three mass types — nxr is a perfect drop-in for the cotangent Laplacian.
+>
+> **CAVEAT — nxr's "Voronoi" mass is not a true Voronoi mass.** Empirically,
+> nxr's served mass is a **barycentric-style dual area** (`area/3`), matching
+> Brainstorm's *barycentric* mass to machine precision (`dBary ≈ 3e-17`) and
+> diverging from the true circumcentric Voronoi mass at irregular (low-valence)
+> vertices (`dVor ≈ 1.6e-3`). We knowingly serve nxr's mass for now and pin it to
+> its real nature in the parity test. **This is flagged for an upstream fix in
+> nxr-compute (see §10.1).** Until then, `tess_laplacian(...,'voronoi','Backend',
+> 'nxr')` returns a different `M` than the `'matlab'` backend.
 
 ```matlab
 % --- backend selection ---
@@ -199,22 +212,27 @@ These must be verified, not assumed — the parity test (§8) is the gate:
 
 ## 8. Deliverable 4 — Tests
 
-Run via the MATLAB MCP (`run_matlab_test_file`) against a live Brainstorm path.
+Tests are function-style scripts under `dev/tests/` (matching the repo idiom, e.g.
+`test_laplacian_ico.m`). Run by invoking the function directly via the MATLAB MCP
+(`evaluate_matlab_code` / `run_matlab_file`), **not** `run_matlab_test_file` —
+MATLAB's `runtests` does not recognize plain function-style tests.
 
-1. **Plugin lifecycle test.** `bst_plugin('Install','nxr-compute')` succeeds; the
-   `TestFile` is found; `nxr_compute('version')` returns a string; the `+nxr`
-   package resolves; unload restores prior path state.
-2. **Parity test (pass/fail gate).** On a real downsampled cortex surface
-   (icosphere-downsampled, clean 2-manifold):
-   - `max(abs(L_nxr - L_matlab))` within tolerance, for the stiffness.
-   - `max(abs(M_nxr - M_matlab))` within tolerance, for **Voronoi** mass.
-   - Sanity: `L` is symmetric, row sums ≈ 0, PSD (smallest eigenvalue ≥ -tol).
-   - Tolerance is "numerically close," not bit-exact — the two implementations
-     may differ in obtuse-triangle Voronoi handling and assembly order. Record the
-     observed max delta and set `tol` accordingly; investigate if it is large.
-3. **Fallback test.** With the plugin force-unloaded, `tess_laplacian` still
-   produces correct operators (the original MATLAB path), confirming graceful
-   degradation.
+1. **Plugin lifecycle test** (`dev/tests/test_nxr_plugin_lifecycle.m`). Stages the
+   locally-built plugin into `UserPluginsDir`, `bst_plugin('Load',...)`, verifies
+   `GetInstalled(...).isLoaded`, runs `nxr.manifold.context` to prove the binary
+   computes `K`/`M`, then `Unload`. Offline — no GitHub release needed.
+2. **Parity test (pass/fail gate)** (`dev/tests/test_laplacian_nxr_parity.m`). On
+   `tess_sphere(642)`:
+   - `L`: `max|L_nxr − L_matlab| < 1e-6` for all three mass types. (Observed: `9e-16`.)
+   - `M`: nxr's served mass is pinned to what it actually is — equals MATLAB
+     **barycentric** to `< 1e-9` (observed `3e-17`) — and asserted to diverge from
+     MATLAB **Voronoi** (`> 1e-6`, observed `1.6e-3`) as a tripwire for the future
+     upstream fix (§10.1).
+   - Sanity: nxr `L` symmetric, row sums ≈ 0; nxr mass total area conserved, positive
+     diagonal.
+3. **Fallback / backend-selection test** (`dev/tests/test_laplacian_backend_select.m`).
+   With the plugin unloaded, `'auto'` uses MATLAB and `'nxr'` errors; with it loaded,
+   `'auto'` equals `'nxr'`. Confirms graceful degradation and deterministic selection.
 
 ## 9. Multi-platform (documented, not built)
 
@@ -225,15 +243,36 @@ Currently nxr-compute has **only** `mexmaca64`; there is no CI. Future work:
 - Add `linux64` / `win64` (and Intel `mac64` if needed) arms to the `PlugDesc`
   `switch` (§6). The per-OS structure already exists, so this is additive.
 
-## 10. Risks
+## 10. Risks & follow-ups
 
-- **Faces 0/1-based mismatch** — most likely failure mode; caught by the parity
-  test (§8) and resolved in §7 reconciliation.
-- **Voronoi mass divergence** — nxr's Voronoi vs the existing mixed-Voronoi obtuse
-  handling (Meyer et al.) may not be bit-identical; the parity tolerance accounts
-  for this. If the delta is large, restrict the nxr `M` path or reconcile schemes.
-- **Manifold strictness** — nxr throws on non-manifold input where the MATLAB path
-  only warns; the backend switch must handle this so behavior is predictable.
+- **Faces 0/1-based mismatch** — RESOLVED. The mex `mxToFaceBuffer` subtracts 1, so
+  Brainstorm's 1-based `Faces` are passed unchanged; confirmed by the lifecycle and
+  parity tests (no manifold/index error, machine-epsilon `L` parity).
+- **Manifold strictness** — nxr throws `nxr:nonManifold` on non-manifold input where
+  the MATLAB path only warns. The backend switch handles this: in `'auto'` mode an
+  nxr error is caught and the MATLAB path runs (with a warning); explicit
+  `'Backend','nxr'` surfaces the error.
+
+### 10.1 ⚑ TODO — fix nxr's Voronoi mass upstream (nxr-compute repo)
+
+**Action required.** nxr's mass operator currently returns a **barycentric-style
+dual area**, not a true **circumcentric (mixed) Voronoi mass**. Evidence: it matches
+Brainstorm's barycentric mass to machine precision (`dBary ≈ 3e-17`) and diverges
+from the true Voronoi mass at irregular vertices (`dVor ≈ 1.6e-3` on `tess_sphere(642)`,
+concentrated on the 12 valence-5 vertices; nxr's value there equals `area/3` exactly).
+
+- **Fix location:** the mass assembly in nxr-compute (`assembleManifoldOperators`),
+  to compute the Meyer et al. (2003) mixed-Voronoi area (with obtuse-triangle
+  handling), matching `local_mass_matlab`'s `'voronoi'` branch.
+- **Consider also:** plumbing the mass *variant* through the mex
+  `assembleManifoldOperators` command (currently fixed to one mass), so nxr can serve
+  barycentric / Voronoi / consistent-FEM explicitly.
+- **Guard already in place:** `dev/tests/test_laplacian_nxr_parity.m` pins nxr's mass
+  to barycentric AND asserts `dVor > 1e-6`. When the upstream fix lands, that second
+  assert will fail deliberately — signalling that the test (and the §7 caveat) must be
+  updated to assert true-Voronoi parity.
+- **Until fixed:** `tess_laplacian(...,'voronoi','Backend','nxr')` returns a different
+  `M` than the `'matlab'` backend. Code carries a `CAVEAT/TODO` comment pointing here.
 
 ## 11. Decisions log (from brainstorming)
 
@@ -248,7 +287,10 @@ Currently nxr-compute has **only** `mexmaca64`; there is no CI. Future work:
   uses nxr only when already loaded and never auto-installs on the operator path;
   installation is a one-time action. MATLAB fallback covers the not-loaded case.
 - **Mass variants:** `L` always from nxr; `M` from nxr only for Voronoi (the only
-  variant the mex exposes); barycentric/galerkin `M` via MATLAB. Extending the mex
-  to all three variants is future work in the nxr repo.
+  variant the mex exposes); barycentric/galerkin `M` via MATLAB. **Refinement
+  (post-parity):** nxr's served "Voronoi" mass is actually a barycentric-style dual
+  area, not a true circumcentric Voronoi. We keep serving it for now and pin it to
+  its real nature in the parity test; fixing nxr to compute a true Voronoi mass (and
+  plumbing the variant through the mex) is flagged as upstream follow-up (§10.1).
 - **First platform:** macOS only now; Linux/Windows packaging later (none exist in
   nxr-compute yet).
