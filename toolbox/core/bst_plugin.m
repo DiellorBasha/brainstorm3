@@ -189,6 +189,22 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
     PlugDesc(end).LoadedFcn      = 'assignin(''base'', ''ISO2MESH_TEMP'', bst_get(''BrainstormTmpDir''));';
     PlugDesc(end).UnloadPlugs    =  {'easyh5','jsnirfy'};
 
+    % === ANATOMY: NXR-COMPUTE (geometry compute backend) ===
+    PlugDesc(end+1)              = GetStruct('nxr-compute');
+    PlugDesc(end).Version        = 'github-master';
+    PlugDesc(end).Category       = 'Anatomy';
+    PlugDesc(end).AutoUpdate     = 0;
+    PlugDesc(end).AutoLoad       = 0;            % SPM-style install-on-demand
+    PlugDesc(end).URLinfo        = 'https://github.com/neurodynamics-xr/nxr-compute';
+    PlugDesc(end).ReadmeFile     = 'README.md';
+    PlugDesc(end).CompiledStatus = 1;            % native code, download-only
+    switch(OsType)
+        case 'mac64arm'
+            PlugDesc(end).URLzip   = 'https://github.com/neurodynamics-xr/nxr-compute/releases/download/plugin-dev/nxr-compute-dev-mac.zip';
+            PlugDesc(end).TestFile = 'nxr_compute.mexmaca64';
+        % 'linux64' / 'win64' / 'mac64' arms added when those binaries exist
+    end
+
     % === ANATOMY: NEUROMAPS ===
     PlugDesc(end+1)              = GetStruct('neuromaps');
     PlugDesc(end).Version        = 'github-main';
