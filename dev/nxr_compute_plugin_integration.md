@@ -2,8 +2,8 @@
 
 - **Date:** 2026-05-31
 - **Author:** Diellor Basha (with Claude)
-- **Status:** Design — pending review
-- **Branch:** feature/eigenmode-spectrum (fork of brainstorm3)
+- **Status:** Implemented — all tasks complete, 5/5 tests passing, macOS release published (`plugin-v1.0.0`)
+- **Branch:** feature/nxr-compute-plugin (off `development`)
 
 ## 1. Goal
 
