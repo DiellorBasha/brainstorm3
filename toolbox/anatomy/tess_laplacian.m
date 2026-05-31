@@ -40,6 +40,13 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %                     2-manifold. Default: false. This function ASSUMES a
 %                     clean 2-manifold input (e.g. icosphere-downsampled
 %                     cortex); validate upstream with tess_manifold.
+%     Backend : Compute backend (default: 'auto')
+%               'auto'   — use the nxr-compute plugin if it is loaded,
+%                          otherwise the built-in MATLAB implementation.
+%               'nxr'    — force nxr-compute (errors if the plugin is not loaded).
+%               'matlab' — force the built-in MATLAB implementation.
+%               nxr supplies the stiffness L for all mass types and the
+%               Voronoi mass; barycentric/galerkin mass use the MATLAB path.
 %
 % OUTPUTS:
 %     L : [nVertices x nVertices] sparse positive semidefinite cotangent
@@ -84,11 +91,13 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 MassType = 'barycentric';
 Symmetrize = true;
 CheckManifold = false;
+Backend = 'auto';          % 'auto' | 'nxr' | 'matlab'
 for i = 1:2:length(varargin)
     switch lower(varargin{i})
         case 'masstype',      MassType = lower(varargin{i+1});
         case 'symmetrize',    Symmetrize = varargin{i+1};
         case 'checkmanifold', CheckManifold = varargin{i+1};
+        case 'backend',       Backend = lower(varargin{i+1});
     end
 end
 
@@ -110,6 +119,36 @@ if CheckManifold
              'inaccurate. Validate with tess_manifold or re-mesh with icosphere downsampling.']);
     end
 end
+
+%% ===== BACKEND SELECTION =====
+% tess_laplacian is a hot-loop operator: it uses nxr only if already loaded
+% and never auto-installs here. Installation is a one-time action (Plugins
+% menu, or a higher-level pipeline calling bst_plugin('Install','nxr-compute')).
+backend = resolve_backend(Backend);
+if strcmp(backend, 'nxr')
+    try
+        ctx = nxr.manifold.context(Vertices, Faces);   % faces passed 1-based (marshal subtracts 1)
+        L = ctx.K;
+        % nxr exposes only the Voronoi mass; other mass types use the MATLAB assembler.
+        if strcmp(MassType, 'voronoi')
+            M = ctx.M;                                  % nxr Voronoi mass
+        else
+            M = local_mass_matlab(Vertices, Faces, MassType);
+        end
+        if Symmetrize
+            L = (L + L') / 2;
+        end
+        return;
+    catch ME
+        if strcmp(Backend, 'nxr')   % explicit request: surface the error
+            rethrow(ME);
+        end
+        % 'auto': degrade gracefully to the MATLAB implementation
+        warning('tess_laplacian:nxrFallback', ...
+            'nxr backend failed (%s); falling back to MATLAB.', ME.message);
+    end
+end
+% Fall through to the pure-MATLAB implementation below.
 
 %% ===== COTANGENT LAPLACIAN =====
 % For each face (i,j,k), compute cotangent weights for all three edges.
@@ -256,5 +295,38 @@ switch MassType
 
     otherwise
         error('Unknown MassType: %s. Use ''barycentric'', ''voronoi'', or ''galerkin''.', MassType);
+end
+end
+
+
+function tf = nxr_is_loaded()
+% True only if the nxr-compute plugin is currently loaded (cheap, in-memory).
+tf = false;
+try
+    PlugDesc = bst_plugin('GetInstalled', 'nxr-compute');
+    tf = ~isempty(PlugDesc) && isfield(PlugDesc, 'isLoaded') && PlugDesc.isLoaded;
+catch
+    tf = false;   % bst_plugin unavailable / any error -> MATLAB path
+end
+end
+
+function backend = resolve_backend(req)
+% Map the requested backend to an effective one ('nxr' or 'matlab').
+switch req
+    case 'matlab'
+        backend = 'matlab';
+    case 'nxr'
+        if ~nxr_is_loaded()
+            error('tess_laplacian:nxrNotLoaded', ...
+                ['Backend ''nxr'' requested but the nxr-compute plugin is not loaded. ' ...
+                 'Install/load it via bst_plugin(''Install'',''nxr-compute'').']);
+        end
+        backend = 'nxr';
+    otherwise   % 'auto'
+        if nxr_is_loaded()
+            backend = 'nxr';
+        else
+            backend = 'matlab';
+        end
 end
 end
