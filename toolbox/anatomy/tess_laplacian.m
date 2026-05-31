@@ -45,8 +45,10 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %                          otherwise the built-in MATLAB implementation.
 %               'nxr'    — force nxr-compute (errors if the plugin is not loaded).
 %               'matlab' — force the built-in MATLAB implementation.
-%               nxr supplies the stiffness L for all mass types and the
-%               Voronoi mass; barycentric/galerkin mass use the MATLAB path.
+%               nxr supplies the stiffness L for all mass types and its own
+%               mass matrix for 'voronoi' (currently a barycentric-style dual
+%               area, pending an upstream nxr fix); barycentric/galerkin use
+%               the MATLAB mass.
 %
 % OUTPUTS:
 %     L : [nVertices x nVertices] sparse positive semidefinite cotangent
@@ -129,9 +131,14 @@ if strcmp(backend, 'nxr')
     try
         ctx = nxr.manifold.context(Vertices, Faces);   % faces passed 1-based (marshal subtracts 1)
         L = ctx.K;
-        % nxr exposes only the Voronoi mass; other mass types use the MATLAB assembler.
+        % nxr serves a single mass matrix, surfaced here for the 'voronoi' request.
+        % CAVEAT/TODO: nxr's mass is currently a barycentric-style dual area, NOT a
+        % true circumcentric Voronoi mass (it diverges from Brainstorm's Voronoi at
+        % irregular vertices). To be fixed upstream in nxr-compute. Until then,
+        % tess_laplacian(...,'voronoi','Backend','nxr') differs from the 'matlab'
+        % backend. See dev/nxr_compute_plugin_integration.md (Known limitations).
         if strcmp(MassType, 'voronoi')
-            M = ctx.M;                                  % nxr Voronoi mass
+            M = ctx.M;                                  % nxr mass (barycentric-style; pending upstream fix)
         else
             M = local_mass_matlab(Vertices, Faces, MassType);
         end
