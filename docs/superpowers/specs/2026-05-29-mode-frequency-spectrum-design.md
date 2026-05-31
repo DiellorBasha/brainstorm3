@@ -216,13 +216,15 @@ pattern mirrored from `bst_timefreq`'s `ReadRawRecordings`), and the saved
   the output timefreq file has shape `[nModes × 1 × nFreq]`, correct RowNames
   (mode labels), a sane ascending positive frequency vector, and finite power.
   Prints `ALL TESTS PASSED`.
-- **Parity test (the key correctness check)** — the linear relation
-  `mode = Φ'·M · source` holds on the **complex** spectrum (power is nonlinear), so
-  run both with **FFT, measure = 'none'** (complex): standard source FFT
-  (`process_fft`) → `X_src`, mode FFT → `X_mode`; assert
-  `X_mode == (Φ'·M) · X_src` to numerical tolerance. Repeat on a raw file **with a
-  marked bad segment** — equality there proves the bad-segment windows excluded are
-  identical. Prints `ALL TESTS PASSED`.
+- **Parity test (the key correctness check)** — `bst_psd` always returns power, and
+  its bad-segment skipping (`bst_psd.m:113`) runs *before* and independent of the
+  kernel (`:158`). So prove the kernel-swap equals project-first using `bst_psd`
+  alone, comparing power outputs (equal because the underlying complex per-window
+  spectra are equal):
+  `coeff = ModeKernel*F; TF_ref = bst_psd(coeff,…,BadSeg,[],…);`
+  `TF_mode = bst_psd(F,…,BadSeg,ModeKernel,…); assert(max(abs(TF_ref(:)-TF_mode(:)))<tol)`.
+  Run it with a `BadSegments` matrix that drops at least one window so the equality
+  also proves bad-segment handling is consistent. Prints `ALL TESTS PASSED`.
 - **Manual GUI validation** by the user afterward (the usual loop): compute
   eigenmodes → run "Mode-frequency spectrum (PSD/FFT)" on a source result →
   open the power-spectrum lines view.
