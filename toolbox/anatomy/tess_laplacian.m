@@ -189,101 +189,72 @@ if Symmetrize
 end
 
 %% ===== MASS MATRIX =====
-% Triangle areas (half the cross product magnitude)
+M = local_mass_matlab(Vertices, Faces, MassType);
+
+end
+
+
+function M = local_mass_matlab(Vertices, Faces, MassType)
+% Pure-MATLAB mass matrix for a triangle mesh (barycentric/voronoi/galerkin).
+nV = size(Vertices, 1);
+Faces = double(Faces);
+V1 = Vertices(Faces(:,1), :);
+V2 = Vertices(Faces(:,2), :);
+V3 = Vertices(Faces(:,3), :);
+e1 = V2 - V1;  e2 = V3 - V1;  e3 = V3 - V2;
+dot12   = sum(e1 .* e2, 2);
+cross12 = cross(e1, e2, 2);
+dblArea = sqrt(sum(cross12.^2, 2));
+dot_at2 = sum((-e1) .* e3, 2);
+dot_at3 = sum((-e2) .* (-e3), 2);
+denom = dblArea;  denom(denom == 0) = eps;
 areas = 0.5 * dblArea;
 
 switch MassType
     case 'barycentric'
-        % Lumped mass: each vertex gets 1/3 of the area of each adjacent face.
-        % M(i,i) = sum over faces containing i of area(face) / 3
         vertAreas = accumarray(Faces(:), repmat(areas, 3, 1) / 3, [nV, 1]);
         M = sparse(1:nV, 1:nV, vertAreas, nV, nV);
 
     case 'voronoi'
-        % Voronoi dual cell areas. For non-obtuse triangles, the Voronoi
-        % area at vertex i is:
-        %   A_v(i) = (1/8) * sum_j [cot(alpha_ij) * ||e_ij||^2]
-        % where the sum is over edges incident to i in each face.
-        %
-        % For obtuse triangles, we use Meyer et al. 2003 mixed Voronoi:
-        %   - If angle at i is obtuse: A_v(i) = area/2
-        %   - If another angle is obtuse: A_v(i) = area/4
-        %   - Otherwise: standard Voronoi formula
-
-        % Squared edge lengths
-        l23sq = sum(e3.^2, 2);   % ||V3-V2||^2 = edge opposite V1
-        l13sq = sum(e2.^2, 2);   % ||V3-V1||^2 = edge opposite V2
-        l12sq = sum(e1.^2, 2);   % ||V2-V1||^2 = edge opposite V3
-
-        % Angles at each vertex (using dot products; sign of dot = cos sign)
-        % Obtuse if dot product < 0
-        obtuse1 = (dot12 < 0);   % angle at V1 > 90 degrees
-        obtuse2 = (dot_at2 < 0); % angle at V2 > 90 degrees
-        obtuse3 = (dot_at3 < 0); % angle at V3 > 90 degrees
+        l23sq = sum(e3.^2, 2);
+        l13sq = sum(e2.^2, 2);
+        l12sq = sum(e1.^2, 2);
+        obtuse1 = (dot12 < 0);
+        obtuse2 = (dot_at2 < 0);
+        obtuse3 = (dot_at3 < 0);
         anyObtuse = obtuse1 | obtuse2 | obtuse3;
-
-        % Standard Voronoi areas (for non-obtuse faces):
-        % Area at Vi = (1/8) * [cot(angle_j)*||e_ij||^2 + cot(angle_k)*||e_ik||^2]
-        % But with our cot variables (already divided by dblArea):
-        % Raw cotangents (without the 0.5 FEM scaling)
         raw_cot1 = dot12 ./ denom;
         raw_cot2 = dot_at2 ./ denom;
         raw_cot3 = dot_at3 ./ denom;
-
-        % For vertex Vi, Voronoi area = (1/8) * sum over edges at Vi of
-        % [cot(opposite angle) * ||edge||^2].
-        %
-        % V1: edges (V1,V2) and (V1,V3), opposite angles at V3 and V2
-        %   Area_V1 = (1/8) * [cot(V3)*||V1-V2||^2 + cot(V2)*||V1-V3||^2]
-        % V2: edges (V2,V1) and (V2,V3), opposite angles at V3 and V1
-        %   Area_V2 = (1/8) * [cot(V3)*||V1-V2||^2 + cot(V1)*||V2-V3||^2]
-        % V3: edges (V3,V1) and (V3,V2), opposite angles at V2 and V1
-        %   Area_V3 = (1/8) * [cot(V2)*||V1-V3||^2 + cot(V1)*||V2-V3||^2]
         areaV1 = (1/8) * (raw_cot3 .* l12sq + raw_cot2 .* l13sq);
         areaV2 = (1/8) * (raw_cot3 .* l12sq + raw_cot1 .* l23sq);
         areaV3 = (1/8) * (raw_cot2 .* l13sq + raw_cot1 .* l23sq);
-
-        % Mixed Voronoi: fix obtuse triangles (Meyer et al. 2003)
-        % If the angle at the vertex is obtuse: area = total_area / 2
-        % If another angle is obtuse: area = total_area / 4
         areaV1(obtuse1) = areas(obtuse1) / 2;
         areaV2(obtuse2) = areas(obtuse2) / 2;
         areaV3(obtuse3) = areas(obtuse3) / 2;
-
-        % For vertices where ANOTHER angle is obtuse:
         otherObtuse1 = anyObtuse & ~obtuse1;
         otherObtuse2 = anyObtuse & ~obtuse2;
         otherObtuse3 = anyObtuse & ~obtuse3;
         areaV1(otherObtuse1) = areas(otherObtuse1) / 4;
         areaV2(otherObtuse2) = areas(otherObtuse2) / 4;
         areaV3(otherObtuse3) = areas(otherObtuse3) / 4;
-
         vertAreas = accumarray(Faces(:), [areaV1; areaV2; areaV3], [nV, 1]);
         M = sparse(1:nV, 1:nV, vertAreas, nV, nV);
 
     case 'galerkin'
-        % Consistent FEM mass matrix (non-diagonal):
-        %   M(i,i) += area(face) / 6   for each face containing vertex i
-        %   M(i,j) += area(face) / 12  for each face containing edge (i,j)
-        %
-        % This gives M = integral of phi_i * phi_j over the mesh, where
-        % phi are piecewise linear basis functions.
         ii_diag = Faces(:);
         jj_diag = Faces(:);
         ww_diag = repmat(areas / 6, 3, 1);
-
         ii_off = [Faces(:,1); Faces(:,2); Faces(:,3); Faces(:,2); Faces(:,3); Faces(:,1)];
         jj_off = [Faces(:,2); Faces(:,3); Faces(:,1); Faces(:,1); Faces(:,2); Faces(:,3)];
         ww_off = repmat(areas / 12, 6, 1);
-
         M = sparse([ii_diag; ii_off], [jj_diag; jj_off], [ww_diag; ww_off], nV, nV);
-
-        if Symmetrize
-            M = (M + M') / 2;
-        end
+        % Galerkin mass is symmetric by construction (mirrored off-diagonals);
+        % (M+M')/2 only clears floating-point asymmetry. Applied unconditionally
+        % because the Symmetrize option governs the stiffness L, not the mass M.
+        M = (M + M') / 2;
 
     otherwise
         error('Unknown MassType: %s. Use ''barycentric'', ''voronoi'', or ''galerkin''.', MassType);
 end
-
 end
