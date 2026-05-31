@@ -145,21 +145,18 @@ unchanged.
 
 ```matlab
 % --- backend selection ---
-useNxr = false;
-if ~CheckManifold || isCleanManifold   % keep existing manifold semantics
-    useNxr = bst_plugin('IsLoaded', 'nxr-compute');
-    if ~useNxr
-        useNxr = bst_plugin('Install', 'nxr-compute');   % attempt on demand
-    end
-end
+% Use nxr only if it is already loaded. tess_laplacian is a hot-loop
+% operator, so it never triggers a (possibly networked) install itself;
+% installation is a one-time action (Plugins menu, or a higher-level
+% pipeline calling bst_plugin('Install','nxr-compute') once up front).
+useNxr = nxr_is_loaded();   % local helper, cheap in-memory check
 
 if useNxr
-    ctx = nxr.manifold.context(Vertices, Faces);   % faces convention handled here
-    L = ctx.K;
+    L = nxr.manifold.operator.stiffness(nxr.manifold.context(Vertices, Faces));
     if strcmp(MassType, 'voronoi')
-        M = ctx.M;                  % nxr Voronoi mass
+        M = nxr.manifold.operator.mass(nxr.manifold.context(Vertices, Faces));
     else
-        M = local_mass_matlab(...); % existing MATLAB mass for this variant
+        M = local_mass_matlab(Vertices, Faces, MassType);  % existing MATLAB mass
     end
     if Symmetrize, L = (L + L')/2; end   % match existing behavior
 else
@@ -167,8 +164,24 @@ else
 end
 ```
 
-The existing MATLAB mass code is factored into a local helper so both paths share
-it; the existing stiffness code remains the fallback.
+where `nxr_is_loaded()` is a local helper:
+
+```matlab
+function tf = nxr_is_loaded()
+    tf = false;
+    try
+        PlugDesc = bst_plugin('GetInstalled', 'nxr-compute');
+        tf = ~isempty(PlugDesc) && isfield(PlugDesc,'isLoaded') && PlugDesc.isLoaded;
+    catch
+        tf = false;   % bst_plugin unavailable / any error → MATLAB path
+    end
+end
+```
+
+The existing MATLAB mass code is factored into a local helper (`local_mass_matlab`)
+so both paths share it; the existing stiffness code remains the fallback. (Building
+the context twice above is for clarity; the implementation builds it once and reads
+both `K` and `M` from it.)
 
 ### Reconciliation work (where the real care goes)
 These must be verified, not assumed — the parity test (§8) is the gate:
@@ -231,8 +244,9 @@ Currently nxr-compute has **only** `mexmaca64`; there is no CI. Future work:
 - **Registration:** native `PlugDesc` entry in the fork's `bst_plugin.m`.
 - **Integration depth:** library + one consumer (`tess_laplacian`); general
   `bst_nxr` bridge deferred.
-- **Wiring model:** SPM-style guarded `Install`, with MATLAB fallback for
-  `tess_laplacian` specifically.
+- **Wiring model:** SPM-style guarded use. `tess_laplacian` (a hot-loop operator)
+  uses nxr only when already loaded and never auto-installs on the operator path;
+  installation is a one-time action. MATLAB fallback covers the not-loaded case.
 - **Mass variants:** `L` always from nxr; `M` from nxr only for Voronoi (the only
   variant the mex exposes); barycentric/galerkin `M` via MATLAB. Extending the mex
   to all three variants is future work in the nxr repo.
