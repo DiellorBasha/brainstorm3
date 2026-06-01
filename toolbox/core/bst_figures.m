@@ -1019,10 +1019,10 @@ function FireModesChanged() %#ok<DEFNU>
                 continue;
             end
             % UpdateSurfaceData recomputes the displayed column (filtered via
-            % panel_eigenmodes('ApplyToColumn') once Task 6 wires it in), then
-            % UpdateSurfaceColor repaints.
+            % panel_eigenmodes('ApplyToColumn') once Task 6 wires it in) and
+            % repaints it: it calls UpdateSurfaceColormap internally, which
+            % triggers UpdateSurfaceColor per data surface (same as FireCurrentTimeChanged).
             panel_surface('UpdateSurfaceData', sFig.hFigure);
-            figure_3d('UpdateSurfaceColor', sFig.hFigure);
         end
     end
 end
