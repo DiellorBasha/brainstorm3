@@ -887,6 +887,9 @@ function DeleteFigure(hFigure, varargin)
     if ishandle(hFigure) && isappdata(hFigure, 'Surface')
         % Signals the "Surfaces" and "Scouts" panel that a figure was closed
         panel_surface('UpdatePanel');
+        if gui_brainstorm('isTabVisible', 'EigenModes')
+            panel_eigenmodes('UpdatePanel');
+        end
         % Remove scouts references
         panel_scout('RemoveScoutsFromFigure', hFigure);
         % Reset "Coordinates" panel

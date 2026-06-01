@@ -146,28 +146,66 @@ function Shape_Callback(shape)
 end
 
 
+%% ===== PURE: panel context from front-figure facts =====
+function c = ClassifyContext(facts) %#ok<DEFNU>
+    c = struct('kind','none','selectEnabled',false,'activeEnabled',false);
+    if facts.isEigenView
+        c.kind='view';   c.selectEnabled=true;  c.activeEnabled=false;
+    elseif facts.hasSourceModes
+        c.kind='source'; c.selectEnabled=true;  c.activeEnabled=true;
+    end
+end
+
+
 %% ===== UPDATE PANEL: populate/enable from the active figure's surface =====
 function UpdatePanel(hFig) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', 'EigenModes');
-    if isempty(ctrl)
-        return;
+    if isempty(ctrl), return; end
+    if (nargin < 1) || isempty(hFig) || ~ishandle(hFig)
+        hFig = bst_figures('GetCurrentFigure', '3D');
     end
-    SurfaceFile = GetFigureSurfaceWithModes(hFig);
-    isEligible = ~isempty(SurfaceFile);
-    SetPanelEnabled(ctrl, isEligible);
-    if ~isEligible
-        ctrl.jLabelReadout.setText('no eigenmodes');
+    isEigenView = ~isempty(hFig) && ishandle(hFig) && ~isempty(getappdata(hFig, 'EigenView'));
+    SurfaceFile = '';
+    if isEigenView
+        ev = getappdata(hFig, 'EigenView'); SurfaceFile = ev.SurfaceFile;
+    elseif ~isempty(hFig) && ishandle(hFig)
+        SurfaceFile = GetFigureSurfaceWithModes(hFig);
+    end
+    facts = struct('isEigenView', isEigenView, 'hasSourceModes', ~isEigenView && ~isempty(SurfaceFile));
+    c = ClassifyContext(facts);
+    % Selection controls + the Active toggle, gated by context
+    SetSelectEnabled(ctrl, c.selectEnabled);
+    ctrl.jCheckActive.setEnabled(c.activeEnabled);
+    ctrl.jCheckActive.setVisible(c.activeEnabled);
+    if ~strcmp(c.kind, 'source')
+        SetActive(0);                          % no stale filtering off-source
+    end
+    if strcmp(c.kind, 'none')
+        ctrl.jLabelReadout.setText('no eigenmode view');
         return;
     end
     [Eig, ~] = in_tess_eigenmodes(SurfaceFile);
-    K = double(max(Eig.CompRank));   % K_paired (per-component rank count)
-    % (Re)initialise state if the surface changed
+    K = double(max(Eig.CompRank));
     st = GetState();
     if ~file_compare(st.SurfaceFile, SurfaceFile) || (st.nModes ~= K)
         ResetState(SurfaceFile, K);
+        if isEigenView
+            SetWindowShape('single'); SetCurrentMode(1);
+        end
     end
-    ctrl.jSliderLo.setMaximum(K);  ctrl.jSliderHi.setMaximum(K);
+    ctrl.jSliderLo.setMaximum(K); ctrl.jSliderHi.setMaximum(K);
     RefreshControls();
+end
+
+
+%% ===== helpers =====
+function SetSelectEnabled(ctrl, isOn)
+    sel = {'jSliderLo','jSliderHi','jLabelBand','jRadioSingle','jRadioBox','jRadioTaper','jRadioGain'};
+    for i = 1:numel(sel)
+        if isfield(ctrl, sel{i}) && isa(ctrl.(sel{i}), 'javax.swing.JComponent')
+            ctrl.(sel{i}).setEnabled(logical(isOn));
+        end
+    end
 end
 
 
