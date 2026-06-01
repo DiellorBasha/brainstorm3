@@ -153,9 +153,12 @@ precision convention of other cached per-element surface arrays (`Curvature`, `S
 - **nxr-only:** guarded `bst_plugin('Install','nxr-compute')` at the top; no MATLAB
   fallback (the trivial connection has no built-in equivalent). Mirrors the
   `bst_normalize_mni`/SPM pattern.
-- **Clean errors** (each with a `tess_tangents:*` identifier): missing `Reg.Sphere`;
-  nxr unavailable; a hemisphere with faces but a failed Gauss-Bonnet check; unassigned
-  faces after the per-hemisphere pass.
+- **Clean errors** (each with a `tess_tangents:*` identifier): missing `Reg.Sphere`
+  (`noRegSphere`); nxr unavailable (`nxrUnavailable`); connected/not-cleanly-separable
+  hemispheres (`connectedHemispheres`, from `tess_hemisplit`'s `isConnected` — the
+  per-hemisphere solve requires disconnected hemispheres); a failed Gauss-Bonnet check
+  (`gaussBonnet`); a face assigned to both hemispheres (`overlap`); unassigned faces
+  after the per-hemisphere pass (`unassignedFaces`).
 
 ## 8. Testing
 
