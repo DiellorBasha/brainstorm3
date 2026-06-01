@@ -103,7 +103,7 @@ SingBase = Vtx(sv, :);
 ctrAll   = mean(Vtx, 1);
 radial   = SingBase - ctrAll;
 radial   = radial ./ max(sqrt(sum(radial.^2, 2)), eps);
-liftLen  = 0.05 * max(max(Vtx,[],1) - min(Vtx,[],1));
+liftLen  = 0.10 * max(max(Vtx,[],1) - min(Vtx,[],1));   % generous: poles can sit deep in sulci
 SingTip  = SingBase + liftLen .* radial;
 
 %% ===== OPEN SURFACE FIGURE =====
@@ -157,7 +157,7 @@ DrawArrows();
         [B, Uvec, Vvec, Nvec] = ArrowField(Centroids, FaceNormals, U, V, idx, ...
             quiverSize * inRadius(idx), 0.1 * meanEdge);
         % Frame glyphs as headless lines (axis-like); U and V share a color.
-        hUq = quiver3(B(:,1), B(:,2), B(:,3), Uvec(:,1), Uvec(:,2), Uvec(:,3), 0, ...
+        quiver3(B(:,1), B(:,2), B(:,3), Uvec(:,1), Uvec(:,2), Uvec(:,3), 0, ...
             'Parent', hAxes, 'Color', colTangent, 'LineWidth', quiverWidth, ...
             'ShowArrowHead', 'off', 'Tag', 'tangentU');
         quiver3(B(:,1), B(:,2), B(:,3), Vvec(:,1), Vvec(:,2), Vvec(:,3), 0, ...
@@ -182,9 +182,16 @@ DrawArrows();
                 'Parent', hAxes, 'MarkerFaceColor', colSing, 'MarkerEdgeColor', [.2 .2 .2], ...
                 'MarkerSize', 10, 'LineStyle', 'none', 'Tag', 'tangentSing');
         end
-        % Legend (meaning of the glyphs).
-        legH = hUq;  legL = {'Tangent frame (U,V)'};
-        if ~isempty(hNq),  legH = [legH, hNq];  legL{end+1} = 'Face normal';            end
+        % Legend. Use plain-line proxies for the frame/normal so the swatches
+        % match the headless line glyphs (a quiver handle draws an arrow icon).
+        hTanProxy = line(NaN, NaN, 'Parent', hAxes, 'Color', colTangent, ...
+            'LineStyle', '-', 'LineWidth', 2, 'Tag', 'tangentLegProxy');
+        legH = hTanProxy;  legL = {'Tangent frame (U,V)'};
+        if ~isempty(hNq)
+            hNorProxy = line(NaN, NaN, 'Parent', hAxes, 'Color', colNormal, ...
+                'LineStyle', '-', 'LineWidth', 2, 'Tag', 'tangentLegProxy');
+            legH = [legH, hNorProxy];  legL{end+1} = 'Face normal';
+        end
         if ~isempty(hSq),  legH = [legH, hSq];  legL{end+1} = 'FreeSurfer sphere pole';  end
         legend(legH, legL, 'TextColor', [1 1 1], 'Color', [0 0 0], ...
             'Location', 'NorthEast', 'Interpreter', 'none', 'Tag', 'tangentLegend');
