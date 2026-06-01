@@ -137,12 +137,13 @@ function hFig = ViewFigure(SurfaceFile, ~)
     % Tag the figure so FireModesChanged can route to ModesChangedCallback
     setappdata(hFig, 'EigenView', struct('SurfaceFile', SurfaceFile, 'PairedGrid', Grid, 'Info', Info, 'ResultsFile', file_short(OutputFile)));
 
-    % Bottom-left legend
+    % Bottom-left legend (handle stored in EigenView so ModesChangedCallback can update it)
     hLabel = uicontrol('Style', 'text', 'String', '...', 'Units', 'Pixels', ...
         'Position', [6 0 560 20], 'HorizontalAlignment', 'left', ...
         'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
         'ForegroundColor', [.9 .9 .9], 'BackgroundColor', [0 0 0], 'Parent', hFig);
-    % Custom keyboard stepping (drives the lever) + legend
+    ev = getappdata(hFig, 'EigenView'); ev.LabelHandle = hLabel; setappdata(hFig, 'EigenView', ev);
+    % Custom keyboard stepping (drives the lever)
     KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
     set(hFig, 'KeyPressFcn', @KeyPress_Callback);
     % Auto-remove the transient result when the figure is destroyed
@@ -150,27 +151,8 @@ function hFig = ViewFigure(SurfaceFile, ~)
     % Show + populate the panel
     gui_brainstorm('ShowToolTab', 'EigenModes');
     panel_eigenmodes('UpdatePanel', hFig);
-    % Initial legend
-    UpdateLabel();
-
-    % ===== NESTED: update bottom-left legend from lever state =====
-    function UpdateLabel()
-        try
-            st = panel_eigenmodes('GetState');
-            k  = st.iCurrentMode;
-            lv = Info.Values(Info.CompRank == k);
-            if numel(lv) >= 2
-                lamStr = sprintf('lambda = [%.4g, %.4g]', lv(1), lv(2));
-            elseif ~isempty(lv)
-                lamStr = sprintf('lambda = %.4g', lv(1));
-            else
-                lamStr = 'lambda = n/a';
-            end
-            set(hLabel, 'String', sprintf('Mode %d / %d     %s', k, Kp, lamStr));
-        catch
-            % Non-fatal: label update is cosmetic
-        end
-    end
+    % Initial repaint + label (driven by ModesChangedCallback so it stays consistent)
+    ModesChangedCallback(hFig);
 
     % ===== NESTED: keyboard navigation via the lever =====
     function KeyPress_Callback(h, keyEvent)
@@ -189,7 +171,6 @@ function hFig = ViewFigure(SurfaceFile, ~)
             otherwise
                 if ~isempty(KeyPressFcn_bak), KeyPressFcn_bak(h, keyEvent); end
         end
-        UpdateLabel();
     end
 
     % ===== NESTED: delete the transient result on figure close =====
@@ -216,5 +197,24 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
     if isempty(iDS), return; end
     GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp = [col col];
     panel_surface('UpdateSurfaceData', hFig);
-    figure_3d('UpdateSurfaceColor', hFig);
+    % Update bottom-left legend
+    if isfield(ev, 'LabelHandle') && ishandle(ev.LabelHandle)
+        K = size(ev.PairedGrid, 2);
+        nKeep = nnz(W > 1e-6);
+        lo = find(W > 1e-6, 1, 'first'); hi = find(W > 1e-6, 1, 'last');
+        cur = 1;
+        try, cur = panel_eigenmodes('GetCurrentMode'); catch, end
+        % Representative eigenvalue for the current paired rank
+        lamStr = '';
+        if isfield(ev, 'Info') && isfield(ev.Info, 'Values') && isfield(ev.Info, 'CompRank')
+            ik = find(ev.Info.CompRank(:) == cur, 1);
+            if ~isempty(ik), lamStr = sprintf('    lambda = %.4g', ev.Info.Values(ik)); end
+        end
+        if (nKeep <= 1)
+            str = sprintf('Mode %d / %d%s', cur, K, lamStr);
+        else
+            str = sprintf('Modes %d-%d / %d   (%d modes)', lo, hi, K, nKeep);
+        end
+        set(ev.LabelHandle, 'String', str);
+    end
 end
