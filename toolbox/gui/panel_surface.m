@@ -1811,6 +1811,11 @@ function [isOk, TessInfo] = UpdateSurfaceData(hFig, iSurfaces)
                 % === GET CURRENT VALUES ===
                 % Get results values
                 TessInfo(iTess).Data = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');
+                % Eigenmode scale lever: live, non-destructive band-limited
+                % reconstruction of the displayed column (no-op when the lever is
+                % inactive or set for a different surface).
+                TessInfo(iTess).Data = panel_eigenmodes('ApplyToColumn', ...
+                    TessInfo(iTess).SurfaceFile, TessInfo(iTess).Data);
                 if isempty(TessInfo(iTess).Data)
                     isOk = 0;
                     return;
