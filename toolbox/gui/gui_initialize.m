@@ -50,6 +50,7 @@ gui_show('panel_record', 'BrainstormTab', 'tools');
 gui_show('panel_filter', 'BrainstormTab', 'tools');
 gui_show('panel_surface', 'BrainstormTab', 'tools');
 gui_show('panel_scout', 'BrainstormTab', 'tools');
+gui_show('panel_eigenmodes', 'BrainstormTab', 'tools');
 % gui_show('panel_cluster', 'BrainstormTab', 'tools');
 % gui_show('panel_dipoles', 'BrainstormTab', 'tools');
 
