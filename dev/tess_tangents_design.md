@@ -104,7 +104,10 @@ surface-file-level. The per-hemisphere nxr solve is factored into a local helper
    tess_addsphere / import with surface registration").
 3. **Ensure nxr:** `bst_plugin('Install','nxr-compute')`; error `tess_tangents:nxrUnavailable`
    if it cannot be installed/loaded.
-4. **Hemisphere split:** `[rH, lH] = tess_hemisplit(TessMat)`.
+4. **Hemisphere split:** `[rH, lH, isConnected] = tess_hemisplit(TessMat)`. If
+   `isConnected` (hemispheres connected / not cleanly separable, e.g. the y-split
+   fallback) → error `tess_tangents:connectedHemispheres` (the per-hemisphere solve
+   requires disconnected hemispheres).
 5. Initialize `U = zeros(nF,3)`, `V = zeros(nF,3)`, `assigned = false(nF,1)`.
 6. For each hemisphere `vH ∈ {lH, rH}` (skip if empty), call `solve_hemisphere`:
    - `isVH = false(nV,1); isVH(vH) = true;`
