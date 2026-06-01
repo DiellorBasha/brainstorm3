@@ -1171,6 +1171,11 @@ switch (lower(action))
                     gui_component('MenuItem', jPopup, [], 'Display', IconLoader.ICON_DISPLAY, [], @(h,ev)view_surface(filenameRelative));
                 end
 
+                % === DISPLAY TANGENT BASIS (cortex only) ===
+                if strcmpi(nodeType, 'cortex') && (length(bstNodes) == 1)
+                    gui_component('MenuItem', jPopup, [], 'Display tangent basis', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@view_tangents, filenameRelative));
+                end
+
                 % === SET SURFACE TYPE ===
                 if ~bst_get('ReadOnly') && (length(bstNodes) == 1)
                     jItemSetSurfType = gui_component('Menu', jPopup, [], 'Set surface type', IconLoader.ICON_SURFACE, [], []);
