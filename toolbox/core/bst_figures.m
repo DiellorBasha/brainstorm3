@@ -1152,6 +1152,9 @@ function SetCurrentFigure(hFig, Type)
                 if gui_brainstorm('isTabVisible', 'Cluster')
                     panel_cluster('CurrentFigureChanged_Callback', hFig);
                 end
+                if gui_brainstorm('isTabVisible', 'EigenModes')
+                    panel_eigenmodes('UpdatePanel', hFig);
+                end
             end
         case 'TypeTF'
             % Only when figure changed (whatever the type of the figure is)
@@ -1430,10 +1433,6 @@ function hNewFig = CloneFigure(hFig)
         end
         % Update Surfaces panel
         panel_surface('UpdatePanel');
-        % Update the eigenmode scale lever for the new figure's surface
-        if gui_brainstorm('isTabVisible', 'EigenModes')
-            panel_eigenmodes('UpdatePanel', hNewFig);
-        end
         % Reload figure
         if strcmpi(FigureId.Type, 'Topography')
             % 2DDisc: Set white background
