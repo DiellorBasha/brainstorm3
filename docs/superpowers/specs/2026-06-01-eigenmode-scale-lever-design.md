@@ -197,4 +197,26 @@ user drags band -> panel_eigenmodes('SetBand', ...)
   single-mode 3D browser — both future consumers of `FireModesChanged`.
 - Differential/spectral analysis filter library.
 - Persisting lever state to disk (state is session-scoped, like `panel_time`/`panel_freq`).
+
+## Tracked follow-ups (from final review — non-blocking)
+
+Implemented and verified live (e2e on a real cortex + source map). These refinements were
+deliberately deferred and should be picked up later:
+
+- **Cache invalidation on mid-session recompute.** `EnsureCache` keys on `SurfaceFile`; if
+  eigenmodes are recomputed for the *same* surface with the same `nModes` mid-session, the
+  cached `Eig`/`MassMatrix` go stale (the different-`nModes` case fails safe as a no-op via the
+  `numel(W) ~= Eig.nModes` guard). Add a `panel_eigenmodes('InvalidateCache', SurfaceFile)` hook
+  called from the eigenmode write path (`out_tess_eigenmodes`/`process_eigenmodes`) to close it.
+- **Unconstrained sources.** For 3-component source maps, `GetResultsValues` collapses to a
+  rectified magnitude *before* `ApplyToColumn`, so the lever band-limits the magnitude map (a
+  valid scalar smoothing, not signed-field filtering). Document this caveat.
+- **`gain` shape** is a Gaussian-in-mode-index (no eigenvalues needed, keeps `BuildWeights`
+  pure/testable), not a heat-kernel — reasonable deviation; optionally note in a panel tooltip.
+- **Minor perf:** de-dup the two `in_tess_eigenmodes` fetches per focus change
+  (`GetFigureSurfaceWithModes` + `UpdatePanel`).
+- **Test gaps (acceptable):** drive `tapered`/`gain` through `ApplyToColumn`; cover the
+  `UpdatePanel` surface-switch `ResetState` path headlessly.
+- **NotifyChanged cross-layer coupling** (state setters fire the GUI broadcast via `exist()`
+  guards) matches `panel_time`/`panel_freq` norms — kept as-is.
 ```
