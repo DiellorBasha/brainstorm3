@@ -76,6 +76,31 @@ if ~isfield(TessMat, 'Reg') || ~isstruct(TessMat.Reg) || ...
 end
 Sphere = TessMat.Reg.Sphere.Vertices;
 
+%% ===== REQUIRE IMPORT-TIME HEMISPHERE LABELS (no geometric re-split) =====
+% Use the left/right labels recorded at import (the 'Structures' atlas). Do NOT
+% re-split the mesh via connected components or coordinates: the cortex is
+% already split and labeled at import time, so we only READ the labels here.
+hasLabels = false;
+if isfield(TessMat, 'Atlas') && ~isempty(TessMat.Atlas)
+    iStruct = find(strcmpi({TessMat.Atlas.Name}, 'Structures'), 1);
+    if ~isempty(iStruct) && ~isempty(TessMat.Atlas(iStruct).Scouts)
+        scouts  = TessMat.Atlas(iStruct).Scouts;
+        labels  = {scouts.Label};
+        regions = {scouts.Region};
+        reg1    = cellfun(@(c) c(1), regions(~cellfun(@isempty, regions)), 'UniformOutput', false);
+        hasL = any(strcmpi(labels, 'lh')) || any(strcmpi(reg1, 'L'));
+        hasR = any(strcmpi(labels, 'rh')) || any(strcmpi(reg1, 'R'));
+        hasLabels = hasL && hasR;
+    end
+end
+if ~hasLabels
+    error('tess_tangents:noHemisphereLabels', ...
+        ['Surface has no ''Structures'' atlas with left/right hemisphere labels. ' ...
+         'tess_tangents uses the import-time hemisphere labels and never re-splits the ' ...
+         'mesh geometrically (no connected-components / coordinate split). Re-import the ' ...
+         'FreeSurfer surface so the ''Structures'' atlas is present.']);
+end
+
 %% ===== ENSURE NXR-COMPUTE PLUGIN =====
 [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
 if ~isOk
@@ -83,7 +108,9 @@ if ~isOk
         'tess_tangents requires the nxr-compute plugin: %s', errMsg);
 end
 
-%% ===== HEMISPHERE SPLIT =====
+%% ===== HEMISPHERE SPLIT (from import labels, not geometry) =====
+% Labels are guaranteed present (checked above), so tess_hemisplit reads the
+% 'Structures' atlas and does not use its geometric region-grow / y-split fallback.
 [rH, lH, isConnected] = tess_hemisplit(TessMat);
 if isConnected
     error('tess_tangents:connectedHemispheres', ...

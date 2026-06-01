@@ -156,8 +156,16 @@ precision convention of other cached per-element surface arrays (`Curvature`, `S
 - **nxr-only:** guarded `bst_plugin('Install','nxr-compute')` at the top; no MATLAB
   fallback (the trivial connection has no built-in equivalent). Mirrors the
   `bst_normalize_mni`/SPM pattern.
+- **Hemisphere labels come from import, never geometry.** tess_tangents reads the
+  left/right labels recorded at import (the `'Structures'` atlas, via `tess_hemisplit`'s
+  label path) and **never re-splits the mesh** via connected components or coordinates.
+  It requires the labels to be present and errors (`noHemisphereLabels`) otherwise,
+  rather than falling back to `tess_hemisplit`'s geometric region-grow / y-split. The
+  per-hemisphere submeshes handed to nxr are throwaway local copies; the stored surface
+  mesh is never modified.
 - **Clean errors** (each with a `tess_tangents:*` identifier): missing `Reg.Sphere`
-  (`noRegSphere`); nxr unavailable (`nxrUnavailable`); connected/not-cleanly-separable
+  (`noRegSphere`); missing import-time hemisphere labels (`noHemisphereLabels`); nxr
+  unavailable (`nxrUnavailable`); connected/not-cleanly-separable
   hemispheres (`connectedHemispheres`, from `tess_hemisplit`'s `isConnected` — the
   per-hemisphere solve requires disconnected hemispheres); a failed Gauss-Bonnet check
   (`gaussBonnet`); a face assigned to both hemispheres (`overlap`); unassigned faces
