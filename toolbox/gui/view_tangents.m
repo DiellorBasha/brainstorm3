@@ -6,23 +6,26 @@ function hFig = view_tangents(SurfaceFile, varargin)
 %
 % DESCRIPTION:
 %     Overlays the per-face tangent frame field (TessMat.TangentFrame, computed
-%     by tess_tangents) on a Brainstorm surface figure. U and V (the in-plane
-%     tangent cross) are drawn in one color; the face normal in another. The
-%     four registration-pole singularities are marked. If the surface has no
-%     stored frame, it is computed and stored via tess_tangents first.
+%     by tess_tangents) on a Brainstorm surface figure. Each frame is drawn as
+%     headless lines (axis-like): U and V (the in-plane tangent cross) share one
+%     color, the face normal another. Glyphs are sized per-face to the triangle's
+%     inscribed circle so they sit flat within each face. The registration-pole
+%     singularities are marked. The cortex is shown opaque, unsmoothed, with the
+%     wireframe edges on. If the surface has no stored frame, it is computed and
+%     stored via tess_tangents first.
 %
 %     Keyboard (figure focused):
-%       Left/Right          fewer / more arrows
-%       Shift + Up/Down     arrow length
+%       Left/Right          fewer / more frames
+%       Shift + Up/Down     glyph length
 %       Ctrl  + Up/Down     line width
-%       N                   toggle normal arrows
+%       N                   toggle face-normal glyphs (off by default)
 %       P                   toggle singularity markers
 %       H                   help
 %
 % INPUT:
 %     - SurfaceFile : Brainstorm cortex surface (relative or full path).
 % OPTIONS:
-%     - MaxArrows : initial number of face frames drawn (default 2000).
+%     - MaxArrows : initial number of face frames drawn (default: half the faces).
 % OUTPUT:
 %     - hFig : handle to the 3D figure.
 %
@@ -49,7 +52,7 @@ function hFig = view_tangents(SurfaceFile, varargin)
 % Authors: Diellor Basha, 2026
 
 %% ===== PARSE INPUTS =====
-MaxArrows = 2000;
+MaxArrows = [];   % default resolved below to half the faces
 if mod(numel(varargin), 2) ~= 0
     error('view_tangents:badArgs', 'Optional arguments must be name/value pairs.');
 end
@@ -80,30 +83,52 @@ U   = double(TF.U);
 V   = double(TF.V);
 
 %% ===== DISPLAY GEOMETRY (plain MATLAB) =====
-[~, FaceNormals] = tess_normals(Vtx, Fcs);
+[VertNormals, FaceNormals] = tess_normals(Vtx, Fcs);
 Centroids = (Vtx(Fcs(:,1),:) + Vtx(Fcs(:,2),:) + Vtx(Fcs(:,3),:)) / 3;
+% Per-face edge lengths and inscribed-circle radius. The radius is the per-face
+% glyph length, so each frame fits flat inside its own triangle.
 e1 = sqrt(sum((Vtx(Fcs(:,2),:) - Vtx(Fcs(:,1),:)).^2, 2));
 e2 = sqrt(sum((Vtx(Fcs(:,3),:) - Vtx(Fcs(:,2),:)).^2, 2));
 e3 = sqrt(sum((Vtx(Fcs(:,1),:) - Vtx(Fcs(:,3),:)).^2, 2));
 meanEdge = mean([e1; e2; e3]);
-SingXYZ  = Vtx(TF.Singularities.Vertices, :);
+sP       = (e1 + e2 + e3) / 2;
+faceArea = sqrt(max(sP .* (sP - e1) .* (sP - e2) .* (sP - e3), 0));
+inRadius = faceArea ./ max(sP, eps);          % [nF x 1] inscribed-circle radius
+% Singularity poles, pushed outward along the (outward-oriented) vertex normal
+% so the markers sit proud of the opaque surface for BOTH hemispheres.
+sv      = TF.Singularities.Vertices(:);
+ctrAll  = mean(Vtx, 1);
+nrmS    = VertNormals(sv, :);
+outSign = sign(sum(nrmS .* (Vtx(sv,:) - ctrAll), 2));   % +1 if normal points outward
+outSign(outSign == 0) = 1;
+offDir  = nrmS .* outSign;
+offDir  = offDir ./ max(sqrt(sum(offDir.^2, 2)), eps);
+SingXYZ = Vtx(sv, :) + (0.02 * max(max(Vtx,[],1) - min(Vtx,[],1))) .* offDir;
 
 %% ===== OPEN SURFACE FIGURE =====
+% Opaque (SurfAlpha=0) so the frame reads clearly against the cortex.
 % Disable scout overlay (isScouts=0) — scout panel cannot handle surfaces
 % that are absolute paths to files not registered in the Brainstorm DB.
-hFig = view_surface(SurfaceFile, 0.5, [.5 .5 .5], 'NewFigure', 0);
+hFig = view_surface(SurfaceFile, 0, [.5 .5 .5], 'NewFigure', 0);
 if isempty(hFig)
     error('view_tangents:noFigure', 'Could not open the surface figure.');
 end
 set(hFig, 'Name', ['Tangent basis: ' SurfaceFile]);
+% Default surface display: opaque, no smoothing, wireframe edges ON.
+panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0);
+panel_surface('SetSurfaceEdges',  hFig, 1, 1);
 hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
 hold(hAxes, 'on');
 
 %% ===== DISPLAY STATE =====
-nArrows     = min(MaxArrows, nF);
+if isempty(MaxArrows)
+    nArrows = round(nF / 2);   % default: frames on half the faces
+else
+    nArrows = min(MaxArrows, nF);
+end
 quiverSize  = 1;
 quiverWidth = 1;
-showNormals = true;
+showNormals = false;     % normals off by default (toggle with N)
 showSing    = true;
 colTangent  = [1 1 0];   % yellow : U and V
 colNormal   = [1 0 1];   % magenta: face normal
@@ -126,26 +151,40 @@ DrawArrows();
     function DrawArrows()
         delete(findobj(hAxes, '-depth', 1, '-regexp', 'Tag', '^tangent'));
         idx = ArrowSubsample(nF, nArrows);
+        % Per-face glyph length = inscribed-circle radius (fits flat in the
+        % triangle); bases lifted slightly off the surface. autoscale OFF (0).
         [B, Uvec, Vvec, Nvec] = ArrowField(Centroids, FaceNormals, U, V, idx, ...
-            quiverSize * meanEdge, 0.25 * meanEdge);
-        % U and V (same color) — autoscale OFF (scale arg 0) for equal lengths
-        quiver3(B(:,1), B(:,2), B(:,3), Uvec(:,1), Uvec(:,2), Uvec(:,3), 0, ...
-            'Parent', hAxes, 'Color', colTangent, 'LineWidth', quiverWidth, 'Tag', 'tangentU');
+            quiverSize * inRadius(idx), 0.1 * meanEdge);
+        % Frame glyphs as headless lines (axis-like); U and V share a color.
+        hUq = quiver3(B(:,1), B(:,2), B(:,3), Uvec(:,1), Uvec(:,2), Uvec(:,3), 0, ...
+            'Parent', hAxes, 'Color', colTangent, 'LineWidth', quiverWidth, ...
+            'ShowArrowHead', 'off', 'Tag', 'tangentU');
         quiver3(B(:,1), B(:,2), B(:,3), Vvec(:,1), Vvec(:,2), Vvec(:,3), 0, ...
-            'Parent', hAxes, 'Color', colTangent, 'LineWidth', quiverWidth, 'Tag', 'tangentV');
-        % Face normal (different color)
+            'Parent', hAxes, 'Color', colTangent, 'LineWidth', quiverWidth, ...
+            'ShowArrowHead', 'off', 'Tag', 'tangentV');
+        % Face normal (different color), also headless.
+        hNq = [];
         if showNormals
-            quiver3(B(:,1), B(:,2), B(:,3), Nvec(:,1), Nvec(:,2), Nvec(:,3), 0, ...
-                'Parent', hAxes, 'Color', colNormal, 'LineWidth', quiverWidth, 'Tag', 'tangentN');
+            hNq = quiver3(B(:,1), B(:,2), B(:,3), Nvec(:,1), Nvec(:,2), Nvec(:,3), 0, ...
+                'Parent', hAxes, 'Color', colNormal, 'LineWidth', quiverWidth, ...
+                'ShowArrowHead', 'off', 'Tag', 'tangentN');
         end
-        % Singularity poles
+        % Singularity poles.
+        hSq = [];
         if showSing && ~isempty(SingXYZ)
-            plot3(SingXYZ(:,1), SingXYZ(:,2), SingXYZ(:,3), 'o', ...
+            hSq = plot3(SingXYZ(:,1), SingXYZ(:,2), SingXYZ(:,3), 'o', ...
                 'Parent', hAxes, 'MarkerFaceColor', colSing, 'MarkerEdgeColor', [.2 .2 .2], ...
                 'MarkerSize', 10, 'LineStyle', 'none', 'Tag', 'tangentSing');
         end
+        % Legend (meaning of the glyphs).
+        legH = hUq;  legL = {'Tangent frame (U,V)'};
+        if ~isempty(hNq),  legH = [legH, hNq];  legL{end+1} = 'Face normal';            end
+        if ~isempty(hSq),  legH = [legH, hSq];  legL{end+1} = 'FreeSurfer sphere pole';  end
+        legend(legH, legL, 'TextColor', [1 1 1], 'Color', [0 0 0], ...
+            'Location', 'NorthEast', 'Interpreter', 'none', 'Tag', 'tangentLegend');
+        % Status label.
         set(hLabel, 'String', sprintf( ...
-            'U,V (yellow) - normal (magenta) - %d/%d faces shown - H for help', numel(idx), nF));
+            '%d / %d faces  |  N: normals   P: poles   <-/->: density   H: help', numel(idx), nF));
     end
 
 %% ===== KEYBOARD CALLBACK =====
@@ -177,10 +216,10 @@ DrawArrows();
                 showSing = ~showSing;
             case 'h'
                 java_dialog('msgbox', ['<HTML><TABLE>' ...
-                    '<TR><TD><B>Left / Right</B></TD><TD>Fewer / more arrows</TD></TR>' ...
-                    '<TR><TD><B>Shift + Up/Down</B></TD><TD>Arrow length</TD></TR>' ...
+                    '<TR><TD><B>Left / Right</B></TD><TD>Fewer / more frames</TD></TR>' ...
+                    '<TR><TD><B>Shift + Up/Down</B></TD><TD>Glyph length</TD></TR>' ...
                     '<TR><TD><B>Ctrl + Up/Down</B></TD><TD>Line width</TD></TR>' ...
-                    '<TR><TD><B>N</B></TD><TD>Toggle normal arrows</TD></TR>' ...
+                    '<TR><TD><B>N</B></TD><TD>Toggle face-normal glyphs</TD></TR>' ...
                     '<TR><TD><B>P</B></TD><TD>Toggle singularity markers</TD></TR>' ...
                     '</TABLE>'], 'Tangent basis shortcuts', [], 0);
                 return;
@@ -202,8 +241,9 @@ end
 
 %% ========================================================================
 function [B, Uvec, Vvec, Nvec] = ArrowField(Centroids, FaceNormals, U, V, idx, len, offset)
-% Pure geometry: equal-length unit arrows, bases offset off the surface along
-% the face normal. No figure handles — testable in isolation.
+% Pure geometry: unit-direction glyphs scaled by len (scalar or per-face column),
+% bases offset off the surface along the face normal. No figure handles —
+% testable in isolation.
 unit = @(X) X ./ max(sqrt(sum(X.^2, 2)), eps);
 n = unit(FaceNormals(idx, :));
 B = Centroids(idx, :) + offset .* n;
