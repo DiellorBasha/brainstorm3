@@ -83,7 +83,7 @@ U   = double(TF.U);
 V   = double(TF.V);
 
 %% ===== DISPLAY GEOMETRY (plain MATLAB) =====
-[VertNormals, FaceNormals] = tess_normals(Vtx, Fcs);
+[~, FaceNormals] = tess_normals(Vtx, Fcs);
 Centroids = (Vtx(Fcs(:,1),:) + Vtx(Fcs(:,2),:) + Vtx(Fcs(:,3),:)) / 3;
 % Per-face edge lengths and inscribed-circle radius. The radius is the per-face
 % glyph length, so each frame fits flat inside its own triangle.
@@ -94,16 +94,17 @@ meanEdge = mean([e1; e2; e3]);
 sP       = (e1 + e2 + e3) / 2;
 faceArea = sqrt(max(sP .* (sP - e1) .* (sP - e2) .* (sP - e3), 0));
 inRadius = faceArea ./ max(sP, eps);          % [nF x 1] inscribed-circle radius
-% Singularity poles, pushed outward along the (outward-oriented) vertex normal
-% so the markers sit proud of the opaque surface for BOTH hemispheres.
-sv      = TF.Singularities.Vertices(:);
-ctrAll  = mean(Vtx, 1);
-nrmS    = VertNormals(sv, :);
-outSign = sign(sum(nrmS .* (Vtx(sv,:) - ctrAll), 2));   % +1 if normal points outward
-outSign(outSign == 0) = 1;
-offDir  = nrmS .* outSign;
-offDir  = offDir ./ max(sqrt(sum(offDir.^2, 2)), eps);
-SingXYZ = Vtx(sv, :) + (0.02 * max(max(Vtx,[],1) - min(Vtx,[],1))) .* offDir;
+% Singularity poles drawn as "lollipops": a marker lifted RADIALLY outward from
+% the surface centroid (so it clears sulcal folds — a face-normal offset fails
+% for poles on steep walls, which are nearly tangential), with a thin stem back
+% to the true pole vertex. Keeps the cortex fully opaque.
+sv       = TF.Singularities.Vertices(:);
+SingBase = Vtx(sv, :);
+ctrAll   = mean(Vtx, 1);
+radial   = SingBase - ctrAll;
+radial   = radial ./ max(sqrt(sum(radial.^2, 2)), eps);
+liftLen  = 0.05 * max(max(Vtx,[],1) - min(Vtx,[],1));
+SingTip  = SingBase + liftLen .* radial;
 
 %% ===== OPEN SURFACE FIGURE =====
 % Opaque (SurfAlpha=0) so the frame reads clearly against the cortex.
@@ -130,9 +131,9 @@ quiverSize  = 1;
 quiverWidth = 1;
 showNormals = false;     % normals off by default (toggle with N)
 showSing    = true;
-colTangent  = [1 1 0];   % yellow : U and V
-colNormal   = [1 0 1];   % magenta: face normal
-colSing     = [1 0 0];   % red    : singularities
+colTangent  = [1 1 0];      % yellow : U and V
+colNormal   = [1 0 1];      % magenta: face normal
+colSing     = [0 0.45 1];   % blue   : singularity poles
 
 % Hijack keyboard callback (fall through to original for unhandled keys)
 KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
@@ -169,10 +170,15 @@ DrawArrows();
                 'Parent', hAxes, 'Color', colNormal, 'LineWidth', quiverWidth, ...
                 'ShowArrowHead', 'off', 'Tag', 'tangentN');
         end
-        % Singularity poles.
+        % Singularity poles as lollipops: a stem from the true vertex to a marker
+        % lifted radially outward so it clears the opaque cortex.
         hSq = [];
-        if showSing && ~isempty(SingXYZ)
-            hSq = plot3(SingXYZ(:,1), SingXYZ(:,2), SingXYZ(:,3), 'o', ...
+        if showSing && ~isempty(SingTip)
+            line([SingBase(:,1)'; SingTip(:,1)'], ...
+                 [SingBase(:,2)'; SingTip(:,2)'], ...
+                 [SingBase(:,3)'; SingTip(:,3)'], ...
+                 'Parent', hAxes, 'Color', colSing, 'LineWidth', 1.5, 'Tag', 'tangentSingStem');
+            hSq = plot3(SingTip(:,1), SingTip(:,2), SingTip(:,3), 'o', ...
                 'Parent', hAxes, 'MarkerFaceColor', colSing, 'MarkerEdgeColor', [.2 .2 .2], ...
                 'MarkerSize', 10, 'LineStyle', 'none', 'Tag', 'tangentSing');
         end

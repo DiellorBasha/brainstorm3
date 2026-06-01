@@ -69,6 +69,11 @@ hS = findobj(hAxes, 'Tag', 'tangentSing');
 assert(~isempty(hS), 'No singularity markers drawn.');
 assert(numel(hS.XData) == numel(Tafter.TangentFrame.Singularities.Vertices), ...
     'Singularity marker count does not match stored Singularities.Vertices.');
+% Markers are blue lollipops with a stem to the true pole
+assert(hS.MarkerFaceColor(3) > hS.MarkerFaceColor(1) && hS.MarkerFaceColor(3) > hS.MarkerFaceColor(2), ...
+    'Singularity markers should be blue.');
+hStem = findobj(hAxes, 'Tag', 'tangentSingStem');
+assert(~isempty(hStem), 'No lollipop stems drawn for the singularities.');
 
 % --- Legend explains the singularity marker ---
 hLeg = findobj(hFig, 'Tag', 'tangentLegend');
@@ -96,6 +101,7 @@ assert(~isequal(hN.Color, hUnow.Color), 'Normal color must differ from U/V.');
 evP = struct('Key', 'p', 'Modifier', {{}});
 kp(hFig, evP);
 assert(isempty(findobj(hAxes, 'Tag', 'tangentSing')), 'P did not toggle the singularity markers off.');
+assert(isempty(findobj(hAxes, 'Tag', 'tangentSingStem')), 'P did not remove the lollipop stems.');
 
 close(hFig);
 
