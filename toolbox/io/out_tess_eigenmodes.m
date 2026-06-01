@@ -74,6 +74,11 @@ if isfield(Eigenmodes, 'Component'),   EigenmodesStore.Component   = Eigenmodes.
 if isfield(Eigenmodes, 'CompRank'),    EigenmodesStore.CompRank    = Eigenmodes.CompRank(:);    end
 if isfield(Eigenmodes, 'nComponents'), EigenmodesStore.nComponents = Eigenmodes.nComponents;    end
 EigenmodesStore.MassType    = Eigenmodes.MassType;
+% Persist the whole-mesh operators (and their types) for reuse (projection, filtering,
+% heat kernels, ...). Sparse matrices stay double (no sparse-single); negligible vs Vectors.
+if isfield(Eigenmodes, 'MassMatrix')    && ~isempty(Eigenmodes.MassMatrix),    EigenmodesStore.MassMatrix    = Eigenmodes.MassMatrix;    end
+if isfield(Eigenmodes, 'Laplacian')     && ~isempty(Eigenmodes.Laplacian),     EigenmodesStore.Laplacian     = Eigenmodes.Laplacian;     end
+if isfield(Eigenmodes, 'LaplacianType') && ~isempty(Eigenmodes.LaplacianType), EigenmodesStore.LaplacianType = Eigenmodes.LaplacianType; end
 EigenmodesStore.Sigma       = Eigenmodes.Sigma;
 EigenmodesStore.Tolerance   = Eigenmodes.Tolerance;
 EigenmodesStore.nRemoved    = Eigenmodes.nRemoved;
