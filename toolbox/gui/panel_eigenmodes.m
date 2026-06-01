@@ -83,6 +83,149 @@ function W = BuildWeights(shape, kLo, kHi, iCenter, K) %#ok<DEFNU>
 end
 
 
+%% ===== CREATE PANEL =====
+function bstPanelNew = CreatePanel() %#ok<DEFNU>
+    panelName = 'EigenModes';
+    import java.awt.*;
+    import javax.swing.*;
+
+    jPanelNew = gui_river([2,2], [4,4,6,6], 'Spatial scale (eigenmodes)');
+
+    % Active toggle + readout (same row)
+    jCheckActive = gui_component('Checkbox', jPanelNew, '', 'Active', [], ...
+        'Live-filter the displayed source map', @(h,ev)CheckActive_Callback());
+    jLabelReadout = gui_component('Label', jPanelNew, 'hfill', '');
+    jLabelReadout.setHorizontalAlignment(JLabel.RIGHT);
+
+    % Band: low / high sliders (dual-handle substitute)
+    gui_component('Label', jPanelNew, 'br', 'Mode band');
+    jSliderLo = JSlider(1, 100, 1);
+    jSliderHi = JSlider(1, 100, 30);
+    java_setcb(jSliderLo, 'MouseReleasedCallback', @(h,ev)Slider_Callback());
+    java_setcb(jSliderHi, 'MouseReleasedCallback', @(h,ev)Slider_Callback());
+    jPanelNew.add('br hfill', jSliderLo);
+    jPanelNew.add('br hfill', jSliderHi);
+    jLabelBand = gui_component('Label', jPanelNew, 'br', 'lo=1  c=15  hi=30');
+
+    % Window shape radios
+    jGroup = ButtonGroup();
+    gui_component('Label', jPanelNew, 'br', 'Window:');
+    jRadioSingle = gui_component('Radio', jPanelNew, '',   'Single', jGroup, '', @(h,ev)Shape_Callback('single'));
+    jRadioBox    = gui_component('Radio', jPanelNew, '',   'Box',    jGroup, '', @(h,ev)Shape_Callback('box'));
+    jRadioTaper  = gui_component('Radio', jPanelNew, 'br', 'Taper',  jGroup, '', @(h,ev)Shape_Callback('tapered'));
+    jRadioGain   = gui_component('Radio', jPanelNew, '',   'Gain',   jGroup, '', @(h,ev)Shape_Callback('gain'));
+    jRadioBox.setSelected(1);
+
+    ctrl = struct('jPanelTop',      jPanelNew, ...
+                  'jCheckActive',   jCheckActive, ...
+                  'jLabelReadout',  jLabelReadout, ...
+                  'jSliderLo',      jSliderLo, ...
+                  'jSliderHi',      jSliderHi, ...
+                  'jLabelBand',     jLabelBand, ...
+                  'jRadioSingle',   jRadioSingle, ...
+                  'jRadioBox',      jRadioBox, ...
+                  'jRadioTaper',    jRadioTaper, ...
+                  'jRadioGain',     jRadioGain);
+    bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
+end
+
+
+%% ===== CALLBACKS (read controls -> state verbs) =====
+function CheckActive_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    SetActive(ctrl.jCheckActive.isSelected());
+end
+
+function Slider_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    SetBand(ctrl.jSliderLo.getValue(), ctrl.jSliderHi.getValue());
+    RefreshControls();
+end
+
+function Shape_Callback(shape)
+    SetWindowShape(shape);
+    RefreshControls();
+end
+
+
+%% ===== UPDATE PANEL: populate/enable from the active figure's surface =====
+function UpdatePanel(hFig) %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    if isempty(ctrl)
+        return;
+    end
+    SurfaceFile = GetFigureSurfaceWithModes(hFig);
+    isEligible = ~isempty(SurfaceFile);
+    SetPanelEnabled(ctrl, isEligible);
+    if ~isEligible
+        ctrl.jLabelReadout.setText('no eigenmodes');
+        return;
+    end
+    [Eig, ~] = in_tess_eigenmodes(SurfaceFile);
+    K = Eig.nModes;
+    % (Re)initialise state if the surface changed
+    st = GetState();
+    if ~file_compare(st.SurfaceFile, SurfaceFile) || (st.nModes ~= K)
+        ResetState(SurfaceFile, K);
+    end
+    ctrl.jSliderLo.setMaximum(K);  ctrl.jSliderHi.setMaximum(K);
+    RefreshControls();
+end
+
+
+%% ===== Reflect state back into the controls + readout =====
+function RefreshControls()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    st = GetState();
+    ctrl.jSliderLo.setValue(st.Band(1));
+    ctrl.jSliderHi.setValue(st.Band(2));
+    ctrl.jLabelBand.setText(sprintf('lo=%d  c=%d  hi=%d', st.Band(1), st.iCurrentMode, st.Band(2)));
+    nKeep = nnz(st.Weights > 1e-6);
+    lamStr = '';
+    if ~isempty(st.CacheEig) && ~isempty(st.CacheEig.Values)
+        lam = st.CacheEig.Values;
+        b = min(max(st.Band, 1), numel(lam));
+        lamStr = sprintf('  lambda in [%.3g, %.3g]', lam(b(1)), lam(b(2)));
+    end
+    ctrl.jLabelReadout.setText(sprintf('modes %d-%d  (%d)%s', st.Band(1), st.Band(2), nKeep, lamStr));
+end
+
+
+%% ===== helpers =====
+function SetPanelEnabled(ctrl, isOn)
+    fn = fieldnames(ctrl);
+    for i = 1:numel(fn)
+        c = ctrl.(fn{i});
+        if isa(c, 'javax.swing.JComponent')
+            c.setEnabled(logical(isOn));
+        end
+    end
+end
+
+function SurfaceFile = GetFigureSurfaceWithModes(hFig)
+    SurfaceFile = '';
+    if isempty(hFig) || ~ishandle(hFig)
+        return;
+    end
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo)
+        return;
+    end
+    for iTess = 1:numel(TessInfo)
+        sf = TessInfo(iTess).SurfaceFile;
+        if isempty(sf) || isempty(TessInfo(iTess).DataSource) ...
+                || isempty(TessInfo(iTess).DataSource.FileName)
+            continue;
+        end
+        [~, isComputed] = in_tess_eigenmodes(sf);
+        if isComputed
+            SurfaceFile = sf;
+            return;
+        end
+    end
+end
+
+
 %% ===== STATE: lazy default =====
 function st = GetState()
     global GlobalData;
