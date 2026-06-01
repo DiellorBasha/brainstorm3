@@ -13,10 +13,18 @@ assert(~isempty(PlugDesc) && strcmp(PlugDesc.Name, 'nxr-compute'), ...
 assert(strcmp(PlugDesc.Category, 'Anatomy'), 'Unexpected Category: %s', PlugDesc.Category);
 assert(PlugDesc.AutoLoad == 0, 'nxr-compute must be AutoLoad=0 (install-on-demand).');
 assert(~isempty(PlugDesc.URLinfo), 'URLinfo must be set.');
-% On Apple Silicon the TestFile must point at the mac arm binary
-if strcmp(bst_get('OsType'), 'mac64arm')
-    assert(strcmp(PlugDesc.TestFile, 'nxr_compute.mexmaca64'), ...
-        'TestFile must be nxr_compute.mexmaca64 on mac64arm, got: %s', PlugDesc.TestFile);
+% Cross-platform release (v0.1.0): URLzip + per-OS TestFile must be wired for
+% each supported platform.
+osType = bst_get('OsType');
+expTestFile = struct('mac64arm', 'nxr_compute.mexmaca64', ...
+                     'win64',    'nxr_compute.mexw64', ...
+                     'linux64',  'nxr_compute.mexa64');
+if isfield(expTestFile, osType)
+    assert(~isempty(PlugDesc.URLzip), 'URLzip must be set for %s.', osType);
+    assert(~isempty(strfind(PlugDesc.URLzip, 'v0.1.0')), ...
+        'URLzip should reference the v0.1.0 release, got: %s', PlugDesc.URLzip);
+    assert(strcmp(PlugDesc.TestFile, expTestFile.(osType)), ...
+        'TestFile must be %s on %s, got: %s', expTestFile.(osType), osType, PlugDesc.TestFile);
 end
 fprintf('ALL TESTS PASSED: test_nxr_plugin_registered\n');
 end
