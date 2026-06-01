@@ -81,3 +81,106 @@ function W = BuildWeights(shape, kLo, kHi, iCenter, K) %#ok<DEFNU>
             error('panel_eigenmodes:BuildWeights: unknown shape "%s".', shape);
     end
 end
+
+
+%% ===== STATE: lazy default =====
+function st = GetState()
+    global GlobalData;
+    if ~isfield(GlobalData, 'UserModes') || isempty(GlobalData.UserModes) ...
+            || ~isfield(GlobalData.UserModes, 'Weights')
+        GlobalData.UserModes = struct(...
+            'SurfaceFile',  '', ...
+            'nModes',       0,  ...
+            'iCurrentMode', 1,  ...
+            'Weights',      [], ...
+            'WindowShape',  'box', ...
+            'Band',         [1 1], ...
+            'isActive',     0,  ...
+            'CacheSurfaceFile', '', ...
+            'CacheEig',     [], ...
+            'CacheMass',    []);
+    end
+    st = GlobalData.UserModes;
+end
+
+%% ===== STATE: reset for a surface with K modes =====
+function ResetState(SurfaceFile, K) %#ok<DEFNU>
+    global GlobalData;
+    GetState();                          % ensure struct exists
+    GlobalData.UserModes.SurfaceFile  = SurfaceFile;
+    GlobalData.UserModes.nModes       = K;
+    GlobalData.UserModes.Band         = [1, min(30, K)];
+    GlobalData.UserModes.iCurrentMode = round(mean(GlobalData.UserModes.Band));
+    GlobalData.UserModes.WindowShape  = 'box';
+    GlobalData.UserModes.isActive     = 0;
+    RecomputeWeights();
+end
+
+%% ===== STATE: recompute Weights from shape/band/center =====
+function RecomputeWeights()
+    global GlobalData;
+    st = GlobalData.UserModes;
+    GlobalData.UserModes.Weights = BuildWeights(st.WindowShape, ...
+        st.Band(1), st.Band(2), st.iCurrentMode, st.nModes);
+end
+
+%% ===== STATE: set band (clamped); recentre iCurrentMode to band midpoint =====
+function SetBand(kLo, kHi) %#ok<DEFNU>
+    global GlobalData;
+    st = GetState();
+    K  = st.nModes;
+    kLo = min(max(round(kLo), 1), K);
+    kHi = min(max(round(kHi), 1), K);
+    if (kHi < kLo), [kLo, kHi] = deal(kHi, kLo); end
+    GlobalData.UserModes.Band         = [kLo, kHi];
+    GlobalData.UserModes.iCurrentMode = round((kLo + kHi) / 2);
+    RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: move center (coupled — slide band, preserve width) =====
+function SetCurrentMode(k) %#ok<DEFNU>
+    global GlobalData;
+    st = GetState();
+    K  = st.nModes;
+    k  = min(max(round(k), 1), K);
+    halfW = round((st.Band(2) - st.Band(1)) / 2);
+    kLo = min(max(k - halfW, 1), K);
+    kHi = min(max(k + halfW, 1), K);
+    GlobalData.UserModes.iCurrentMode = k;
+    GlobalData.UserModes.Band         = [kLo, kHi];
+    RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: window shape ('single' collapses band to center) =====
+function SetWindowShape(shape) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    GlobalData.UserModes.WindowShape = lower(shape);
+    if strcmpi(shape, 'single')
+        c = GlobalData.UserModes.iCurrentMode;
+        GlobalData.UserModes.Band = [c, c];
+    end
+    RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: active toggle =====
+function SetActive(isActive) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    GlobalData.UserModes.isActive = logical(isActive);
+    NotifyChanged();
+end
+
+%% ===== STATE: read canonical weights =====
+function W = GetWeights() %#ok<DEFNU>
+    st = GetState();
+    W = st.Weights;
+end
+
+%% ===== Broadcast (real implementation added in Task 5) =====
+function NotifyChanged()
+    % Placeholder until Task 5 wires the figure repaint broadcast.
+end
