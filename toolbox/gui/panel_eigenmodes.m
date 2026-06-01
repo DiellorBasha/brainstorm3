@@ -188,6 +188,14 @@ function RefreshControls()
         lamStr = sprintf('  lambda in [%.3g, %.3g]', lam(b(1)), lam(b(2)));
     end
     ctrl.jLabelReadout.setText(sprintf('modes %d-%d  (%d)%s', st.Band(1), st.Band(2), nKeep, lamStr));
+    % Sync the toggle + shape radios back from state (e.g. after ResetState)
+    ctrl.jCheckActive.setSelected(logical(st.isActive));
+    switch st.WindowShape
+        case 'single',  ctrl.jRadioSingle.setSelected(true);
+        case 'box',     ctrl.jRadioBox.setSelected(true);
+        case 'tapered', ctrl.jRadioTaper.setSelected(true);
+        case 'gain',    ctrl.jRadioGain.setSelected(true);
+    end
 end
 
 
@@ -213,7 +221,8 @@ function SurfaceFile = GetFigureSurfaceWithModes(hFig)
     end
     for iTess = 1:numel(TessInfo)
         sf = TessInfo(iTess).SurfaceFile;
-        if isempty(sf) || isempty(TessInfo(iTess).DataSource) ...
+        if isempty(sf) || ~isfield(TessInfo(iTess), 'DataSource') ...
+                || isempty(TessInfo(iTess).DataSource) ...
                 || isempty(TessInfo(iTess).DataSource.FileName)
             continue;
         end
