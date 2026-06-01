@@ -160,7 +160,7 @@ function UpdatePanel(hFig) %#ok<DEFNU>
         return;
     end
     [Eig, ~] = in_tess_eigenmodes(SurfaceFile);
-    K = Eig.nModes;
+    K = double(max(Eig.CompRank));   % K_paired (per-component rank count)
     % (Re)initialise state if the surface changed
     st = GetState();
     if ~file_compare(st.SurfaceFile, SurfaceFile) || (st.nModes ~= K)
@@ -417,10 +417,12 @@ function uF = ApplyToColumn(SurfaceFile, u) %#ok<DEFNU>
     if (size(u,1) ~= size(Eig.Vectors,1)) || (size(u,2) ~= 1)
         return;
     end
+    CompRank = Eig.CompRank(:);
+    Kpaired  = max(CompRank);
     W = GlobalData.UserModes.Weights;
-    if isempty(W) || (numel(W) ~= Eig.nModes)
+    if isempty(W) || (numel(W) ~= Kpaired)
         return;
     end
-    % Reconstruct via the core spectral filter (custom transfer = our weights)
-    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) W(:));
+    wRaw = W(CompRank);                         % expand paired -> raw columns
+    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) wRaw(:));
 end
