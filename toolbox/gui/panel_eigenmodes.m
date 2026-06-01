@@ -95,6 +95,7 @@ function st = GetState()
             'Weights',      [], ...
             'WindowShape',  'box', ...
             'Band',         [1 1], ...
+            'BandSpan',     0, ...
             'isActive',     0,  ...
             'CacheSurfaceFile', '', ...
             'CacheEig',     [], ...
@@ -110,6 +111,7 @@ function ResetState(SurfaceFile, K) %#ok<DEFNU>
     GlobalData.UserModes.SurfaceFile  = SurfaceFile;
     GlobalData.UserModes.nModes       = K;
     GlobalData.UserModes.Band         = [1, min(30, K)];
+    GlobalData.UserModes.BandSpan     = GlobalData.UserModes.Band(2) - GlobalData.UserModes.Band(1);
     GlobalData.UserModes.iCurrentMode = round(mean(GlobalData.UserModes.Band));
     GlobalData.UserModes.WindowShape  = 'box';
     GlobalData.UserModes.isActive     = 0;
@@ -133,6 +135,7 @@ function SetBand(kLo, kHi) %#ok<DEFNU>
     kHi = min(max(round(kHi), 1), K);
     if (kHi < kLo), [kLo, kHi] = deal(kHi, kLo); end
     GlobalData.UserModes.Band         = [kLo, kHi];
+    GlobalData.UserModes.BandSpan     = kHi - kLo;
     GlobalData.UserModes.iCurrentMode = round((kLo + kHi) / 2);
     RecomputeWeights();
     NotifyChanged();
@@ -144,7 +147,7 @@ function SetCurrentMode(k) %#ok<DEFNU>
     st = GetState();
     K  = st.nModes;
     k  = min(max(round(k), 1), K);
-    halfW = round((st.Band(2) - st.Band(1)) / 2);
+    halfW = round(st.BandSpan / 2);
     kLo = min(max(k - halfW, 1), K);
     kHi = min(max(k + halfW, 1), K);
     GlobalData.UserModes.iCurrentMode = k;
@@ -175,6 +178,7 @@ function SetActive(isActive) %#ok<DEFNU>
 end
 
 %% ===== STATE: read canonical weights =====
+% Precondition: ResetState must have been called; returns [] on uninitialized state.
 function W = GetWeights() %#ok<DEFNU>
     st = GetState();
     W = st.Weights;

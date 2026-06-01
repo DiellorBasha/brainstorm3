@@ -26,7 +26,7 @@ st = GlobalData.UserModes;
 assert(isequal(st.Band, [1 200]), 'band clamped to [1,K]');
 
 % SetCurrentMode (coupled): slides the band, preserving its width
-panel_eigenmodes('SetBand', 30, 50);   % width 21, center 40
+panel_eigenmodes('SetBand', 30, 50);   % 21-mode band, span 20, center 40
 panel_eigenmodes('SetCurrentMode', 100);
 st = GlobalData.UserModes;
 assert(st.iCurrentMode == 100, 'center moved');
@@ -38,6 +38,25 @@ panel_eigenmodes('SetWindowShape', 'single');
 st = GlobalData.UserModes;
 assert(strcmp(st.WindowShape, 'single'), 'shape stored');
 assert(sum(st.Weights) == 1 && st.Weights(100) == 1, 'single -> delta at center');
+
+% SetActive toggles the flag
+panel_eigenmodes('SetActive', true);
+assert(GlobalData.UserModes.isActive == 1, 'SetActive true');
+panel_eigenmodes('SetActive', false);
+assert(GlobalData.UserModes.isActive == 0, 'SetActive false');
+
+% SetCurrentMode near the upper boundary clamps the displayed band...
+panel_eigenmodes('SetBand', 30, 50);          % span 20
+panel_eigenmodes('SetCurrentMode', 198);      % K = 200
+st = GlobalData.UserModes;
+assert(st.iCurrentMode == 198, 'center at 198');
+assert(st.Band(2) == 200, 'upper edge clamped to K');
+assert(st.Band(1) == 188, 'lower edge slides in (span shortened at boundary)');
+
+% ...but the canonical span is preserved: sliding back to the interior recovers width 20
+panel_eigenmodes('SetCurrentMode', 100);
+st = GlobalData.UserModes;
+assert((st.Band(2) - st.Band(1)) == 20, 'band width recovers after boundary round-trip');
 
 fprintf('ALL TESTS PASSED: test_eigenmode_lever_state\n');
 end
