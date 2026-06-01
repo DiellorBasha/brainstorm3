@@ -334,6 +334,12 @@ function W = GetWeights() %#ok<DEFNU>
     W = st.Weights;
 end
 
+%% ===== STATE: read the current center mode index =====
+function k = GetCurrentMode() %#ok<DEFNU>
+    st = GetState();
+    k = st.iCurrentMode;
+end
+
 %% ===== QUERY: is the lever actively filtering this surface? =====
 function tf = IsActive(SurfaceFile) %#ok<DEFNU>
     st = GetState();
