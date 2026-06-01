@@ -139,12 +139,10 @@ end
 function Slider_Callback()
     ctrl = bst_get('PanelControls', 'EigenModes');
     SetBand(ctrl.jSliderLo.getValue(), ctrl.jSliderHi.getValue());
-    RefreshControls();
 end
 
 function Shape_Callback(shape)
     SetWindowShape(shape);
-    RefreshControls();
 end
 
 
@@ -336,9 +334,25 @@ function W = GetWeights() %#ok<DEFNU>
     W = st.Weights;
 end
 
-%% ===== Broadcast (real implementation added in Task 5) =====
+%% ===== Broadcast: sync the panel (if shown) + repaint affected figures =====
+% Guarded so the state verbs stay callable headlessly (unit tests run without a
+% running Brainstorm and without toolbox/core on the path).
 function NotifyChanged()
-    % Placeholder until Task 5 wires the figure repaint broadcast.
+    global GlobalData;
+    % Only query PanelControls when the Brainstorm GUI is fully initialised
+    % (GlobalData.Program.GUI must exist — it does not in headless unit tests).
+    if exist('bst_get', 'file') ...
+            && ~isempty(GlobalData) ...
+            && isfield(GlobalData, 'Program') ...
+            && isfield(GlobalData.Program, 'GUI')
+        ctrl = bst_get('PanelControls', 'EigenModes');
+        if ~isempty(ctrl)
+            RefreshControls();
+        end
+    end
+    if exist('bst_figures', 'file')
+        bst_figures('FireModesChanged');
+    end
 end
 
 

@@ -989,6 +989,45 @@ function FireCurrentTimeChanged(ForceTime)
 end
 
 
+%% ===== FIRE MODES CHANGED =====
+% Repaint visible 3D source figures after the eigenmode lever changes.
+function FireModesChanged() %#ok<DEFNU>
+    global GlobalData;
+    if ~isfield(GlobalData, 'UserModes') || isempty(GlobalData.UserModes) ...
+            || ~isfield(GlobalData.UserModes, 'SurfaceFile') || isempty(GlobalData.UserModes.SurfaceFile)
+        return;
+    end
+    if ~isfield(GlobalData, 'DataSet') || isempty(GlobalData.DataSet)
+        return;
+    end
+    SurfaceFile = GlobalData.UserModes.SurfaceFile;
+    for iDS = 1:length(GlobalData.DataSet)
+        for iFig = 1:length(GlobalData.DataSet(iDS).Figure)
+            sFig = GlobalData.DataSet(iDS).Figure(iFig);
+            if strcmpi(get(sFig.hFigure, 'Visible'), 'off') || ~strcmpi(sFig.Id.Type, '3DViz')
+                continue;
+            end
+            % Only repaint figures showing the lever's surface
+            TessInfo = getappdata(sFig.hFigure, 'Surface');
+            isMatch = false;
+            for iTess = 1:numel(TessInfo)
+                if file_compare(TessInfo(iTess).SurfaceFile, SurfaceFile)
+                    isMatch = true; break;
+                end
+            end
+            if ~isMatch
+                continue;
+            end
+            % UpdateSurfaceData recomputes the displayed column (filtered via
+            % panel_eigenmodes('ApplyToColumn') once Task 6 wires it in), then
+            % UpdateSurfaceColor repaints.
+            panel_surface('UpdateSurfaceData', sFig.hFigure);
+            figure_3d('UpdateSurfaceColor', sFig.hFigure);
+        end
+    end
+end
+
+
 %% ===== FIRE CURRENT FREQUENCY CHANGED =====
 %Call the 'CurrentFreqChangedCallback' function for all the registered figures
 function FireCurrentFreqChanged()
@@ -1391,6 +1430,10 @@ function hNewFig = CloneFigure(hFig)
         end
         % Update Surfaces panel
         panel_surface('UpdatePanel');
+        % Update the eigenmode scale lever for the new figure's surface
+        if gui_brainstorm('isTabVisible', 'EigenModes')
+            panel_eigenmodes('UpdatePanel', hNewFig);
+        end
         % Reload figure
         if strcmpi(FigureId.Type, 'Topography')
             % 2DDisc: Set white background
