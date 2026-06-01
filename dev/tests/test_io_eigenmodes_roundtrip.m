@@ -19,6 +19,9 @@ Em.Sigma       = -1e-8;
 Em.Tolerance   = 1e-10;
 Em.nRemoved    = 2;
 Em.ComputeTime = 1.23;
+Em.Component   = [ones(8,1); 2*ones(7,1)];   % two components (non-default, to make persistence assertions real)
+Em.CompRank    = [(1:8)'; (1:7)'];            % per-component rank (non-default)
+Em.nComponents = 2;
 
 tmpDir = tempname; mkdir(tmpDir);
 cleanup = onCleanup(@() rmdir(tmpDir, 's'));
@@ -43,6 +46,25 @@ bst_save(SurfFile2, struct('Vertices', V, 'Faces', F, 'Comment', 'empty'), 'v7')
 [~, isComp2] = in_tess_eigenmodes(SurfFile2);
 assert(~isComp2, 'Empty surface wrongly reported computed.');
 fprintf('PASSED: missing eigenmodes report isComputed=false.\n');
+
+% ----- New per-hemisphere metadata round-trips -----
+assert(isfield(Em2, 'Component') && isfield(Em2, 'CompRank'), ...
+    'Component/CompRank must persist through save/load.');
+assert(isequal(Em2.Component(:), Em.Component(:)), 'Component not preserved.');
+assert(isequal(Em2.CompRank(:),  Em.CompRank(:)),  'CompRank not preserved.');
+assert(isequal(Em2.nComponents, Em.nComponents), 'nComponents not preserved.');
+fprintf('PASSED: Component/CompRank survive round-trip.\n');
+
+% ----- Backward compatibility: a struct WITHOUT the metadata loads with defaults -----
+TessTmp = load(SurfFile);
+TessTmp.Eigenmodes = rmfield(TessTmp.Eigenmodes, intersect({'Component','CompRank','nComponents'}, fieldnames(TessTmp.Eigenmodes)));
+bst_save(SurfFile, TessTmp, 'v7');
+[EigOld, isOld] = in_tess_eigenmodes(SurfFile);
+assert(isOld, 'Old-format eigenmodes must still load.');
+nOld = size(EigOld.Vectors, 2);
+assert(isequal(EigOld.Component(:), ones(nOld,1)), 'Missing Component must default to a single component.');
+assert(isequal(EigOld.CompRank(:),  (1:nOld)'),    'Missing CompRank must default to 1..K.');
+fprintf('PASSED: backward-compat defaults for old files without Component/CompRank.\n');
 
 fprintf('ALL TESTS PASSED: test_io_eigenmodes_roundtrip\n');
 end
