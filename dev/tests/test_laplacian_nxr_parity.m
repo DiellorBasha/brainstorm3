@@ -4,12 +4,13 @@ function test_laplacian_nxr_parity
 % L (stiffness): nxr must match the MATLAB cotangent assembler to machine
 %   precision for every mass type (L is mass-independent).
 %
-% M (mass): tess_laplacian currently serves nxr's own mass for the 'voronoi'
-%   request. nxr's mass is, in fact, a BARYCENTRIC-style dual area (NOT a true
-%   circumcentric Voronoi mass). This test pins nxr's mass to what it actually
-%   serves: it must equal Brainstorm's barycentric mass to machine precision,
-%   and it is expected to diverge from Brainstorm's true Voronoi mass. When nxr
-%   is fixed upstream to compute a true Voronoi mass, this test must be updated.
+% M (mass): nxr's MATLAB binding exposes one mass — geometry-central's
+%   vertexLumpedMassMatrix (diag A/3 per vertex), i.e. the BARYCENTRIC mass.
+%   (Older nxr mislabelled this "Voronoi"; it never was a circumcentric/mixed
+%   Voronoi mass. Upstream nxr now names it Lumped, matching geometry-central.)
+%   tess_laplacian therefore serves nxr's mass for the 'barycentric' request
+%   (machine-precision parity) and uses the MATLAB assembler for 'voronoi' and
+%   'galerkin'. This test verifies that routing.
 %
 % Stages + loads the locally-built nxr-compute plugin.
 thisDir  = fileparts(mfilename('fullpath'));
@@ -43,32 +44,42 @@ for mt = {'barycentric', 'voronoi', 'galerkin'}
     assert(dL < tolL, 'Stiffness L parity failed for %s (max|dL|=%.3e).', mt{1}, dL);
 end
 
-% --- Mass M: pin nxr's served mass to what it actually is (barycentric) ---
-[~, Mn]    = tess_laplacian(V, F, 'MassType', 'voronoi',     'Backend', 'nxr');     % nxr's served mass
-[~, Mbary] = tess_laplacian(V, F, 'MassType', 'barycentric', 'Backend', 'matlab');  % true barycentric
-[~, Mvor]  = tess_laplacian(V, F, 'MassType', 'voronoi',     'Backend', 'matlab');  % true Voronoi
-dBary = full(max(abs(diag(Mn) - diag(Mbary))));
-dVor  = full(max(abs(diag(Mn) - diag(Mvor))));
-fprintf('nxr mass vs MATLAB barycentric: max|d| = %.3e (expect ~0)\n', dBary);
-fprintf('nxr mass vs MATLAB voronoi:     max|d| = %.3e (expect > 0; known divergence)\n', dVor);
+% --- Mass M routing: nxr serves barycentric; voronoi/galerkin use MATLAB ---
+% (1) 'barycentric' via nxr == MATLAB barycentric (machine precision).
+[~, Mb_nxr] = tess_laplacian(V, F, 'MassType', 'barycentric', 'Backend', 'nxr');
+[~, Mb_mat] = tess_laplacian(V, F, 'MassType', 'barycentric', 'Backend', 'matlab');
+dBary = full(max(abs(diag(Mb_nxr) - diag(Mb_mat))));
+fprintf('barycentric mass, nxr vs MATLAB: max|d| = %.3e (expect ~0)\n', dBary);
+assert(dBary < 1e-9, 'nxr barycentric mass no longer matches MATLAB (max|d|=%.3e).', dBary);
 
-% nxr currently serves a barycentric-style dual area: pin to barycentric.
-assert(dBary < 1e-9, ...
-    ['nxr mass no longer matches MATLAB barycentric (max|d|=%.3e). nxr''s mass ' ...
-     'convention changed; re-characterize this test (and check if the upstream ' ...
-     'true-Voronoi fix landed).'], dBary);
-% Document the known divergence from true Voronoi (do not fail on it).
-assert(dVor > 1e-6, ...
-    ['nxr mass now MATCHES true Voronoi (max|d|=%.3e) - the upstream fix may have ' ...
-     'landed; update this test to assert true-Voronoi parity.'], dVor);
+% (2) 'voronoi' via the nxr backend must route to the MATLAB Voronoi mass,
+%     NOT nxr's lumped/barycentric mass (the old mislabel bug).
+[~, Mv_nxr] = tess_laplacian(V, F, 'MassType', 'voronoi', 'Backend', 'nxr');
+[~, Mv_mat] = tess_laplacian(V, F, 'MassType', 'voronoi', 'Backend', 'matlab');
+dVor = full(max(abs(diag(Mv_nxr) - diag(Mv_mat))));
+fprintf('voronoi mass, nxr-backend vs MATLAB: max|d| = %.3e (expect ~0)\n', dVor);
+assert(dVor < 1e-9, ...
+    ['voronoi request via the nxr backend does not match the MATLAB Voronoi mass ' ...
+     '(max|d|=%.3e); nxr must not serve its lumped mass for ''voronoi''.'], dVor);
 
-% nxr's mass is a valid mass matrix: total area conserved, positive diagonal.
-assert(abs(full(sum(diag(Mn))) - full(sum(diag(Mvor)))) < 1e-9, 'nxr mass total area not conserved.');
-assert(all(full(diag(Mn)) > 0), 'nxr mass has non-positive diagonal.');
-fprintf('Mass pinned to barycentric; Voronoi divergence documented.\n');
+% (3) 'galerkin' via the nxr backend must route to the MATLAB Galerkin mass.
+[~, Mg_nxr] = tess_laplacian(V, F, 'MassType', 'galerkin', 'Backend', 'nxr');
+[~, Mg_mat] = tess_laplacian(V, F, 'MassType', 'galerkin', 'Backend', 'matlab');
+dGal = full(max(abs(Mg_nxr(:) - Mg_mat(:))));
+fprintf('galerkin mass, nxr-backend vs MATLAB: max|d| = %.3e (expect ~0)\n', dGal);
+assert(dGal < 1e-9, 'galerkin request via nxr backend does not match MATLAB Galerkin (max|d|=%.3e).', dGal);
+
+% Sanity: barycentric and Voronoi genuinely differ on this irregular mesh, so
+% the routing distinction above is meaningful (not a no-op).
+assert(full(max(abs(diag(Mb_mat) - diag(Mv_mat)))) > 1e-6, ...
+    'barycentric and Voronoi unexpectedly identical; test mesh too regular.');
+% nxr's served mass: total area conserved (vs Voronoi), positive diagonal.
+assert(abs(full(sum(diag(Mb_nxr))) - full(sum(diag(Mv_mat)))) < 1e-9, 'nxr mass total area not conserved.');
+assert(all(full(diag(Mb_nxr)) > 0), 'nxr mass has non-positive diagonal.');
+fprintf('Mass routing verified: nxr->barycentric; MATLAB->voronoi/galerkin.\n');
 
 % --- Sanity on the nxr stiffness itself ---
-Ln = tess_laplacian(V, F, 'MassType', 'voronoi', 'Backend', 'nxr');
+Ln = tess_laplacian(V, F, 'MassType', 'barycentric', 'Backend', 'nxr');
 assert(norm(Ln - Ln', 1) < 1e-9, 'nxr L not symmetric.');
 assert(max(abs(sum(Ln, 2))) < 1e-6, 'nxr L row sums not ~0.');
 fprintf('ALL TESTS PASSED: test_laplacian_nxr_parity\n');

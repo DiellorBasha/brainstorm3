@@ -45,10 +45,11 @@ function [L, M] = tess_laplacian(Vertices, Faces, varargin)
 %                          otherwise the built-in MATLAB implementation.
 %               'nxr'    — force nxr-compute (errors if the plugin is not loaded).
 %               'matlab' — force the built-in MATLAB implementation.
-%               nxr supplies the stiffness L for all mass types and its own
-%               mass matrix for 'voronoi' (currently a barycentric-style dual
-%               area, pending an upstream nxr fix); barycentric/galerkin use
-%               the MATLAB mass.
+%               nxr supplies the stiffness L for all mass types and its lumped
+%               (barycentric) mass for 'barycentric' (machine-precision parity
+%               with the MATLAB assembler). 'voronoi' and 'galerkin' use the
+%               MATLAB mass: nxr exposes no true Voronoi mass, and its Galerkin
+%               mass is not surfaced through the MATLAB binding.
 %
 % OUTPUTS:
 %     L : [nVertices x nVertices] sparse positive semidefinite cotangent
@@ -131,14 +132,13 @@ if strcmp(backend, 'nxr')
     try
         ctx = nxr.manifold.context(Vertices, Faces);   % faces passed 1-based (marshal subtracts 1)
         L = ctx.K;
-        % nxr serves a single mass matrix, surfaced here for the 'voronoi' request.
-        % CAVEAT/TODO: nxr's mass is currently a barycentric-style dual area, NOT a
-        % true circumcentric Voronoi mass (it diverges from Brainstorm's Voronoi at
-        % irregular vertices). To be fixed upstream in nxr-compute. Until then,
-        % tess_laplacian(...,'voronoi','Backend','nxr') differs from the 'matlab'
-        % backend. See dev/nxr_compute_plugin_integration.md (Known limitations).
-        if strcmp(MassType, 'voronoi')
-            M = ctx.M;                                  % nxr mass (barycentric-style; pending upstream fix)
+        % nxr's MATLAB binding exposes one mass: ctx.M, geometry-central's
+        % vertexLumpedMassMatrix (diag A/3 per vertex) — i.e. the BARYCENTRIC
+        % mass (machine-precision parity with local_mass_matlab's barycentric).
+        % nxr exposes no true Voronoi mass, and its Galerkin mass is not
+        % surfaced through the binding, so those use the MATLAB assembler.
+        if strcmp(MassType, 'barycentric')
+            M = ctx.M;                                  % nxr lumped == barycentric
         else
             M = local_mass_matlab(Vertices, Faces, MassType);
         end

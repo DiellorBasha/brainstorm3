@@ -36,7 +36,9 @@ consumer.
 - All other nxr capabilities (eigenmodes, Hodge decomposition, trivial
   connections, heat-geodesics, vector transport, BFF, direction fields, …).
 - Any GUI `process_*.m` wrapper.
-- Exposing barycentric/galerkin mass via nxr (requires a C++/mex change — see §6).
+- Serving nxr's Galerkin mass (or a true Voronoi mass) via nxr (the MATLAB binding
+  surfaces only the lumped `ctx.M` = barycentric; more requires an upstream binding
+  change — see §10.1).
 
 ## 3. Background
 
@@ -132,29 +134,30 @@ stay empty, and install fails cleanly — consumers fall back to MATLAB.
 
 A backend switch at the top of `tess_laplacian` (`toolbox/anatomy/tess_laplacian.m`).
 nxr serves the stiffness `L` for **all** mass types (it is mass-independent); nxr
-serves the mass `M` **only for Voronoi** (the only variant the mex exposes today).
+serves the mass `M` **only for `barycentric`**. nxr's MATLAB binding exposes one
+mass — `ctx.M`, geometry-central's `vertexLumpedMassMatrix` (`area/3` per vertex),
+i.e. the barycentric mass. It exposes no true Voronoi mass, and its Galerkin mass is
+not surfaced through the binding, so `voronoi`/`galerkin` use the MATLAB assembler.
 
 | `MassType` request | `L` (stiffness) | `M` (mass) |
 |---|---|---|
-| `voronoi`     | nxr | **nxr** (see caveat below) |
-| `barycentric` | nxr | MATLAB fallback |
-| `galerkin`    | nxr | MATLAB fallback |
+| `barycentric` | nxr | **nxr** (lumped == barycentric, machine-precision parity) |
+| `voronoi`     | nxr | MATLAB |
+| `galerkin`    | nxr | MATLAB |
 
 If the plugin is unavailable, the entire existing MATLAB implementation runs
 unchanged.
 
 > **Validated outcome (parity test, `tess_sphere(642)`):** the stiffness `L`
 > matches the MATLAB assembler to machine epsilon (`max|dL| ≈ 9e-16`) for all
-> three mass types — nxr is a perfect drop-in for the cotangent Laplacian.
+> three mass types, and nxr's mass matches MATLAB **barycentric** to machine
+> precision (`dBary ≈ 3e-17`). The `voronoi`/`galerkin` requests route to the
+> MATLAB assembler under the nxr backend (verified identical, `d = 0`).
 >
-> **CAVEAT — nxr's "Voronoi" mass is not a true Voronoi mass.** Empirically,
-> nxr's served mass is a **barycentric-style dual area** (`area/3`), matching
-> Brainstorm's *barycentric* mass to machine precision (`dBary ≈ 3e-17`) and
-> diverging from the true circumcentric Voronoi mass at irregular (low-valence)
-> vertices (`dVor ≈ 1.6e-3`). We knowingly serve nxr's mass for now and pin it to
-> its real nature in the parity test. **This is flagged for an upstream fix in
-> nxr-compute (see §10.1).** Until then, `tess_laplacian(...,'voronoi','Backend',
-> 'nxr')` returns a different `M` than the `'matlab'` backend.
+> **NOTE (resolved).** Older nxr mislabelled this lumped mass "Voronoi"; it never
+> was a circumcentric/mixed Voronoi mass. Upstream nxr now names its variants
+> `Lumped`/`Galerkin` (matching geometry-central). Brainstorm serves nxr's lumped
+> mass for the `barycentric` request only — see §10.1.
 
 ```matlab
 % --- backend selection ---
@@ -166,10 +169,10 @@ useNxr = nxr_is_loaded();   % local helper, cheap in-memory check
 
 if useNxr
     L = nxr.manifold.operator.stiffness(nxr.manifold.context(Vertices, Faces));
-    if strcmp(MassType, 'voronoi')
-        M = nxr.manifold.operator.mass(nxr.manifold.context(Vertices, Faces));
+    if strcmp(MassType, 'barycentric')
+        M = nxr.manifold.operator.mass(nxr.manifold.context(Vertices, Faces));  % lumped == barycentric
     else
-        M = local_mass_matlab(Vertices, Faces, MassType);  % existing MATLAB mass
+        M = local_mass_matlab(Vertices, Faces, MassType);  % voronoi/galerkin: MATLAB mass
     end
     if Symmetrize, L = (L + L')/2; end   % match existing behavior
 else
@@ -224,10 +227,11 @@ MATLAB's `runtests` does not recognize plain function-style tests.
 2. **Parity test (pass/fail gate)** (`dev/tests/test_laplacian_nxr_parity.m`). On
    `tess_sphere(642)`:
    - `L`: `max|L_nxr − L_matlab| < 1e-6` for all three mass types. (Observed: `9e-16`.)
-   - `M`: nxr's served mass is pinned to what it actually is — equals MATLAB
-     **barycentric** to `< 1e-9` (observed `3e-17`) — and asserted to diverge from
-     MATLAB **Voronoi** (`> 1e-6`, observed `1.6e-3`) as a tripwire for the future
-     upstream fix (§10.1).
+   - `M`: nxr's served mass (for the `barycentric` request) equals MATLAB
+     **barycentric** to `< 1e-9` (observed `3e-17`). The `voronoi`/`galerkin`
+     requests route to the MATLAB assembler under the nxr backend (verified
+     identical, `d = 0`); a sanity check confirms barycentric ≠ Voronoi on the
+     irregular test mesh so the routing is meaningful.
    - Sanity: nxr `L` symmetric, row sums ≈ 0; nxr mass total area conserved, positive
      diagonal.
 3. **Fallback / backend-selection test** (`dev/tests/test_laplacian_backend_select.m`).
@@ -253,26 +257,25 @@ Currently nxr-compute has **only** `mexmaca64`; there is no CI. Future work:
   nxr error is caught and the MATLAB path runs (with a warning); explicit
   `'Backend','nxr'` surfaces the error.
 
-### 10.1 ⚑ TODO — fix nxr's Voronoi mass upstream (nxr-compute repo)
+### 10.1 ✅ RESOLVED — nxr's mislabelled "Voronoi" mass (nxr-compute repo)
 
-**Action required.** nxr's mass operator currently returns a **barycentric-style
-dual area**, not a true **circumcentric (mixed) Voronoi mass**. Evidence: it matches
-Brainstorm's barycentric mass to machine precision (`dBary ≈ 3e-17`) and diverges
-from the true Voronoi mass at irregular vertices (`dVor ≈ 1.6e-3` on `tess_sphere(642)`,
-concentrated on the 12 valence-5 vertices; nxr's value there equals `area/3` exactly).
+**Resolved upstream (nxr-compute `7f52e77`, 2026-06).** nxr's mass was never a
+circumcentric/mixed Voronoi mass — it was always geometry-central's
+`vertexLumpedMassMatrix` (`area/3` per vertex), i.e. the barycentric mass, served
+under a misleading "Voronoi" label. Rather than implement a true Voronoi mass, nxr
+**relabelled** its variants to geometry-central's vocabulary — `Lumped` (diagonal,
+`area/3`) and `Galerkin` (sparse P1 L² products) — and `parseMassMatrixVariant` now
+hard-throws on the old strings (`'voronoi'`, `'barycentric'`, `'full'`).
 
-- **Fix location:** the mass assembly in nxr-compute (`assembleManifoldOperators`),
-  to compute the Meyer et al. (2003) mixed-Voronoi area (with obtuse-triangle
-  handling), matching `local_mass_matlab`'s `'voronoi'` branch.
-- **Consider also:** plumbing the mass *variant* through the mex
-  `assembleManifoldOperators` command (currently fixed to one mass), so nxr can serve
-  barycentric / Voronoi / consistent-FEM explicitly.
-- **Guard already in place:** `dev/tests/test_laplacian_nxr_parity.m` pins nxr's mass
-  to barycentric AND asserts `dVor > 1e-6`. When the upstream fix lands, that second
-  assert will fail deliberately — signalling that the test (and the §7 caveat) must be
-  updated to assert true-Voronoi parity.
-- **Until fixed:** `tess_laplacian(...,'voronoi','Backend','nxr')` returns a different
-  `M` than the `'matlab'` backend. Code carries a `CAVEAT/TODO` comment pointing here.
+Brainstorm-side resolution (this change): `tess_laplacian` serves nxr's lumped mass
+for the **`barycentric`** request only (machine-precision parity) and uses the MATLAB
+assembler for `voronoi` and `galerkin`. The parity test verifies that routing.
+
+- **No true Voronoi from nxr.** nxr does not expose a circumcentric Voronoi mass;
+  Brainstorm's `voronoi` request always uses `local_mass_matlab`.
+- **Galerkin not yet via nxr.** nxr's C++ now has a Galerkin variant, but the MATLAB
+  binding only surfaces the lumped `ctx.M`. Serving nxr's Galerkin would need an
+  upstream binding change; until then `galerkin` uses the MATLAB assembler.
 
 ## 11. Decisions log (from brainstorming)
 
@@ -286,11 +289,11 @@ concentrated on the 12 valence-5 vertices; nxr's value there equals `area/3` exa
 - **Wiring model:** SPM-style guarded use. `tess_laplacian` (a hot-loop operator)
   uses nxr only when already loaded and never auto-installs on the operator path;
   installation is a one-time action. MATLAB fallback covers the not-loaded case.
-- **Mass variants:** `L` always from nxr; `M` from nxr only for Voronoi (the only
-  variant the mex exposes); barycentric/galerkin `M` via MATLAB. **Refinement
-  (post-parity):** nxr's served "Voronoi" mass is actually a barycentric-style dual
-  area, not a true circumcentric Voronoi. We keep serving it for now and pin it to
-  its real nature in the parity test; fixing nxr to compute a true Voronoi mass (and
-  plumbing the variant through the mex) is flagged as upstream follow-up (§10.1).
+- **Mass variants:** `L` always from nxr; `M` from nxr only for `barycentric` (nxr's
+  MATLAB binding exposes just the lumped `ctx.M` = `area/3` = barycentric);
+  `voronoi`/`galerkin` `M` via MATLAB. **Resolved (post-parity):** nxr's served
+  "Voronoi" mass was always the barycentric lumped mass under a misleading label;
+  upstream nxr relabelled to `Lumped`/`Galerkin` (`7f52e77`) and Brainstorm now serves
+  it for the `barycentric` request (§10.1).
 - **First platform:** macOS only now; Linux/Windows packaging later (none exist in
   nxr-compute yet).
