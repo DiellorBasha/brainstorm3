@@ -188,3 +188,66 @@ end
 function NotifyChanged()
     % Placeholder until Task 5 wires the figure repaint broadcast.
 end
+
+
+%% ===== CACHE: store eigenmodes + mass matrix for a surface =====
+function SetCache(SurfaceFile, Eig, MassMatrix) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    GlobalData.UserModes.CacheSurfaceFile = SurfaceFile;
+    GlobalData.UserModes.CacheEig         = Eig;
+    GlobalData.UserModes.CacheMass        = MassMatrix;
+end
+
+%% ===== CACHE: ensure eigenmodes + mass are loaded for a surface =====
+function isOk = EnsureCache(SurfaceFile)
+    global GlobalData;
+    st = GetState();
+    isOk = false;
+    if ~isempty(st.CacheEig) && ~isempty(st.CacheMass) ...
+            && file_compare(st.CacheSurfaceFile, SurfaceFile)
+        isOk = true;
+        return;
+    end
+    [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
+    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
+        return;
+    end
+    % Prefer the mass matrix stored with the eigenmodes; recompute only if absent.
+    if isfield(Eig, 'MassMatrix') && ~isempty(Eig.MassMatrix)
+        M = Eig.MassMatrix;
+    else
+        sSurf = in_tess_bst(SurfaceFile, 0);
+        [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
+    end
+    SetCache(SurfaceFile, Eig, M);
+    isOk = true;
+end
+
+%% ===== APPLY: filter a displayed source column (guarded, non-destructive) =====
+function uF = ApplyToColumn(SurfaceFile, u) %#ok<DEFNU>
+    global GlobalData;
+    uF = u;                                   % default: unchanged
+    st = GetState();
+    % Guards: lever off, surface mismatch, empty column
+    if ~st.isActive || isempty(u) || isempty(SurfaceFile) ...
+            || ~file_compare(st.SurfaceFile, SurfaceFile)
+        return;
+    end
+    if ~EnsureCache(SurfaceFile)
+        return;
+    end
+    Eig = GlobalData.UserModes.CacheEig;
+    M   = GlobalData.UserModes.CacheMass;
+    % Scalar-field guard: only filter when the column matches the mesh vertex
+    % count (skip unconstrained/volume/mismatched maps rather than mis-filter).
+    if (size(u,1) ~= size(Eig.Vectors,1)) || (size(u,2) ~= 1)
+        return;
+    end
+    W = GlobalData.UserModes.Weights;
+    if isempty(W) || (numel(W) ~= Eig.nModes)
+        return;
+    end
+    % Reconstruct via the core spectral filter (custom transfer = our weights)
+    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) W(:));
+end
