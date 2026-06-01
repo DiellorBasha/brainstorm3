@@ -91,6 +91,34 @@ how the panel authors `Weights`:
 slides the whole window. One "scale" knob. `single` is the zero-width degenerate case.
 Decoupling (independent inspection cursor) is deferred until the single-mode 3D browser needs it.
 
+## Panel layout
+
+Docked panel in `panel_freq` house style (`gui_river`, Swing). Chosen layout —
+**band slider + readout**:
+
+```
++- Spatial scale (eigenmodes) -----+
+| [x] Active          modes 30-55  |
+|                                  |
+| Mode band                        |
+| 1 ===[o=====o]=============== 200|
+|      lo=30   c=42   hi=55         |
+|                                  |
+| Window: ( )Single (*)Box         |
+|         ( )Taper  ( )Gain        |
+|                                  |
+| lambda in [9.4, 61.2]  26 modes  |
++----------------------------------+
+```
+
+- **Active** checkbox → `SetActive(0|1)`.
+- **Dual-handle range slider** over `[1, K]` → `SetBand(kLo, kHi)`; the center handle `c`
+  is `iCurrentMode` (coupled — dragging it slides the whole band). Fire on mouse-release
+  (panel_freq pattern); a lightweight quick-preview label updates while dragging.
+- **Window** radios (`radio_linelabel`): Single / Box / Taper / Gain → `SetWindowShape`.
+  `Single` collapses the band to the center (`lo = hi = c`).
+- **Readout** label: live `lambda` range over the band and the kept-mode count.
+
 ## Panel API (`panel_eigenmodes`)
 
 Thin verbs mirroring `panel_freq`/`panel_time`; each setter recomputes `Weights`, stores
