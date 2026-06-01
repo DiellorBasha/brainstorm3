@@ -1854,6 +1854,12 @@ function [isOk, TessInfo] = UpdateSurfaceData(hFig, iSurfaces)
                         TessInfo(iTess).DataMinMax = bst_memory('GetResultsMaximum', iDS, iResult);
                     end
                 end
+                % Eigenmode lever: when active, scale the colormap to the FILTERED
+                % column's range -- the raw DataMinMax would compress a narrow-band
+                % reconstruction to a near-uniform map.
+                if ~isempty(TessInfo(iTess).Data) && panel_eigenmodes('IsActive', TessInfo(iTess).SurfaceFile)
+                    TessInfo(iTess).DataMinMax = [min(TessInfo(iTess).Data(:)), max(TessInfo(iTess).Data(:))];
+                end
                 % Reset Overlay cube
                 TessInfo(iTess).OverlayCube = [];
                 % Check the consistency between the number of results points (number of sources)

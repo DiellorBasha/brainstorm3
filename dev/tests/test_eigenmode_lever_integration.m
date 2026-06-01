@@ -48,5 +48,12 @@ assert(norm(uLow) < norm(u), 'low-band reconstruction must shrink overall energy
 uOther = panel_eigenmodes('ApplyToColumn', '/synthetic/other.mat', u);
 assert(isequal(uOther, u), 'mismatched surface must be a no-op');
 
+% IsActive query reflects active flag + surface match
+panel_eigenmodes('SetActive', 1);
+assert(panel_eigenmodes('IsActive', SurfaceFile), 'IsActive true when active+matching');
+assert(~panel_eigenmodes('IsActive', '/synthetic/other.mat'), 'IsActive false on surface mismatch');
+panel_eigenmodes('SetActive', 0);
+assert(~panel_eigenmodes('IsActive', SurfaceFile), 'IsActive false when inactive');
+
 fprintf('ALL TESTS PASSED: test_eigenmode_lever_integration\n');
 end

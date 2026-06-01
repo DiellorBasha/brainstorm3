@@ -334,6 +334,13 @@ function W = GetWeights() %#ok<DEFNU>
     W = st.Weights;
 end
 
+%% ===== QUERY: is the lever actively filtering this surface? =====
+function tf = IsActive(SurfaceFile) %#ok<DEFNU>
+    st = GetState();
+    tf = logical(st.isActive) && ~isempty(SurfaceFile) ...
+         && file_compare(st.SurfaceFile, SurfaceFile);
+end
+
 %% ===== Broadcast: sync the panel (if shown) + repaint affected figures =====
 % Guarded so the state verbs stay callable headlessly (unit tests run without a
 % running Brainstorm and without toolbox/core on the path).
