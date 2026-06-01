@@ -56,12 +56,13 @@ function W = BuildWeights(shape, kLo, kHi, iCenter, K) %#ok<DEFNU>
         case 'box'
             W(kLo:kHi) = 1;
         case 'tapered'
-            % Tukey window over [kLo,kHi]: flat interior, cosine shoulders.
+            % Tukey window over [kLo,kHi]: cosine shoulders taper to 0 at kLo and kHi;
+            % flat interior (=1) over the central portion of the band.
             n = kHi - kLo + 1;
-            if (n <= 1)
+            if (n <= 2)
                 W(kLo:kHi) = 1;
             else
-                r = 0.5;                       % shoulder fraction (each side)
+                r = 0.5;    % total taper fraction (each shoulder spans r/2 = 25% of the window)
                 t = linspace(0, 1, n);
                 wt = ones(1, n);
                 edge = (r/2);
