@@ -59,6 +59,23 @@ assert(~isempty(hS), 'No singularity markers drawn.');
 assert(numel(hS.XData) == numel(Tafter.TangentFrame.Singularities.Vertices), ...
     'Singularity marker count does not match stored Singularities.Vertices.');
 
+% --- Interaction: right arrow increases density ---
+kp = get(hFig, 'KeyPressFcn');
+evMore = struct('Key', 'rightarrow', 'Modifier', {{}});
+kp(hFig, evMore);
+hUmore = findobj(hAxes, 'Tag', 'tangentU');
+assert(numel(hUmore.UData) > nU, 'Right arrow did not increase arrow density.');
+
+% --- Interaction: N toggles the normal arrows off ---
+evN = struct('Key', 'n', 'Modifier', {{}});
+kp(hFig, evN);
+assert(isempty(findobj(hAxes, 'Tag', 'tangentN')), 'N did not toggle the normal arrows off.');
+
+% --- Interaction: P toggles the singularity markers off ---
+evP = struct('Key', 'p', 'Modifier', {{}});
+kp(hFig, evP);
+assert(isempty(findobj(hAxes, 'Tag', 'tangentSing')), 'P did not toggle the singularity markers off.');
+
 close(hFig);
 fprintf('ALL TESTS PASSED: test_view_tangents\n');
 end
