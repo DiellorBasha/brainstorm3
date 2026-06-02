@@ -34,6 +34,7 @@ end
 if nargin < 1 || isempty(params); params = struct(); end
 if ~isfield(params,'t1') || isempty(params.t1); params.t1 = 0.01; end
 if ~isfield(params,'t2') || isempty(params.t2); params.t2 = 0.04; end
+if params.t1 < 0; error('bst_eigfilter_design_dog: t1 must be >= 0.'); end
 if params.t1 >= params.t2
     error('bst_eigfilter_design_dog: require t1 < t2 (got t1=%g, t2=%g).', params.t1, params.t2);
 end

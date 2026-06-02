@@ -33,6 +33,8 @@ end
 if nargin < 1 || isempty(params); params = struct(); end
 if ~isfield(params,'kappa') || isempty(params.kappa); params.kappa = 1; end
 if ~isfield(params,'nu') || isempty(params.nu); params.nu = 1; end
+if params.kappa < 0; error('bst_eigfilter_design_matern: kappa must be >= 0.'); end
+if params.nu < 0;    error('bst_eigfilter_design_matern: nu must be >= 0 (a negative nu boosts high modes and is not a valid low-pass / prior).'); end
 k = params.kappa; nu = params.nu;
 out = @(l) (k^2 + double(l(:))).^(-nu);
 end

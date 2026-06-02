@@ -29,6 +29,7 @@ if nargin >= 1 && ischar(params) && strcmpi(params,'meta')
 end
 if nargin < 1 || isempty(params); params = struct(); end
 if ~isfield(params,'alpha') || isempty(params.alpha); params.alpha = 1; end
+if params.alpha < 0; error('bst_eigfilter_design_power: alpha must be >= 0.'); end
 a = params.alpha;
 out = @(l) double(l(:)).^(-a);
 end
