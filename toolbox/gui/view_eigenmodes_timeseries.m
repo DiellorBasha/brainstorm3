@@ -192,6 +192,9 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
         return;
     end
     st   = panel_eigenmodes('GetState');
+    if ~file_compare(st.SurfaceFile, cache.SurfaceFile)
+        return;   % panel currently driving a different surface
+    end
     band = st.Band;
     [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
     if isempty(iRows)
@@ -201,8 +204,9 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
     colors = HemiColors(Hemi);
     % Redraw into the same figure (view_timeseries_matrix replots when hFig is given)
     view_timeseries_matrix(cache.DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, hFig);
-    % Re-assert our tag (redraw may overwrite figure appdata)
+    % Re-assert our tag + title (redraw overwrites figure appdata and name)
     setappdata(hFig, 'EigenTimeSeries', cache);
+    set(hFig, 'Name', ['Eigenmode time series: ' cache.SurfaceFile]);
 end
 
 
