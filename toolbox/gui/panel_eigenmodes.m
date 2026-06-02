@@ -106,36 +106,60 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jLabelReadout = gui_component('Label', jPanelNew, 'hfill', '');
     jLabelReadout.setHorizontalAlignment(JLabel.RIGHT);
 
-    % Band: low / high sliders (dual-handle substitute)
-    gui_component('Label', jPanelNew, 'br', 'Mode band');
-    jSliderLo = JSlider(1, 100, 1);
-    jSliderHi = JSlider(1, 100, 30);
-    java_setcb(jSliderLo, 'MouseReleasedCallback', @(h,ev)Slider_Callback());
-    java_setcb(jSliderHi, 'MouseReleasedCallback', @(h,ev)Slider_Callback());
-    jPanelNew.add('br hfill', jSliderLo);
-    jPanelNew.add('br hfill', jSliderHi);
-    jLabelBand = gui_component('Label', jPanelNew, 'br', 'lo=1  c=15  hi=30');
+    % Center mode slider
+    jLabelCenter = gui_component('Label', jPanelNew, 'br', 'Center mode');
+    jSliderCenter = JSlider(1, 100, 1);
+    jSliderCenter.setPaintLabels(1);
+    java_setcb(jSliderCenter, 'StateChangedCallback',  @(h,ev)CenterPreview_Callback());
+    java_setcb(jSliderCenter, 'MouseReleasedCallback', @(h,ev)Center_Callback());
+    jPanelNew.add('br hfill', jSliderCenter);
+
+    % Width text field
+    jLabelWidth = gui_component('Label', jPanelNew, 'br', 'Width (+/- modes):');
+    jTextWidth  = gui_component('Text', jPanelNew, '', '0', [], '', @(h,ev)Width_Callback());
+    try
+        jTextWidth.setColumns(4);
+    catch
+        % setColumns not available on this Swing wrapper — safe to skip
+    end
 
     % Window shape radios
     jGroup = ButtonGroup();
-    gui_component('Label', jPanelNew, 'br', 'Window:');
-    jRadioSingle = gui_component('Radio', jPanelNew, '',   'Single', jGroup, '', @(h,ev)Shape_Callback('single'));
-    jRadioBox    = gui_component('Radio', jPanelNew, '',   'Box',    jGroup, '', @(h,ev)Shape_Callback('box'));
-    jRadioTaper  = gui_component('Radio', jPanelNew, 'br', 'Taper',  jGroup, '', @(h,ev)Shape_Callback('tapered'));
-    jRadioGain   = gui_component('Radio', jPanelNew, '',   'Gain',   jGroup, '', @(h,ev)Shape_Callback('gain'));
+    jLabelShape = gui_component('Label', jPanelNew, 'br', 'Shape:');
+    jRadioBox   = gui_component('Radio', jPanelNew, '',  'Box',   jGroup, '', @(h,ev)Shape_Callback('box'));
+    jRadioTaper = gui_component('Radio', jPanelNew, '',  'Taper', jGroup, '', @(h,ev)Shape_Callback('tapered'));
+    jRadioGauss = gui_component('Radio', jPanelNew, '',  'Gauss', jGroup, '', @(h,ev)Shape_Callback('gain'));
     jRadioBox.setSelected(1);
 
     ctrl = struct('jPanelTop',      jPanelNew, ...
                   'jCheckActive',   jCheckActive, ...
                   'jLabelReadout',  jLabelReadout, ...
-                  'jSliderLo',      jSliderLo, ...
-                  'jSliderHi',      jSliderHi, ...
-                  'jLabelBand',     jLabelBand, ...
-                  'jRadioSingle',   jRadioSingle, ...
+                  'jLabelCenter',   jLabelCenter, ...
+                  'jSliderCenter',  jSliderCenter, ...
+                  'jLabelWidth',    jLabelWidth, ...
+                  'jTextWidth',     jTextWidth, ...
+                  'jLabelShape',    jLabelShape, ...
                   'jRadioBox',      jRadioBox, ...
                   'jRadioTaper',    jRadioTaper, ...
-                  'jRadioGain',     jRadioGain);
+                  'jRadioGauss',    jRadioGauss);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
+end
+
+
+%% ===== SLIDER AXIS LABELS (with [ ] band markers) =====
+function ApplySliderLabels(jSlider, K, lo, hi, width)
+    import javax.swing.JLabel;
+    tbl = java.util.Hashtable();
+    pos = unique(round(linspace(1, K, 5)));
+    for p = pos
+        tbl.put(java.lang.Integer(p), JLabel(num2str(p)));
+    end
+    if (width > 0)
+        tbl.put(java.lang.Integer(lo), JLabel('['));
+        tbl.put(java.lang.Integer(hi), JLabel(']'));
+    end
+    jSlider.setLabelTable(tbl);
+    jSlider.setPaintLabels(1);
 end
 
 
@@ -145,13 +169,66 @@ function CheckActive_Callback()
     SetActive(ctrl.jCheckActive.isSelected());
 end
 
-function Slider_Callback()
+function Center_Callback()
     ctrl = bst_get('PanelControls', 'EigenModes');
-    SetBand(ctrl.jSliderLo.getValue(), ctrl.jSliderHi.getValue());
+    st = GetState();
+    c = ctrl.jSliderCenter.getValue();
+    w = ReadWidth(ctrl, st.nModes);
+    [lo, hi] = BandFromCenterWidth(c, w, st.nModes);
+    SetBand(lo, hi);
+end
+
+function CenterPreview_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    if ~ctrl.jSliderCenter.getValueIsAdjusting(), return; end
+    st = GetState();
+    c = ctrl.jSliderCenter.getValue();
+    w = ReadWidth(ctrl, st.nModes);
+    [lo, hi] = BandFromCenterWidth(c, w, st.nModes);
+    ApplySliderLabels(ctrl.jSliderCenter, st.nModes, lo, hi, w);
+end
+
+function Width_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    st = GetState();
+    w = ReadWidth(ctrl, st.nModes);
+    c = ctrl.jSliderCenter.getValue();
+    [lo, hi] = BandFromCenterWidth(c, w, st.nModes);
+    if (w == 0)
+        SetWindowShape('single');
+    else
+        SetWindowShape(CurrentShape(ctrl));
+    end
+    SetBand(lo, hi);
 end
 
 function Shape_Callback(shape)
-    SetWindowShape(shape);
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    w = ReadWidth(ctrl, GetState().nModes);
+    if (w == 0)
+        SetWindowShape('single');
+    else
+        SetWindowShape(shape);
+    end
+end
+
+function w = ReadWidth(ctrl, K)
+    s = char(ctrl.jTextWidth.getText());
+    w = str2double(s);
+    if isnan(w) || ~isreal(w)
+        st = GetState(); w = round((st.Band(2) - st.Band(1)) / 2);
+    end
+    w = min(max(round(w), 0), max(K-1, 0));
+end
+
+function shape = CurrentShape(ctrl)
+    if ctrl.jRadioTaper.isSelected()
+        shape = 'tapered';
+    elseif ctrl.jRadioGauss.isSelected()
+        shape = 'gain';
+    else
+        shape = 'box';
+    end
 end
 
 
@@ -202,14 +279,14 @@ function UpdatePanel(hFig) %#ok<DEFNU>
             SetWindowShape('single'); SetCurrentMode(1);
         end
     end
-    ctrl.jSliderLo.setMaximum(K); ctrl.jSliderHi.setMaximum(K);
+    ctrl.jSliderCenter.setMaximum(K);
     RefreshControls();
 end
 
 
 %% ===== helpers =====
 function SetSelectEnabled(ctrl, isOn)
-    sel = {'jSliderLo','jSliderHi','jLabelBand','jRadioSingle','jRadioBox','jRadioTaper','jRadioGain'};
+    sel = {'jSliderCenter','jTextWidth','jRadioBox','jRadioTaper','jRadioGauss'};
     for i = 1:numel(sel)
         if isfield(ctrl, sel{i}) && isa(ctrl.(sel{i}), 'javax.swing.JComponent')
             ctrl.(sel{i}).setEnabled(logical(isOn));
@@ -221,25 +298,41 @@ end
 %% ===== Reflect state back into the controls + readout =====
 function RefreshControls()
     ctrl = bst_get('PanelControls', 'EigenModes');
+    % Guard: panel may be unregistered, or a stale instance without the new controls.
+    if isempty(ctrl) || ~isfield(ctrl, 'jSliderCenter'), return; end
     st = GetState();
-    ctrl.jSliderLo.setValue(st.Band(1));
-    ctrl.jSliderHi.setValue(st.Band(2));
-    ctrl.jLabelBand.setText(sprintf('lo=%d  c=%d  hi=%d', st.Band(1), st.iCurrentMode, st.Band(2)));
-    nKeep = nnz(st.Weights > 1e-6);
-    lamStr = '';
-    if ~isempty(st.CacheEig) && ~isempty(st.CacheEig.Values)
-        lam = st.CacheEig.Values;
-        b = min(max(st.Band, 1), numel(lam));
-        lamStr = sprintf('  lambda in [%.3g, %.3g]', lam(b(1)), lam(b(2)));
-    end
-    ctrl.jLabelReadout.setText(sprintf('modes %d-%d  (%d)%s', st.Band(1), st.Band(2), nKeep, lamStr));
+    K  = max(st.nModes, 1);
+    lo = st.Band(1); hi = st.Band(2);
+    width = round((hi - lo) / 2);
+    ctrl.jSliderCenter.setMaximum(K);
+    ctrl.jSliderCenter.setValue(st.iCurrentMode);
+    ApplySliderLabels(ctrl.jSliderCenter, K, lo, hi, width);
+    ctrl.jTextWidth.setText(num2str(width));
+    isBand = (width > 0) && ~strcmpi(st.WindowShape, 'single');
+    ctrl.jRadioBox.setEnabled(isBand);
+    ctrl.jRadioTaper.setEnabled(isBand);
+    ctrl.jRadioGauss.setEnabled(isBand);
     % Sync the toggle + shape radios back from state (e.g. after ResetState)
     ctrl.jCheckActive.setSelected(logical(st.isActive));
     switch st.WindowShape
-        case 'single',  ctrl.jRadioSingle.setSelected(true);
-        case 'box',     ctrl.jRadioBox.setSelected(true);
         case 'tapered', ctrl.jRadioTaper.setSelected(true);
-        case 'gain',    ctrl.jRadioGain.setSelected(true);
+        case 'gain',    ctrl.jRadioGauss.setSelected(true);
+        otherwise,      ctrl.jRadioBox.setSelected(true);
+    end
+    nKeep = nnz(st.Weights > 1e-6);
+    lamStr = '';
+    if ~isempty(st.CacheEig) && isfield(st.CacheEig,'Values') && ~isempty(st.CacheEig.Values) ...
+            && isfield(st.CacheEig,'CompRank')
+        cr = st.CacheEig.CompRank(:); vals = st.CacheEig.Values(:);
+        iLo = find(cr == lo, 1); iHi = find(cr == hi, 1);
+        if ~isempty(iLo) && ~isempty(iHi)
+            lamStr = sprintf('    lambda %.3g - %.3g', vals(iLo), vals(iHi));
+        end
+    end
+    if (width == 0)
+        ctrl.jLabelReadout.setText(sprintf('Mode %d / %d%s', st.iCurrentMode, K, lamStr));
+    else
+        ctrl.jLabelReadout.setText(sprintf('Keeping %d modes%s', nKeep, lamStr));
     end
 end
 
