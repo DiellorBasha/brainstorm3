@@ -30,7 +30,7 @@ function varargout = view_eigenmodes_timeseries(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'GetBandTraces','HemiColors','ModesChangedCallback'}))
+if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'GetBandTraces','HemiColors','ModesChangedCallback','CurrentTimeChangedCallback'}))
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -40,14 +40,16 @@ end
 
 %% ===== GUI: build the eigenmode coefficient time series figure =====
 function hFig = ViewFigure(DataFile)
+    global GlobalData;
     hFig = [];
-    if isempty(DataFile)
+    if isempty(DataFile) || ~ischar(DataFile)
         bst_error('No data file provided.', 'Eigenmode time series', 0);
         return;
     end
     % ----- Study + head model + surface -----
     [sStudy, ~] = bst_get('AnyFile', DataFile);
-    if isempty(sStudy) || ~isfield(sStudy, 'iHeadModel') || isempty(sStudy.iHeadModel) || (sStudy.iHeadModel < 1)
+    if isempty(sStudy) || ~isfield(sStudy, 'iHeadModel') || isempty(sStudy.iHeadModel) ...
+            || (sStudy.iHeadModel < 1) || (length(sStudy.HeadModel) < sStudy.iHeadModel)
         bst_error('No head model available for this study.', 'Eigenmode time series', 0);
         return;
     end
@@ -75,50 +77,53 @@ function hFig = ViewFigure(DataFile)
         return;
     end
 
-    % ----- Channels + recordings -----
-    ChannelFile = bst_get('ChannelFileForStudy', sStudy.FileName);
-    if isempty(ChannelFile)
-        bst_error('No channel file found.', 'Eigenmode time series', 0);
+    % ----- Load the recordings dataset (raw or imported); read the CURRENT window -----
+    % This is the lazy path used by "Display on cortex": GetRecordingsValues loads
+    % the current page on demand for raw files and returns the displayed window.
+    iDS = bst_memory('LoadDataFile', DataFile);
+    if isempty(iDS)
+        bst_error('Could not load the recordings.', 'Eigenmode time series', 0);
         return;
     end
-    ChannelMat = in_bst_channel(ChannelFile);
-    DataMat    = in_bst_data(DataFile);
-    if isstruct(DataMat.F)
-        bst_error('Eigenmode time series requires imported (non-raw) recordings.', 'Eigenmode time series', 0);
+    Channels    = GlobalData.DataSet(iDS).Channel;
+    ChannelFlag = GlobalData.DataSet(iDS).Measures.ChannelFlag;
+    if isempty(Channels)
+        bst_error('No channels found for this recording.', 'Eigenmode time series', 0);
         return;
     end
-    if isfield(DataMat, 'ChannelFlag') && ~isempty(DataMat.ChannelFlag)
-        ChannelFlag = DataMat.ChannelFlag;
-    else
-        ChannelFlag = ones(length(ChannelMat.Channel), 1);
+    if isempty(ChannelFlag)
+        ChannelFlag = ones(length(Channels), 1);
     end
-    iCh = good_channel(ChannelMat.Channel, ChannelFlag, 'MEG');
+    iCh = good_channel(Channels, ChannelFlag, 'MEG');
     if isempty(iCh)
-        iCh = good_channel(ChannelMat.Channel, ChannelFlag, 'EEG');
+        iCh = good_channel(Channels, ChannelFlag, 'EEG');
     end
     if isempty(iCh)
         bst_error('No good MEG or EEG channels found.', 'Eigenmode time series', 0);
         return;
     end
 
-    % ----- Transform: full coefficient matrix Theta [K_raw x nTime] -----
-    % Use ALL raw modes so paired ranks are always complete (both hemispheres).
-    % bst_eigenmodes_transform's pinv is rank-safe when K_raw >= nCh: high modes
-    % simply receive near-zero, floored coefficients. The panel band selects what
-    % is actually displayed, so computing all modes here costs only one SVD.
+    % ----- Transform kernel over ALL raw modes (complete pairing; rank-safe pinv) -----
     K_raw = double(Eig.nModes);
     Phi   = double(Eig.Vectors(:, 1:K_raw));
     [Kernel, ~] = bst_eigenmodes_transform(Gain(iCh, :), Phi);   % [K_raw x nCh]
-    Theta = Kernel * double(DataMat.F(iCh, :));                  % [K_raw x nTime]
 
-    % ----- Cache everything the live refresh needs -----
+    % ----- Current-window recordings -> coefficients (unscaled: isGradMagScale=0) -----
+    F = bst_memory('GetRecordingsValues', iDS, iCh, 'UserTimeWindow', 0);   % [nCh x nTime]
+    [TimeVector, ~] = bst_memory('GetTimeVector', iDS, [], 'UserTimeWindow');
+    Theta = Kernel * F;                                                     % [K_raw x nTime]
+
+    % ----- Cache (kernel + channels let us recompute on window change) -----
     cache = struct( ...
         'SurfaceFile', SurfaceFile, ...
         'DataFile',    DataFile, ...
-        'Theta',       Theta, ...
+        'Kernel',      Kernel, ...
+        'GoodChannel', iCh, ...
         'Component',   Eig.Component(1:K_raw), ...
         'CompRank',    Eig.CompRank(1:K_raw), ...
-        'TimeVector',  DataMat.Time);
+        'Theta',       Theta, ...
+        'TimeVector',  TimeVector, ...
+        'WindowTime',  GlobalData.DataSet(iDS).Measures.Time);
 
     % ----- Ensure the lever is initialized for this surface (paired ranks) -----
     Kp = double(max(cache.CompRank));
@@ -130,14 +135,12 @@ function hFig = ViewFigure(DataFile)
     band = band.Band;
 
     % ----- First plot -----
-    [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
-    if isempty(iRows)
+    [F0, Labels, colors] = BandData(cache, band);
+    if isempty(F0)
         bst_error('No eigenmodes in the selected band.', 'Eigenmode time series', 0);
         return;
     end
-    F      = cache.Theta(iRows, :);
-    colors = HemiColors(Hemi);
-    hFig = view_timeseries_matrix(DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, []);
+    hFig = view_timeseries_matrix(DataFile, {F0}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, []);
     if isempty(hFig)
         return;
     end
@@ -151,6 +154,41 @@ function hFig = ViewFigure(DataFile)
     catch
         % Non-fatal: the panel still works, controls just won't pre-sync.
     end
+end
+
+
+%% ===== band -> {F, Labels, colors} from a cache's current Theta =====
+function [F, Labels, colors] = BandData(cache, band)
+    [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
+    if isempty(iRows)
+        F = []; colors = {};
+        return;
+    end
+    F      = cache.Theta(iRows, :);
+    colors = HemiColors(Hemi);
+end
+
+
+%% ===== Re-slice the band and redraw into the existing figure =====
+function RefreshTraces(hFig)
+    cache = getappdata(hFig, 'EigenTimeSeries');
+    if isempty(cache)
+        return;
+    end
+    st = panel_eigenmodes('GetState');
+    if ~file_compare(st.SurfaceFile, cache.SurfaceFile)
+        return;   % panel currently driving a different surface
+    end
+    [F, Labels, colors] = BandData(cache, st.Band);
+    if isempty(F)
+        return;
+    end
+    view_timeseries_matrix(cache.DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, hFig);
+    % Restore our title (view_timeseries_matrix calls UpdateFigureName, which
+    % overwrites it). The EigenTimeSeries appdata survives the redraw; re-assert
+    % it defensively in case view_timeseries_matrix's behaviour ever changes.
+    setappdata(hFig, 'EigenTimeSeries', cache);
+    set(hFig, 'Name', ['Eigenmode time series: ' cache.SurfaceFile]);
 end
 
 
@@ -185,30 +223,9 @@ function [iRows, Labels, Hemi] = GetBandTraces(Component, CompRank, kLo, kHi)
 end
 
 
-%% ===== Re-select the band's rows and redraw on a lever change =====
+%% ===== Lever changed: re-slice the band (no data re-read) =====
 function ModesChangedCallback(hFig) %#ok<DEFNU>
-    cache = getappdata(hFig, 'EigenTimeSeries');
-    if isempty(cache)
-        return;
-    end
-    st   = panel_eigenmodes('GetState');
-    if ~file_compare(st.SurfaceFile, cache.SurfaceFile)
-        return;   % panel currently driving a different surface
-    end
-    band = st.Band;
-    [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
-    if isempty(iRows)
-        return;
-    end
-    F      = cache.Theta(iRows, :);
-    colors = HemiColors(Hemi);
-    % Redraw into the same figure (view_timeseries_matrix replots when hFig is given)
-    view_timeseries_matrix(cache.DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, hFig);
-    % Restore our title (view_timeseries_matrix calls UpdateFigureName, which
-    % overwrites it). The EigenTimeSeries appdata survives the redraw; re-assert
-    % it defensively in case view_timeseries_matrix's behaviour ever changes.
-    setappdata(hFig, 'EigenTimeSeries', cache);
-    set(hFig, 'Name', ['Eigenmode time series: ' cache.SurfaceFile]);
+    RefreshTraces(hFig);
 end
 
 
