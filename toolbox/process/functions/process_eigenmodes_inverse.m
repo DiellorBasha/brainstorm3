@@ -69,6 +69,9 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         bst_report('Warning', sProcess, sInputs, 'No noise covariance: using identity whitening.');
     end
     ChannelFile = bst_get('ChannelFileForStudy', sStudy.FileName);
+    if isempty(ChannelFile)
+        bst_report('Error', sProcess, sInputs, 'No channel file found for this study.'); return;
+    end
     ChannelMat  = in_bst_channel(ChannelFile);
 
     % Good channels from the first input's flags (MEG, else EEG)
@@ -89,12 +92,21 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     K = Inv.nModes;
 
     % Eigenmodes (Phi) for reconstruction
-    [Eig, ~] = in_tess_eigenmodes(HM.SurfaceFile);
+    [Eig, isComputed] = in_tess_eigenmodes(HM.SurfaceFile);
+    if ~isComputed
+        bst_report('Error', sProcess, sInputs, ...
+            ['No eigenmodes on surface: ' HM.SurfaceFile '. Run "Compute eigenmodes" first.']); return;
+    end
     Phi = double(Eig.Vectors(:, 1:K));               % [nVert x K]
     lambdas = Inv.Eigenvalues;
 
     for iInput = 1:numel(sInputs)
         sInput = sInputs(iInput);
+        if sInput.iStudy ~= sInputs(1).iStudy
+            bst_report('Warning', sProcess, sInput, ...
+                'Skipped: input is from a different study than the head model. Run the process per study.');
+            continue;
+        end
         DataMat = in_bst_data(sInput.FileName);
         isRaw = isstruct(DataMat.F);
         [sStudyOut, iStudyOut] = bst_get('Study', sInput.iStudy);
@@ -110,6 +122,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 upper(Method), K, Prior, sInput.Comment);
             ResMat.Function      = ['eigenmode_' Method];
             ResMat.Time          = DataMat.Time;
+            if isRaw; ResMat.Time = []; end   % raw kernel: viewer fetches time from the data file
             ResMat.DataFile      = sInput.FileName;
             ResMat.HeadModelFile = HeadModelFile;
             ResMat.HeadModelType = 'surface';
