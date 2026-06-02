@@ -123,7 +123,7 @@ function hFig = ViewFigure(DataFile)
         'CompRank',    Eig.CompRank(1:K_raw), ...
         'Theta',       Theta, ...
         'TimeVector',  TimeVector, ...
-        'WindowTime',  GlobalData.DataSet(iDS).Measures.Time);
+        'WindowTime',  GlobalData.DataSet(iDS).Measures.Time);  % [t0 t1]; CurrentTimeChangedCallback uses it to detect a window change
 
     % ----- Ensure the lever is initialized for this surface (paired ranks) -----
     Kp = double(max(cache.CompRank));
@@ -135,12 +135,12 @@ function hFig = ViewFigure(DataFile)
     band = band.Band;
 
     % ----- First plot -----
-    [F0, Labels, colors] = BandData(cache, band);
-    if isempty(F0)
+    [Fband, Labels, colors] = BandData(cache, band);
+    if isempty(Fband)
         bst_error('No eigenmodes in the selected band.', 'Eigenmode time series', 0);
         return;
     end
-    hFig = view_timeseries_matrix(DataFile, {F0}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, []);
+    hFig = view_timeseries_matrix(DataFile, {Fband}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, []);
     if isempty(hFig)
         return;
     end
@@ -225,6 +225,33 @@ end
 
 %% ===== Lever changed: re-slice the band (no data re-read) =====
 function ModesChangedCallback(hFig) %#ok<DEFNU>
+    RefreshTraces(hFig);
+end
+
+
+%% ===== Displayed window changed (e.g. raw page scroll): re-read + recompute =====
+function CurrentTimeChangedCallback(hFig, iDS) %#ok<DEFNU>
+    global GlobalData;
+    cache = getappdata(hFig, 'EigenTimeSeries');
+    if isempty(cache)
+        return;
+    end
+    if (nargin < 2) || isempty(iDS) || (iDS < 1) || (iDS > numel(GlobalData.DataSet))
+        return;
+    end
+    % Only re-read when the displayed window bounds actually changed (a raw page
+    % scroll). Moving the time cursor within the same page leaves Measures.Time
+    % unchanged, so this is a cheap no-op on every cursor move.
+    Win = GlobalData.DataSet(iDS).Measures.Time;
+    if isequal(Win, cache.WindowTime)
+        return;
+    end
+    F = bst_memory('GetRecordingsValues', iDS, cache.GoodChannel, 'UserTimeWindow', 0);
+    [TimeVector, ~] = bst_memory('GetTimeVector', iDS, [], 'UserTimeWindow');
+    cache.Theta      = cache.Kernel * F;
+    cache.TimeVector = TimeVector;
+    cache.WindowTime = Win;
+    setappdata(hFig, 'EigenTimeSeries', cache);
     RefreshTraces(hFig);
 end
 
