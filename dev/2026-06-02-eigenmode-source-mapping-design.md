@@ -154,8 +154,12 @@ and dimensionlessly:
 
 ```
 λ̃_k = λ_k / λ_ref ,   λ_ref = λ_{K+1}  (first discarded eigenvalue; else λ_K·(1+ε))
-R_k ∝ −1 / log(λ̃_k)
+R_k ∝ −log(λ̃_k) = log(λ_ref / λ_k)
 ```
+
+(`R` is the source *covariance*. GBF writes the penalty as the *precision*
+`Σ⁻¹ = −1/log λ`, so the covariance is `R = Σ = −log λ` — positive and **decreasing**
+in `λ` (smooth low-`λ` modes get more prior variance, fine modes less).)
 
 This is a **pure shift in log-space** (`−log(λ_k/λ_ref) = −log λ_k + log λ_ref`), so it
 **preserves all eigenvalue ratios and ordering** — the interpretation of each mode
