@@ -236,16 +236,6 @@ end
 
 
 %% ===== helpers =====
-function SetPanelEnabled(ctrl, isOn)
-    fn = fieldnames(ctrl);
-    for i = 1:numel(fn)
-        c = ctrl.(fn{i});
-        if isa(c, 'javax.swing.JComponent')
-            c.setEnabled(logical(isOn));
-        end
-    end
-end
-
 function SurfaceFile = GetFigureSurfaceWithModes(hFig)
     SurfaceFile = '';
     if isempty(hFig) || ~ishandle(hFig)
@@ -361,7 +351,11 @@ end
 function SetActive(isActive) %#ok<DEFNU>
     global GlobalData;
     GetState();
-    GlobalData.UserModes.isActive = logical(isActive);
+    isActive = logical(isActive);
+    if isActive == GlobalData.UserModes.isActive
+        return;                      % no change -> no broadcast
+    end
+    GlobalData.UserModes.isActive = isActive;
     NotifyChanged();
 end
 
