@@ -39,6 +39,14 @@ st = GlobalData.UserModes;
 assert(strcmp(st.WindowShape, 'single'), 'shape stored');
 assert(sum(st.Weights) == 1 && st.Weights(100) == 1, 'single -> delta at center');
 
+% Regression: 'single' zeroes the span, so sliding the centre stays single
+panel_eigenmodes('SetCurrentMode', 120);
+st = GlobalData.UserModes;
+assert(st.Band(1) == 120 && st.Band(2) == 120, 'single: slider stays one mode (span zeroed)');
+assert(sum(st.Weights) == 1 && st.Weights(120) == 1, 'single -> delta follows the slider');
+% Restore box shape for the remaining band-width checks
+panel_eigenmodes('SetWindowShape', 'box');
+
 % SetActive toggles the flag
 panel_eigenmodes('SetActive', true);
 assert(GlobalData.UserModes.isActive == 1, 'SetActive true');

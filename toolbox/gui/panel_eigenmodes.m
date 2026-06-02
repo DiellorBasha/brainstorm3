@@ -452,7 +452,8 @@ function SetWindowShape(shape) %#ok<DEFNU>
     GlobalData.UserModes.WindowShape = lower(shape);
     if strcmpi(shape, 'single')
         c = GlobalData.UserModes.iCurrentMode;
-        GlobalData.UserModes.Band = [c, c];
+        GlobalData.UserModes.Band     = [c, c];
+        GlobalData.UserModes.BandSpan = 0;   % zero width so the slider stays single
     end
     RecomputeWeights();
     NotifyChanged();
