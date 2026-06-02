@@ -14,7 +14,7 @@ function R = bst_benchmark_report(rows, varargin)
 %   .summary : per (regime,snr,method,metric): .median .iqr .ci_lo .ci_hi .n
 %   .paired  : per (regime,snr,method,metric): .median_diff .ci_lo .ci_hi (ref - method)
 %
-% Base MATLAB only (no Statistics Toolbox): percentiles via local_prctile.
+% Base MATLAB only (no Statistics Toolbox): percentiles via bst_prctile.
 %
 % Authors: Diellor Basha, 2026
 RefMethod = 'eigenmode'; Seed = 1; OutDir = ''; nBoot = 2000;
@@ -103,20 +103,9 @@ bm = zeros(nBoot,1);
 for b = 1:nBoot
     bm(b) = median(v(randi(n, n, 1)));
 end
-ci = [local_prctile(bm, 2.5), local_prctile(bm, 97.5)];
+ci = bst_prctile(bm, [2.5 97.5]);
 end
 
 function q = local_iqr(v)
-q = local_prctile(v, 75) - local_prctile(v, 25);
-end
-
-function p = local_prctile(x, pct)
-% Percentile via linear interpolation (base MATLAB; matches prctile convention).
-x = sort(x(:)); n = numel(x);
-if n == 0; p = NaN; return; end
-if n == 1; p = x(1); return; end
-pos = 100 * ((1:n) - 0.5) / n;       % plotting positions
-if pct <= pos(1);   p = x(1);   return; end
-if pct >= pos(end); p = x(end); return; end
-p = interp1(pos, x, pct, 'linear');
+q = bst_prctile(v, 75) - bst_prctile(v, 25);
 end
