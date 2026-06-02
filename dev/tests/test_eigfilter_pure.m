@@ -46,5 +46,30 @@ threw = false;
 try, bst_eigfilter_kernel('no_such_kernel'); catch, threw = true; end
 assert(threw, 'unknown kernel must error.');
 
+lp = [1; 2; 4; 8; 16];   % strictly positive for power/log
+% flat
+gf = bst_eigfilter_design_flat();
+assert(all(bst_eigfilter_evaluate(gf, lp) == 1), 'flat must be ones.');
+% power: lambda^-alpha, decreasing
+gp = bst_eigfilter_design_power(struct('alpha',1));
+assert(max(abs(gp(lp) - lp.^(-1))) < 1e-12, 'power value wrong.');
+% log: -log(lambda), needs lambda in (0,1) for positivity (prior scales it)
+gl = bst_eigfilter_design_log();
+assert(max(abs(gl([0.1;0.5]) - (-log([0.1;0.5])))) < 1e-12, 'log value wrong.');
+% inverse_heat: clamped
+gih = bst_eigfilter_design_inverse_heat(struct('t',0.1,'maxgain',5));
+assert(max(gih(lp)) <= 5 + 1e-12, 'inverse_heat must clamp at maxgain.');
+% tikhonov
+gt = bst_eigfilter_design_tikhonov(struct('beta',2));
+assert(max(abs(gt(lp) - 1./(1+2*lp))) < 1e-12, 'tikhonov value wrong.');
+% ideal band [2 8] inclusive
+gi = bst_eigfilter_design_ideal(struct('band',[2 8]));
+assert(isequal(gi(lp), double(lp>=2 & lp<=8)), 'ideal mask wrong.');
+% registry sees all of them
+nm = bst_eigfilter_kernel('list');
+for k = {'flat','power','log','inverse_heat','tikhonov','ideal'}
+    assert(any(strcmp(nm, k{1})), sprintf('list missing %s.', k{1}));
+end
+
 disp('ALL TESTS PASSED');
 end
