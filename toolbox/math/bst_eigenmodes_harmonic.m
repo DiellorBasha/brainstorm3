@@ -42,8 +42,8 @@ function M = bst_eigenmodes_harmonic(L, Phi, iW)
 %
 % Authors: Diellor Basha, 2026
 
-% Rank-safe pseudoinverse of the whitened compressed lead field, then de-whiten
-% the data side so the kernel applies to raw recordings.
+% Rank-safe pseudoinverse of the whitened compressed lead field; folding in iW
+% lets M pre-whiten raw recordings on the fly (M*d = pinv(iW*L*Phi)*(iW*d)).
 [Kt, ~] = bst_eigenmodes_transform(iW * L, Phi);   % pinv(iW*L*Phi)  [K x nCh]
 M = Kt * iW;                                        % [K x nCh]
 end

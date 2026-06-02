@@ -12,7 +12,7 @@ end
 
 % Synthetic problem: 8 channels, 12 vertices, 5 modes (deterministic, no rng).
 % L uses sin(i*j*pi/13) so rows are linearly independent (full rank over K=5).
-% Phi uses DCT-II basis (normalized) so L*Phi is guaranteed full column rank.
+% Phi uses DCT-II basis (normalized) so L*Phi is full column rank (verified numerically: rank(L*Phi)==K).
 nCh = 8; nV = 12; K = 5;
 L = zeros(nCh, nV);
 for i = 1:nCh
