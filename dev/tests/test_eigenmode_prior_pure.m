@@ -31,10 +31,10 @@ assert(all(Rl > 0), 'log prior must be positive (lambda normalized into (0,1)).'
 assert(abs(max(Rl) - 1) < 1e-12, 'log prior must be normalized to max 1.');
 assert(all(diff(Rl) <= 1e-9), 'log prior must be non-increasing in lambda.');
 
-% ratio-preservation invariant: scaling all eigenvalues by c only shifts log-space,
-% so the resulting log prior is unchanged after max-normalization.
-Rl_scaled = bst_eigenmode_prior(lambdas * 7.3, K, 'log', 0);
-assert(max(abs(Rl - Rl_scaled)) < 1e-9, 'log prior must be invariant to uniform eigenvalue scaling.');
+% GBF-exact prior is INTENTIONALLY scale-dependent (millimetre scale is physical):
+% the key fix is that high modes are NOT over-suppressed (gentle rolloff).
+fprintf('log prior Rl = [%s]\n', sprintf('%.4f ', Rl));
+assert(Rl(end) > 0.5, 'log prior must keep substantial variance on the edge mode (gentle rolloff).');
 
 disp('ALL TESTS PASSED');
 end

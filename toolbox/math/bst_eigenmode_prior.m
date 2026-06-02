@@ -12,7 +12,7 @@ function R = bst_eigenmode_prior(lambdas, K, priorType, alpha)
 %     priorType:
 %       'flat'  : R = ones(K,1)                         (no spectral prior)
 %       'power' : R proportional to lambda_k^(-alpha)   (legacy 1/f-like)
-%       'log'   : R proportional to log(lambda_ref/lambda_k)      (2026 GBF log prior)
+%       'log'   : R = -log(lambda_mm), GBF millimetre-scale eigenvalues (gentle high-mode rolloff)
 %
 %     For 'log', eigenvalues are normalized into (0,1) by lambda_ref (the first
 %     discarded eigenvalue, i.e. lambda(K+1), else lambda(K)*(1+eps)). R_k =
@@ -52,16 +52,17 @@ switch lower(priorType)
         R = lamK .^ (-alpha);
 
     case 'log'
-        % Reference scale = first discarded eigenvalue (else just above max used)
-        if nAvail >= K+1
-            lamRef = lambdas(K+1);
-        else
-            lamRef = lam(K) * (1 + 1e-6);
-        end
-        lamRef = max(lamRef, lam(K) * (1 + 1e-12));   % ensure strictly > lam(K)
-        lamTilde = lam(1:K) / lamRef;                  % in (0,1)
-        lamTilde = min(lamTilde, 1 - 1e-12);
-        R = -log(lamTilde);                            % = log(lamRef/lam) > 0, decreasing in lambda
+        % GBF 2026 prior on RAW millimetre-scale eigenvalues. Brainstorm surfaces
+        % are in metres and the cotan stiffness is scale-invariant (only the mass
+        % matrix scales with area), so lambda_mm = lambda_m * 1e-6 reproduces GBF's
+        % millimetre mesh exactly (eigenvectors unchanged). With lambda_mm in (0,1),
+        % R = -log(lambda_mm) > 0 and decreases gently with mode index (a large
+        % additive offset, ~ -log(1e-6) ≈ 13.8, so high modes are softened, not
+        % annihilated). The global regulariser in the inverse absorbs absolute scale.
+        M2MM2 = 1e-6;                                  % m^-2 -> mm^-2 (coords scale 1e3)
+        lamMM = lam(1:K) * M2MM2;
+        lamMM = min(max(lamMM, eps), 1 - 1e-12);       % keep strictly in (0,1)
+        R = -log(lamMM);                               % > 0, gently decreasing
 
     otherwise
         error('bst_eigenmode_prior:UnknownPrior', 'Unknown priorType: %s', priorType);
