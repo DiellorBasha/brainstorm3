@@ -62,6 +62,11 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
     if ~isMixed
         jRadioGridMixed.setEnabled(0);
     end
+    % Cortex surface harmonics (LBO eigenmode basis of the cortical source space)
+    jRadioGridHarmonics = gui_component('Radio', jPanelSourceSpace, 'br hfill', 'Cortex surface harmonics', jButtonGroupGridType, 'Re-expresses the cortical source space in the LBO eigenmode basis (L*Phi)', @UpdateComment);
+    gui_component('label', jPanelSourceSpace, 'br', 'Number of modes (0=all): ');
+    jTextNModes = gui_component('text', jPanelSourceSpace, 'tab hfill', '0');
+    jTextNModes.setEnabled(0);
     % Default: surface
     jRadioGridSurface.setSelected(1);
     % Attach sub panel to NewPanel
@@ -157,6 +162,8 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
                   'jRadioGridSurface',   jRadioGridSurface, ...
                   'jRadioGridVolume',    jRadioGridVolume, ...
                   'jRadioGridMixed',     jRadioGridMixed, ...
+                  'jRadioGridHarmonics', jRadioGridHarmonics, ...
+                  'jTextNModes',         jTextNModes, ...
                   'jCheckMethodMEG',     jCheckMethodMEG, ...
                   'jComboMethodMEG',     jComboMethodMEG, ...
                   'jCheckMethodEEG',     jCheckMethodEEG, ...
@@ -201,9 +208,11 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
         elseif isNirs && ~isMeg && ~isEeg && ~isEcog && ~isSeeg
             jCheckMethodNIRS.setSelected(1);
         end
-        % Disable NIRS for other than surface head model
+        % Enable the "Number of modes" field only for the harmonics source space
+        jTextNModes.setEnabled(jRadioGridHarmonics.isSelected());
+        % Disable NIRS for anything other than a plain cortex-surface head model
         if isNirs
-            if jRadioGridVolume.isSelected() || jRadioGridMixed.isSelected()
+            if jRadioGridVolume.isSelected() || jRadioGridMixed.isSelected() || jRadioGridHarmonics.isSelected()
                 jCheckMethodNIRS.setSelected(0);
                 jCheckMethodNIRS.setEnabled(0);
             else
@@ -264,6 +273,8 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
             Comment = [Comment ' (volume)'];
         elseif jRadioGridMixed.isSelected()
             Comment = [Comment ' (mixed)'];
+        elseif jRadioGridHarmonics.isSelected()
+            Comment = [Comment ' | harmonic'];
         else
             %Comment = [Comment ' (cortex)'];
         end
@@ -288,12 +299,19 @@ function s = GetPanelContents() %#ok<DEFNU>
     % Comment
     s.Comment = char(ctrl.jTextComment.getText());
     % Get source space
+    s.SourceCompression = 'none';
     if ctrl.jRadioGridSurface.isSelected()
         s.HeadModelType = 'surface';
     elseif ctrl.jRadioGridVolume.isSelected()
         s.HeadModelType = 'volume';
     elseif ctrl.jRadioGridMixed.isSelected()
         s.HeadModelType = 'mixed';
+    elseif ctrl.jRadioGridHarmonics.isSelected()
+        s.HeadModelType = 'surface';            % base physics is a surface run
+        s.SourceCompression = 'eigenmode';
+        nModes = str2double(char(ctrl.jTextNModes.getText()));
+        if isnan(nModes) || nModes < 0; nModes = 0; end
+        s.nModes = round(nModes);
     end
     % Get methods for MEG, EEG, ECOG, SEEG
     if ~isempty(ctrl.jCheckMethodMEG) && ctrl.jCheckMethodMEG.isSelected()
