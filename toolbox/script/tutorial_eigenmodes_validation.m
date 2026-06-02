@@ -14,7 +14,7 @@ function tutorial_eigenmodes_validation(ReportFile)
 %
 %     Level 1 (REQUIRED) - Resolution metrics
 %       On one subject with a base surface head model + eigenmodes + noise
-%       cov, builds the eigenmode-dSPM vertex kernel and the standard wMNE /
+%       cov, builds the eigenmode MNE/log (GBF MAP) vertex kernel and the standard wMNE /
 %       dSPM / sLORETA vertex kernels on the SAME base head model + noise cov
 %       + good MEG channels, then scores each with bst_resolution_metrics
 %       against the constrained base leadfield (apples-to-apples). Reports
@@ -24,13 +24,13 @@ function tutorial_eigenmodes_validation(ReportFile)
 %     Level 2 (BEST EFFORT) - Ground-truth simulation
 %       Plants a known focal source (single cortical vertex) on the subject's
 %       cortex, forward-projects through the base leadfield, adds sensor noise
-%       at a target SNR, reconstructs with eigenmode-dSPM and standard dSPM,
+%       at a target SNR, reconstructs with eigenmode MNE/log and standard dSPM,
 %       and reports the distance from the reconstructed peak vertex to the
 %       seed. Swept across 2 SNRs.
 %
 %     Level 3 (REQUIRED OMEGA part) - GBF vs dSPM on real data
 %       On each available subject (up to 2) with imported recordings, computes
-%       the eigenmode-dSPM and standard-dSPM |source| maps for the same data
+%       the eigenmode MNE/log and standard-dSPM |source| maps for the same data
 %       window and reports their spatial correlation. Phantom localization is
 %       attempted only if a phantom protocol is loaded (else SKIPPED).
 %
@@ -57,7 +57,7 @@ L{end+1} = '';
 pInfo = bst_get('ProtocolInfo');
 L{end+1} = sprintf('- Protocol: `%s`', pInfo.Comment);
 L{end+1} = sprintf('- Date: %s', datestr(now, 'yyyy-mm-dd HH:MM'));
-L{end+1} = sprintf('- Method under test: eigenmode (GBF) dSPM, prior=log');
+L{end+1} = sprintf('- Method under test: eigenmode (GBF) MNE, prior=log (GBF MAP estimate), full mode count K = nModes > nChannels');
 L{end+1} = '';
 
 summary = struct('L1', 'SKIP', 'L2', 'SKIP', 'L3omega', 'SKIP', 'L3phantom', 'SKIP');
@@ -156,8 +156,10 @@ Lc      = LcFull(iMeg, :);                            % [nMeg x nSrc]
 GridLoc = HM.GridLoc;                                 % [nSrc x 3] meters
 nSrc    = size(GridLoc, 1);
 
-% nModes cap (use all available, but not more than channels for stability)
-K = min(E.nModes, numel(iMeg));
+% Use the FULL available mode count. The eigenmode inverse + spectral prior are
+% designed for the underdetermined K > nChannels regime (the prior regularizes
+% the mode-space system); capping at nChannels defeats the spectral-prior regime.
+K = E.nModes;
 
 % --- Eigenmode-dSPM vertex kernel ---
 CompHM = bst_eigenmode_leadfield(HM, E, 'nModes', K);
@@ -212,7 +214,7 @@ lines{end+1} = '| Method | median LocError (mm) | median SpatialDisp (mm) | dept
 lines{end+1} = '|--------|----------------------|--------------------------|----------------------------|';
 
 allKern  = [{KernE}, stdKern];
-allLabel = [{'eigenmode-dSPM'}, labels];
+allLabel = [{'eigenmode-MNE/log'}, labels];
 for k = 1:numel(allKern)
     Kn = allKern{k};
     if isempty(Kn) || size(Kn,1) ~= nSrc
@@ -263,9 +265,9 @@ LcFull = bst_gain_orient(double(HM.Gain), HM.GridOrient, getf(HM,'GridAtlas',[])
 Lc = LcFull(iMeg, :);                                 % [nMeg x nSrc]
 GridLoc = HM.GridLoc;
 nSrc = size(GridLoc,1);
-K = min(E.nModes, numel(iMeg));
+K = E.nModes;   % full mode count (K > nChannels regime), see Level 1 note
 
-% Build eigenmode-dSPM and standard-dSPM vertex kernels once (reused per SNR)
+% Build eigenmode (MNE/log) and standard-dSPM vertex kernels once (reused per SNR)
 CompHM = bst_eigenmode_leadfield(HM, E, 'nModes', K);
 [InvE, errE, tmpCompFile, iStudyTmp] = run_eigenmode_inverse_tmp(CompHM, NoiseCovFile, ChannelFile, GoodMask, K, iStudy);
 if isempty(InvE)
@@ -307,7 +309,7 @@ Wnoise = Un * diag(sqrt(sn));                         % colored-noise generator
 
 lines{end+1} = sprintf('- Self-contained simulation: %d focal seeds spread across the cortex; localization error averaged (median) over seeds.', numel(seedIdx));
 lines{end+1} = '';
-lines{end+1} = '| SNR (amp) | eigenmode-dSPM median LocError (mm) | standard dSPM median LocError (mm) |';
+lines{end+1} = '| SNR (amp) | eigenmode-MNE/log median LocError (mm) | standard dSPM median LocError (mm) |';
 lines{end+1} = '|-----------|--------------------------------------|--------------------------------------|';
 
 SNRs = [3, 10];
@@ -350,7 +352,7 @@ function [lines, omegaOk, phantomOk] = level3_omega_phantom()
 lines = {}; omegaOk = false; phantomOk = false;
 
 % --- OMEGA: GBF-dSPM vs standard-dSPM spatial correlation on real data ---
-lines{end+1} = '### OMEGA: spatial correlation of |source| maps (eigenmode-dSPM vs standard dSPM)';
+lines{end+1} = '### OMEGA: spatial correlation of |source| maps (eigenmode-MNE/log vs standard dSPM)';
 lines{end+1} = '';
 studies = find_studies_with_imported_data(2);
 if isempty(studies)
@@ -399,9 +401,9 @@ maxT = min(nT, 200);
 ti = round(linspace(1, nT, maxT));
 F = F(:, ti);
 
-K = min(E.nModes, numel(iMeg));
+K = E.nModes;   % full mode count (K > nChannels regime), see Level 1 note
 
-% eigenmode-dSPM vertex map
+% eigenmode (MNE/log) vertex map
 CompHM = bst_eigenmode_leadfield(HM, E, 'nModes', K);
 [InvE, errE, tmpCompFile, iStudyTmp] = run_eigenmode_inverse_tmp(CompHM, NoiseCovFile, ChannelFile, GoodMask, K, iStudy);
 if isempty(InvE)
@@ -517,8 +519,10 @@ try
     tmpFull = bst_process('GetNewFilename', studyPath, 'headmodel_eigenmode_tmpval');
     bst_save(tmpFull, CompHM, 'v7');
     tmpFile = file_short(tmpFull);
+    % Headline eigenmode method = MNE with the log spectral prior (the GBF MAP
+    % estimate). This is the configuration designed for the K > nChannels regime.
     [Inv, errMsg] = bst_inverse_eigenmodes(tmpFile, NoiseCovFile, ChannelFile, GoodMask, ...
-        'Method','dspm', 'Prior','log', 'SNR',3, 'nModes',K);
+        'Method','mne', 'Prior','log', 'SNR',3, 'nModes',K);
 catch ME
     errMsg = ME.message;
 end
