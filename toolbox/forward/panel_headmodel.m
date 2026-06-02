@@ -310,7 +310,7 @@ function s = GetPanelContents() %#ok<DEFNU>
         s.HeadModelType = 'surface';            % base physics is a surface run
         s.SourceCompression = 'eigenmode';
         nModes = str2double(char(ctrl.jTextNModes.getText()));
-        if isnan(nModes) || nModes < 0; nModes = 0; end
+        if isnan(nModes) || isinf(nModes) || nModes < 0; nModes = 0; end
         s.nModes = round(nModes);
     end
     % Get methods for MEG, EEG, ECOG, SEEG
