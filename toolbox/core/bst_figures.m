@@ -1007,7 +1007,18 @@ function FireModesChanged() %#ok<DEFNU>
     for iDS = 1:length(GlobalData.DataSet)
         for iFig = 1:length(GlobalData.DataSet(iDS).Figure)
             sFig = GlobalData.DataSet(iDS).Figure(iFig);
-            if strcmpi(get(sFig.hFigure, 'Visible'), 'off') || ~strcmpi(sFig.Id.Type, '3DViz')
+            if strcmpi(get(sFig.hFigure, 'Visible'), 'off')
+                continue;
+            end
+            % Eigenmode time series client (not a 3D figure): re-select band rows.
+            etsInfo = getappdata(sFig.hFigure, 'EigenTimeSeries');
+            if ~isempty(etsInfo)
+                if file_compare(etsInfo.SurfaceFile, SurfaceFile)
+                    view_eigenmodes_timeseries('ModesChangedCallback', sFig.hFigure);
+                end
+                continue;
+            end
+            if ~strcmpi(sFig.Id.Type, '3DViz')
                 continue;
             end
             % Only repaint figures showing the lever's surface
