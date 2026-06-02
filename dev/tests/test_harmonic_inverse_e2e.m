@@ -43,9 +43,15 @@ if isempty(target)
     return;
 end
 
+% Build a good-channel mask: drop non-sensor / NaN-gain rows so the smoke test
+% mirrors the realistic compute paths (which pass good_channel-filtered sets).
+HM = in_bst_headmodel(target.hmFile, 1);   % ApplyOrient=1 -> constrained [nch x nVert]
+goodMask = all(isfinite(double(HM.Gain)), 2);
+assert(any(goodMask), 'No finite-gain channels found.');
+
 % Compute the harmonic kernel via bst_inverse_eigenmodes (engine under both compute surfaces)
 [InvE, errE] = bst_inverse_eigenmodes(target.hmFile, target.surf, target.ncFile, ...
-    'Method', 'harmonic', 'nModes', 0);
+    'Method', 'harmonic', 'nModes', 0, 'GoodChannel', goodMask);
 assert(isempty(errE), ['bst_inverse_eigenmodes harmonic failed: ' errE]);
 assert(~isempty(InvE.ImagingKernel), 'Harmonic kernel must be non-empty.');
 K = InvE.nModes;

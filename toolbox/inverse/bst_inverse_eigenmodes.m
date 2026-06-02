@@ -166,13 +166,6 @@ else
     iGoodChan = 1:nAllChannels;
 end
 L = Gain(iGoodChan, :);  % [nGoodChannels × nVertices]
-
-% Guard: drop any channel rows that contain NaN (bad channels with no valid solution)
-iNanRows = any(isnan(L), 2);
-if any(iNanRows)
-    iGoodChan = iGoodChan(~iNanRows);
-    L = L(~iNanRows, :);
-end
 nChannels = size(L, 1);
 
 %% ===== LOAD EIGENMODES =====
