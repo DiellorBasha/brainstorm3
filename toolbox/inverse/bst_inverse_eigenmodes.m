@@ -140,8 +140,8 @@ for i = 1:2:length(varargin)
 end
 
 % Validate method
-if ~ismember(Method, {'mne', 'dspm', 'sloreta'})
-    errMsg = ['Unknown method: ' Method '. Use mne, dspm, or sloreta.'];
+if ~ismember(Method, {'mne', 'dspm', 'sloreta', 'harmonic'})
+    errMsg = ['Unknown method: ' Method '. Use mne, dspm, sloreta, or harmonic.'];
     return;
 end
 
@@ -296,6 +296,13 @@ alpha = s ./ (s.^2 + Lambda);         % [r × 1] — filter factors
 
 % Build imaging kernel
 switch Method
+    case 'harmonic'
+        % Unregularized, whitened eigenmode reconstruction (no SNR/prior).
+        % iW is the whitener built above; L (good-channel constrained gain),
+        % Phi, and K are already defined. Reuses the rank-safe pinv.
+        Kernel = bst_eigenmodes_harmonic(L, Phi, iW);   % [K x nChannels]
+        EigenGains = ones(K, 1);
+
     case 'mne'
         % M̃ = diag(sqrtPrior) · V · diag(alpha) · U' · iW
         Kernel = diag(sqrtPrior) * V * diag(alpha) * U' * iW;  % [K × nChannels]
