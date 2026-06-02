@@ -44,5 +44,12 @@ colors = view_eigenmodes_timeseries('HemiColors', [1 2 0]);
 assert(iscell(colors) && numel(colors) == 3, 'HemiColors must return a 1x3 cell.');
 assert(~isequal(colors{1}, colors{2}), 'Left and right must differ in color.');
 
+% --- Empty/out-of-range band yields no traces ---
+[iRowsE, LabelsE, HemiE] = view_eigenmodes_timeseries('GetBandTraces', Component, CompRank, 5, 3);
+assert(isempty(iRowsE) && isempty(LabelsE) && isempty(HemiE), 'Out-of-range band must yield no traces.');
+
+% --- HemiColors neutral (single-component) entry is the documented grey ---
+assert(isequal(colors{3}, [0.20 0.20 0.20]), 'Hemi=0 must map to neutral grey.');
+
 disp('ALL TESTS PASSED');
 end
