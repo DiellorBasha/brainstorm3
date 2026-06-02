@@ -14,14 +14,16 @@ function R = bst_eigenmode_prior(lambdas, K, priorType, alpha)
 %       'power' : R proportional to lambda_k^(-alpha)   (legacy 1/f-like)
 %       'log'   : R = -log(lambda_mm), GBF millimetre-scale eigenvalues (gentle high-mode rolloff)
 %
-%     For 'log', eigenvalues are normalized into (0,1) by lambda_ref (the first
-%     discarded eigenvalue, i.e. lambda(K+1), else lambda(K)*(1+eps)). R_k =
-%     log(lambda_ref/lambda_k) is positive and decreasing in lambda (smoother
-%     modes get more prior variance). Scaling all eigenvalues by a constant c
-%     only shifts log-space uniformly; after max-normalization R is unchanged
-%     (scale invariance). The DC mode (lambda~0) is swapped to lambda(2).
-%     R is normalized so max(R) = 1; absolute scale is absorbed by the global
-%     regularizer in the inverse.
+%     For 'log', eigenvalues are taken on GBF's millimetre scale: Brainstorm
+%     surfaces are in metres and the cotan stiffness is scale-invariant (only the
+%     mass matrix scales with area), so lambda_mm = lambda_m * 1e-6 reproduces a
+%     millimetre mesh (eigenvectors unchanged). With lambda_mm in (0,1),
+%     R = -log(lambda_mm) > 0 and decreases gently with mode index (a large
+%     additive offset ~ -log(1e-6) ~ 13.8 softens, rather than annihilates, the
+%     high modes). The DC mode (lambda~0) is swapped to lambda(2). R is then
+%     normalized so max(R) = 1; the inverse's global regulariser absorbs absolute
+%     scale. Unlike a reference-normalized prior, this is intentionally
+%     scale-dependent (the millimetre scale is physical).
 %
 % Authors: Diellor Basha, 2026
 

@@ -2,7 +2,7 @@ function test_eigenmode_prior_pure
 % Verify the spectral prior R from eigenvalues:
 %   - 'flat'  -> all ones
 %   - 'power' -> normalized lambda^(-alpha), DC handled
-%   - 'log'   -> positive, decreasing in lambda, ratio-preserving, max==1
+%   - 'log'   -> positive, decreasing in lambda, gentle high-mode rolloff, max==1
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
 addpath(repoRoot);
