@@ -92,5 +92,27 @@ assert(all(gd(lpp) >= -1e-12), 'dog must be non-negative for t1<t2.');
 md = bst_eigfilter_design_dog('meta');
 assert(md.priorAdmissible == false, 'dog must be flagged not prior-admissible.');
 
+% ---- meta contract: every registered kernel exposes the full field set ----
+% (mechanically enforces the contract the future filter-design GUI relies on)
+reqFields = {'name','display','params','bandpass','priorAdmissible'};
+allNames  = bst_eigfilter_kernel('list');
+assert(numel(allNames) == 10, 'expected 10 registered kernels.');
+for k = allNames
+    mt = bst_eigfilter_kernel('info', k{1});
+    for f = reqFields
+        assert(isfield(mt, f{1}), sprintf('meta for %s missing field %s.', k{1}, f{1}));
+    end
+    assert(strcmp(mt.name, k{1}), sprintf('meta.name mismatch for %s.', k{1}));
+    assert(islogical(mt.bandpass) || isnumeric(mt.bandpass), 'meta.bandpass must be logical/numeric.');
+    assert(islogical(mt.priorAdmissible) || isnumeric(mt.priorAdmissible), 'meta.priorAdmissible must be logical/numeric.');
+end
+% only mexhat and dog are analysis-only (priorAdmissible=false)
+inadmissible = {};
+for k = allNames
+    mt = bst_eigfilter_kernel('info', k{1});
+    if ~mt.priorAdmissible; inadmissible{end+1} = k{1}; end %#ok<AGROW>
+end
+assert(isequal(sort(inadmissible), {'dog','mexhat'}), 'only dog and mexhat must be prior-inadmissible.');
+
 disp('ALL TESTS PASSED');
 end
