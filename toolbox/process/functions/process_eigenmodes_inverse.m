@@ -32,6 +32,9 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.nmodes.Comment = 'Number of eigenmodes (0 = all in head model): ';
     sProcess.options.nmodes.Type    = 'value';
     sProcess.options.nmodes.Value   = {0, '', 0};
+    sProcess.options.whiten.Comment = 'Apply noise whitening (recommended)';
+    sProcess.options.whiten.Type    = 'checkbox';
+    sProcess.options.whiten.Value   = 1;
     sProcess.options.outputtype.Comment = {'Coefficients (matrix)', 'Sources (results)', 'Both', 'Output:'; ...
         'coefficients', 'sources', 'both', ''};
     sProcess.options.outputtype.Type  = 'radio_linelabel';
@@ -45,120 +48,28 @@ end
 
 function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     OutputFiles = {};
-    Method     = lower(sProcess.options.method.Value);
-    Prior      = lower(sProcess.options.prior.Value);
-    SNR        = sProcess.options.snr.Value{1};
-    nModes     = sProcess.options.nmodes.Value{1};
-    OutputType = lower(sProcess.options.outputtype.Value);
-
-    [sStudy, ~] = bst_get('Study', sInputs(1).iStudy);
-    if isempty(sStudy.iHeadModel) || sStudy.iHeadModel < 1
-        bst_report('Error', sProcess, sInputs, 'No head model for this study.'); return;
-    end
-    HeadModelFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
-    HM = in_bst_headmodel(HeadModelFile, 0);
-    if ~isfield(HM,'isEigenmode') || ~HM.isEigenmode
-        bst_report('Error', sProcess, sInputs, ...
-            'Active head model is not an eigenmode leadfield. Run "Compute eigenmode leadfield" first.'); return;
-    end
-
-    NoiseCovFile = '';
-    if ~isempty(sStudy.NoiseCov) && ~isempty(sStudy.NoiseCov(1).FileName)
-        NoiseCovFile = sStudy.NoiseCov(1).FileName;
-    else
-        bst_report('Warning', sProcess, sInputs, 'No noise covariance: using identity whitening.');
-    end
-    ChannelFile = bst_get('ChannelFileForStudy', sStudy.FileName);
-    if isempty(ChannelFile)
-        bst_report('Error', sProcess, sInputs, 'No channel file found for this study.'); return;
-    end
-    ChannelMat  = in_bst_channel(ChannelFile);
-
-    % Good channels from the first input's flags (MEG, else EEG)
-    DataFlag = in_bst_data(sInputs(1).FileName, 'ChannelFlag');
-    ChannelFlag = ones(numel(ChannelMat.Channel), 1);
-    if isfield(DataFlag,'ChannelFlag') && ~isempty(DataFlag.ChannelFlag)
-        ChannelFlag = DataFlag.ChannelFlag;
-    end
-    iSel = good_channel(ChannelMat.Channel, ChannelFlag, 'MEG');
-    if isempty(iSel); iSel = good_channel(ChannelMat.Channel, ChannelFlag, 'EEG'); end
-    if isempty(iSel); bst_report('Error', sProcess, sInputs, 'No good MEG/EEG channels.'); return; end
-    GoodChannel = false(numel(ChannelMat.Channel), 1); GoodChannel(iSel) = true;
-
-    % Solve
-    [Inv, errMsg] = bst_inverse_eigenmodes(HeadModelFile, NoiseCovFile, ChannelFile, GoodChannel, ...
-        'Method', Method, 'Prior', Prior, 'SNR', SNR, 'nModes', nModes);
-    if ~isempty(errMsg); bst_report('Error', sProcess, sInputs, errMsg); return; end
-    K = Inv.nModes;
-
-    % Eigenmodes (Phi) for reconstruction
-    [Eig, isComputed] = in_tess_eigenmodes(HM.SurfaceFile);
-    if ~isComputed
-        bst_report('Error', sProcess, sInputs, ...
-            ['No eigenmodes on surface: ' HM.SurfaceFile '. Run "Compute eigenmodes" first.']); return;
-    end
-    Phi = double(Eig.Vectors(:, 1:K));               % [nVert x K]
-    lambdas = Inv.Eigenvalues;
-
-    for iInput = 1:numel(sInputs)
-        sInput = sInputs(iInput);
-        if sInput.iStudy ~= sInputs(1).iStudy
-            bst_report('Warning', sProcess, sInput, ...
-                'Skipped: input is from a different study than the head model. Run the process per study.');
-            continue;
-        end
-        DataMat = in_bst_data(sInput.FileName);
-        isRaw = isstruct(DataMat.F);
-        [sStudyOut, iStudyOut] = bst_get('Study', sInput.iStudy);
-        StudyDir = bst_fileparts(file_fullpath(sStudyOut.FileName));
-
-        % Cortex results node (kernel-only): ImagingKernel = Phi * M~
-        if ismember(OutputType, {'sources','both'})
-            ResMat = db_template('resultsmat');
-            ResMat.ImagingKernel = Phi * Inv.ImagingKernel;     % [nVert x nGoodCh]
-            ResMat.ImageGridAmp  = [];
-            ResMat.nComponents   = 1;
-            ResMat.Comment       = sprintf('Eigenmode %s (%d modes, %s) | %s', ...
-                upper(Method), K, Prior, sInput.Comment);
-            ResMat.Function      = ['eigenmode_' Method];
-            ResMat.Time          = DataMat.Time;
-            if isRaw; ResMat.Time = []; end   % raw kernel: viewer fetches time from the data file
-            ResMat.DataFile      = sInput.FileName;
-            ResMat.HeadModelFile = HeadModelFile;
-            ResMat.HeadModelType = 'surface';
-            ResMat.SurfaceFile   = HM.SurfaceFile;
-            ResMat.GoodChannel   = iSel;
-            ResMat.ChannelFlag   = ChannelFlag;
-            ResMat.nAvg          = DataMat.nAvg; ResMat.Leff = DataMat.Leff;
-            ResMat = bst_history('add', ResMat, 'eigenmodes_inverse', ...
-                sprintf('Eigenmode %s, %d modes, prior=%s, SNR=%.1f', Method, K, Prior, SNR));
-            OutFile = bst_process('GetNewFilename', StudyDir, 'results_eigeninverse');
-            bst_save(OutFile, ResMat, 'v6');
-            db_add_data(iStudyOut, OutFile, ResMat);
-            OutputFiles{end+1} = file_short(OutFile); %#ok<AGROW>
-        end
-
-        % Coefficients matrix node: theta = M~ * d (imported data only)
-        if ismember(OutputType, {'coefficients','both'}) && ~isRaw
-            theta = Inv.ImagingKernel * double(DataMat.F(iSel, :));   % [K x nTime]
-            MatMat = db_template('matrixmat');
-            MatMat.Value       = theta;
-            MatMat.Time        = DataMat.Time;
-            MatMat.nAvg        = DataMat.nAvg; MatMat.Leff = DataMat.Leff;
-            MatMat.SurfaceFile = HM.SurfaceFile;
-            MatMat.Comment     = sprintf('EigenCoeffs %s (%d modes, %s) | %s', ...
-                upper(Method), K, Prior, sInput.Comment);
-            RowNames = cell(K,1);
-            for k = 1:K; RowNames{k} = sprintf('Mode %d (lam=%.3g)', k, lambdas(k)); end
-            MatMat.Description = RowNames;
-            MatMat = bst_history('add', MatMat, 'eigenmodes_inverse', ...
-                sprintf('Eigenmode coefficients %s, %d modes, prior=%s', Method, K, Prior));
-            OutFile = bst_process('GetNewFilename', StudyDir, 'matrix_eigencoeffs');
-            bst_save(OutFile, MatMat, 'v6');
-            db_add_data(iStudyOut, OutFile, MatMat);
-            OutputFiles{end+1} = file_short(OutFile); %#ok<AGROW>
-        elseif ismember(OutputType, {'coefficients','both'}) && isRaw
-            bst_report('Warning', sProcess, sInput, 'Coefficients require imported data; skipped for raw.');
-        end
+    % Map process options to the shared Compute() OPTIONS
+    OPTIONS = struct();
+    OPTIONS.InverseMethod    = 'eigenmode';
+    OPTIONS.InverseMeasure   = lower(sProcess.options.method.Value);     % mne|dspm|sloreta
+    OPTIONS.EigenmodePrior   = lower(sProcess.options.prior.Value);      % log|flat|power
+    OPTIONS.SnrFixed         = sProcess.options.snr.Value{1};
+    OPTIONS.SnrMethod        = 'fixed';
+    OPTIONS.nModes           = sProcess.options.nmodes.Value{1};
+    OPTIONS.NoiseMethod      = 'reg';
+    OPTIONS.NoiseReg         = 0.1;
+    OPTIONS.SourceOrient     = {'fixed'};
+    OPTIONS.ComputeKernel    = 1;
+    OPTIONS.DisplayMessages  = 0;
+    OPTIONS.DataTypes        = [];     % auto-detect MEG else EEG in Compute
+    OPTIONS.EigenmodeWhiten  = sProcess.options.whiten.Value;            % default 1
+    OPTIONS.SaveCoefficients = ismember(lower(sProcess.options.outputtype.Value), {'coefficients','both'});
+    % Resolve study/data indices for the shared core, then delegate
+    % (kernel-only, one per file: replicate process_inverse_2018.Run case 2)
+    iStudies = [sInputs.iStudy];
+    iDatas   = [sInputs.iItem];
+    [OutputFiles, errMessage] = process_inverse_2018('Compute', iStudies, iDatas, OPTIONS);
+    if ~isempty(errMessage)
+        bst_report('Error', sProcess, sInputs, errMessage);
     end
 end

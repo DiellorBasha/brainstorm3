@@ -295,8 +295,18 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     end
     % If no MEG and no EEG selected
     if isempty(OPTIONS.DataTypes)
-        errMessage = 'Please select at least one modality.';
-        return;
+        if OPTIONS.DisplayMessages
+            errMessage = 'Please select at least one modality.';
+            return;
+        end
+        % Non-interactive (batch/scripted): default to MEG if available, else the
+        % remaining available modalities. Lets headless callers (e.g. the eigenmode
+        % wrapper) run without an explicit modality selection.
+        if any(ismember({'MEG','MEG GRAD','MEG MAG'}, AllMod))
+            OPTIONS.DataTypes = intersect(AllMod, {'MEG','MEG GRAD','MEG MAG'});
+        else
+            OPTIONS.DataTypes = AllMod;
+        end
     end
     % Tags corresponding to the different methods
     methodTag = panel_inverse_2018('GetMethodComment', OPTIONS.InverseMethod, OPTIONS.InverseMeasure);
