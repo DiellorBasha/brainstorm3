@@ -29,6 +29,12 @@ lambdas = double(lambdas(:));
 nAvail  = numel(lambdas);
 K = max(1, min(K, nAvail));
 
+% Need a usable spectrum: a single zero eigenvalue cannot be normalized/swapped.
+if nAvail < 1 || (nAvail == 1 && lambdas(1) <= 0)
+    error('bst_eigenmode_prior:InvalidInput', ...
+        'lambdas must contain at least one positive eigenvalue.');
+end
+
 % DC handling: replace a (near-)zero leading eigenvalue with the next one
 lam = lambdas;
 if lam(1) <= max(lam) * 1e-12 && nAvail >= 2

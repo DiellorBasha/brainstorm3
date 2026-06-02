@@ -22,6 +22,9 @@ assert(all(Rp > 0), 'power prior must be positive.');
 assert(abs(max(Rp) - 1) < 1e-12, 'prior must be normalized to max 1.');
 assert(all(diff(Rp) <= 1e-12), 'power prior must be non-increasing in lambda.');
 
+% DC mode (lambda=0) is swapped to lambda(2), so modes 1 and 2 get equal prior
+assert(abs(Rp(1) - Rp(2)) < 1e-12, 'DC swap: mode-1 and mode-2 prior should be equal.');
+
 % log (2026): positive, decreasing, normalized; smoother modes favored
 Rl = bst_eigenmode_prior(lambdas, K, 'log', 0);
 assert(all(Rl > 0), 'log prior must be positive (lambda normalized into (0,1)).');
