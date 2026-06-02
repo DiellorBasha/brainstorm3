@@ -41,11 +41,18 @@ Theta  = Kernel * Data         [nRawModes × nTime]   per-raw-mode coefficients
 
 - **`Gain`** — lead field from the study's **default head model** (auto-selected; no prompt).
 - **`Phi`** — eigenvectors from the displayed surface's eigenmodes (`in_tess_eigenmodes`).
-- **`Data`** — sensor recordings `[nChan × nTime]` from the associated data file, good
-  channels for the head model's modality only.
+- **`Data`** — sensor recordings `[nChan × nTime]` for the figure's **current displayed time
+  window**, read via `bst_memory('GetRecordingsValues', iDS, iCh, 'UserTimeWindow', 0)` (good
+  channels for the head model's modality only; `isGradMagScale=0` keeps physical units
+  consistent with the lead field). This is the same **lazy** path "Display on cortex" uses, so
+  it works for **both imported and raw/continuous** recordings — for raw, the current page is
+  loaded on demand rather than the whole file.
 
-`Theta` is computed **once** at launch over **all raw modes** and cached in the figure.
-Band changes never recompute — they reselect rows (see live tracking).
+The **transform kernel** `pinv(Gain·Phi)` is computed **once** at launch over **all raw
+modes** and cached in the figure, along with the current window's `Theta`/`TimeVector`.
+- **Band changes** never recompute — they reselect rows of the cached `Theta` (see live tracking).
+- **Window changes** (raw page scroll) recompute only `Theta = Kernel · Data(newWindow)` — the
+  cached kernel means no second SVD (see live tracking).
 
 ## Traces: band → rows (paired rank, two traces per rank)
 
@@ -99,11 +106,17 @@ works unchanged.
    cached `Theta`, builds labels + hemisphere colors, and calls `view_timeseries_matrix`
    (reusing `hFig`). Pure row-selection over cached data — cheap.
 
-3. **Live tracking (`ModesChangedCallback`, private + dispatch wiring).** The panel's
-   existing `bst_figures('FireModesChanged')` broadcast dispatches by client (the pattern
-   `view_eigenmodes` already uses). Add an `EigenTimeSeries` figure-tag branch that calls
-   `view_eigenmodes_timeseries('ModesChangedCallback', hFig)` → `RefreshTraces`. Moving the
-   slider/width updates the traces in place without recompute.
+3. **Live tracking — two dimensions.**
+   - **Band (spatial-frequency):** the panel's `bst_figures('FireModesChanged')` broadcast
+     dispatches by client (the pattern `view_eigenmodes` uses). An `EigenTimeSeries` figure-tag
+     branch calls `view_eigenmodes_timeseries('ModesChangedCallback', hFig)` → `RefreshTraces`.
+     Moving the slider/width reselects cached rows in place — no recompute.
+   - **Displayed window (time):** `bst_figures('FireCurrentTimeChanged')` gets an
+     `EigenTimeSeries` branch (in addition to the normal `ResultsTimeSeries` cursor handling)
+     that calls `view_eigenmodes_timeseries('CurrentTimeChangedCallback', hFig, iDS)`. It is a
+     no-op unless the window **bounds** (`Measures.Time`) changed — so ordinary cursor motion is
+     free; a **raw page scroll** re-reads the new window and recomputes `Theta = Kernel·Data`
+     (cached kernel → no SVD), then `RefreshTraces`.
 
 4. **Launch (figure popup menu).** Add an "Eigenmode time series" item to the **3D source
    figure** popup (`figure_3d.m`) — that figure already has the cortical surface in context,
@@ -162,7 +175,8 @@ Following the project's pure-function + smoke convention (`dev/tests/`):
 
 | Unit | File | Change |
 |------|------|--------|
-| Entry point + refresh + callback | `toolbox/gui/view_eigenmodes_timeseries.m` | **new** |
-| Multi-client dispatch | `bst_figures.m` (`FireModesChanged`) | add `EigenTimeSeries` branch |
+| Entry point + refresh + callbacks | `toolbox/gui/view_eigenmodes_timeseries.m` | **new** |
+| Band dispatch | `bst_figures.m` (`FireModesChanged`) | add `EigenTimeSeries` branch |
+| Window dispatch | `bst_figures.m` (`FireCurrentTimeChanged`) | add `EigenTimeSeries` branch (lazy raw re-read) |
 | Launch menu | 3D source figure popup (`figure_3d.m`) | add menu item + enable guard |
 | Pure test | `dev/tests/test_view_eigenmodes_timeseries_pure.m` | **new** |

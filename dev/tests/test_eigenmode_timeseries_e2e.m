@@ -29,14 +29,10 @@ for iS = 1:numel(sProtocol.Study)
         if strcmpi(hm.HeadModelType, 'surface')
             [~, isEig] = in_tess_eigenmodes(hm.SurfaceFile);
             if isEig
-                % Skip raw recordings (DataMat.F is a struct for raw links).
-                for iD = 1:numel(s.Data)
-                    if isempty(strfind(s.Data(iD).FileName, '@raw'))
-                        DataFile = s.Data(iD).FileName;
-                        break;
-                    end
-                end
-                if ~isempty(DataFile), break; end
+                % Raw and imported both work: the viewer reads the current
+                % displayed window lazily (GetRecordingsValues).
+                DataFile = s.Data(1).FileName;
+                break;
             end
         end
     catch
@@ -44,7 +40,7 @@ for iS = 1:numel(sProtocol.Study)
     end
 end
 if isempty(DataFile)
-    disp('SKIP: no study with surface head model + eigenmodes + imported data.');
+    disp('SKIP: no study with surface head model + eigenmodes + recordings.');
     return;
 end
 
@@ -62,13 +58,13 @@ cleanup = onCleanup(@() restorePanel(hFig, st0)); %#ok<NASGU>
 % Expected trace count for the current band
 iRows0 = view_eigenmodes_timeseries('GetBandTraces', cache.Component, cache.CompRank, st0.Band(1), st0.Band(2));
 
-% Narrow the band to a single rank; tracking must collapse the band and not grow traces
-panel_eigenmodes('SetWindowShape', 'single');
-panel_eigenmodes('SetCurrentMode', st0.Band(1));
+% Narrow the band to a single rank (SetBand sets the span unambiguously) and
+% confirm the live tracking does not grow the trace count.
+panel_eigenmodes('SetBand', st0.Band(1), st0.Band(1));
 st1 = panel_eigenmodes('GetState');
-assert(st1.Band(1) == st1.Band(2), 'SetWindowShape single must collapse Band to a point.');
+assert(st1.Band(1) == st1.Band(2), 'SetBand(c,c) must collapse the band to a point.');
 iRows1 = view_eigenmodes_timeseries('GetBandTraces', cache.Component, cache.CompRank, st1.Band(1), st1.Band(2));
-assert(numel(iRows1) <= numel(iRows0), 'Single-mode band should not increase trace count.');
+assert(numel(iRows1) <= numel(iRows0), 'Single-rank band should not increase trace count.');
 
 disp('ALL TESTS PASSED');
 end
