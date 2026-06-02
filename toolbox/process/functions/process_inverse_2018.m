@@ -212,12 +212,18 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         if ~isempty(sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).MEGMethod) && isempty(MEGMethod)
             MEGMethod = sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).MEGMethod;
         end
+        % Detect eigenmode head model (flag on the active head model file); all
+        % studies in a single Compute call must agree (no eigenmode/standard mix).
+        hmFlag_i = in_bst_headmodel(sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).FileName, 0, 'isEigenmode');
+        isEig_i  = isfield(hmFlag_i, 'isEigenmode') && ~isempty(hmFlag_i.isEigenmode) && hmFlag_i.isEigenmode;
+        if (i == 1)
+            isEigenmode = isEig_i;
+        elseif isEig_i ~= isEigenmode
+            errMessage = 'Cannot mix eigenmode and standard head models in a single Compute call.';
+            return;
+        end
         % First file only: Load the number of samples from the covariance files
         if (i == 1)
-            % Detect eigenmode head model (flag stored on the active head model file)
-            hmFile_i = sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).FileName;
-            hmFlag_i = in_bst_headmodel(hmFile_i, 0, 'isEigenmode');
-            isEigenmode = isfield(hmFlag_i, 'isEigenmode') && ~isempty(hmFlag_i.isEigenmode) && hmFlag_i.isEigenmode;
             % Noise covariance
             if (length(sChanStudies(i).NoiseCov) >= 1) && ~isempty(sChanStudies(i).NoiseCov(1).FileName)
                 covMat = load(file_fullpath(sChanStudies(i).NoiseCov(1).FileName), 'nSamples');
@@ -295,17 +301,18 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     end
     % If no MEG and no EEG selected
     if isempty(OPTIONS.DataTypes)
-        if OPTIONS.DisplayMessages
+        % Headless eigenmode callers (the batch wrapper) may pass DataTypes=[]:
+        % default to MEG if available, else the remaining available modalities.
+        % All other cases still require an explicit modality selection.
+        if ~OPTIONS.DisplayMessages && strcmpi(OPTIONS.InverseMethod, 'eigenmode')
+            if any(ismember({'MEG','MEG GRAD','MEG MAG'}, AllMod))
+                OPTIONS.DataTypes = intersect(AllMod, {'MEG','MEG GRAD','MEG MAG'});
+            else
+                OPTIONS.DataTypes = AllMod;
+            end
+        else
             errMessage = 'Please select at least one modality.';
             return;
-        end
-        % Non-interactive (batch/scripted): default to MEG if available, else the
-        % remaining available modalities. Lets headless callers (e.g. the eigenmode
-        % wrapper) run without an explicit modality selection.
-        if any(ismember({'MEG','MEG GRAD','MEG MAG'}, AllMod))
-            OPTIONS.DataTypes = intersect(AllMod, {'MEG','MEG GRAD','MEG MAG'});
-        else
-            OPTIONS.DataTypes = AllMod;
         end
     end
     % Tags corresponding to the different methods
@@ -721,6 +728,11 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 Time     = OPTIONS.DataTime;
             case 'eigenmode'
                 % Eigenmode leadfield: solve in mode space, reconstruct to cortex.
+                % Coerce the measure to an eigenmode-valid value (guards scripted
+                % callers that inherited the standard 'dspm2018' default).
+                if ~ismember(lower(OPTIONS.InverseMeasure), {'mne','dspm','sloreta'})
+                    OPTIONS.InverseMeasure = 'dspm';
+                end
                 % L_tilde is already SSP-projected + avg-ref'd + good-channel only.
                 L_tilde = double(HeadModel.Gain);                 % [nGoodCh x K]
                 HMeig = in_bst_headmodel(HeadModelFile, 0, 'Eigenvalues', 'SurfaceFile', 'nModes');
