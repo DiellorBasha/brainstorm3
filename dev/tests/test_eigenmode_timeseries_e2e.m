@@ -55,6 +55,19 @@ assert(size(cache.Theta,2) == numel(cache.TimeVector), 'Theta time dimension mus
 st0 = panel_eigenmodes('GetState');
 cleanup = onCleanup(@() restorePanel(hFig, st0)); %#ok<NASGU>
 
+% --- Regression: a figure reload (butterfly<->column toggle, montage change,
+% "reload all") must replot the cached coefficients, NOT reload the raw file via
+% view_matrix (which loaded the whole recording / errored on the missing .Value).
+TsInfoR = getappdata(hFig, 'TsInfo');
+TsInfoR.DisplayMode = 'column';
+setappdata(hFig, 'TsInfo', TsInfoR);
+bst_figures('ReloadFigures', hFig, 0);
+assert(ishandle(hFig), 'Figure must survive a display-mode reload.');
+cacheR = getappdata(hFig, 'EigenTimeSeries');
+assert(~isempty(cacheR) && isfield(cacheR, 'Theta'), 'Cache must survive reload.');
+assert(strcmp(getfield(getappdata(hFig, 'TsInfo'), 'DisplayMode'), 'column'), ...
+    'Reload must keep the toggled column display mode.'); %#ok<GFLD>
+
 % Expected trace count for the current band
 iRows0 = view_eigenmodes_timeseries('GetBandTraces', cache.Component, cache.CompRank, st0.Band(1), st0.Band(2));
 

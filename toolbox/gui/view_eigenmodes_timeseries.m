@@ -30,7 +30,7 @@ function varargout = view_eigenmodes_timeseries(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'GetBandTraces','HemiColors','ModesChangedCallback','CurrentTimeChangedCallback'}))
+if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'GetBandTraces','HemiColors','ModesChangedCallback','CurrentTimeChangedCallback','ReloadCallback'}))
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -133,6 +133,7 @@ function hFig = ViewFigure(DataFile)
     end
     band = panel_eigenmodes('GetState');
     band = band.Band;
+    cache.Band = band;   % last-rendered band; lets a reload replot without the panel
 
     % ----- First plot -----
     [Fband, Labels, colors] = BandData(cache, band);
@@ -169,17 +170,10 @@ function [F, Labels, colors] = BandData(cache, band)
 end
 
 
-%% ===== Re-slice the band and redraw into the existing figure =====
-function RefreshTraces(hFig)
-    cache = getappdata(hFig, 'EigenTimeSeries');
-    if isempty(cache)
-        return;
-    end
-    st = panel_eigenmodes('GetState');
-    if ~file_compare(st.SurfaceFile, cache.SurfaceFile)
-        return;   % panel currently driving a different surface
-    end
-    [F, Labels, colors] = BandData(cache, st.Band);
+%% ===== Redraw cache.Band into the existing figure (the new TsInfo.DisplayMode
+%%       is honoured because view_timeseries_matrix preserves it on reuse) =====
+function PlotBand(hFig, cache)
+    [F, Labels, colors] = BandData(cache, cache.Band);
     if isempty(F)
         return;
     end
@@ -189,6 +183,32 @@ function RefreshTraces(hFig)
     % it defensively in case view_timeseries_matrix's behaviour ever changes.
     setappdata(hFig, 'EigenTimeSeries', cache);
     set(hFig, 'Name', ['Eigenmode time series: ' cache.SurfaceFile]);
+end
+
+
+%% ===== Re-slice the panel band and redraw (lever change) =====
+function RefreshTraces(hFig)
+    cache = getappdata(hFig, 'EigenTimeSeries');
+    if isempty(cache)
+        return;
+    end
+    st = panel_eigenmodes('GetState');
+    if ~file_compare(st.SurfaceFile, cache.SurfaceFile)
+        return;   % panel currently driving a different surface
+    end
+    cache.Band = st.Band;
+    PlotBand(hFig, cache);
+end
+
+
+%% ===== Figure reload (display-mode toggle, montage change, "reload all"):
+%%       replot the cached coefficients; never reload the raw file via view_matrix =====
+function ReloadCallback(hFig) %#ok<DEFNU>
+    cache = getappdata(hFig, 'EigenTimeSeries');
+    if isempty(cache) || ~isfield(cache, 'Band') || isempty(cache.Band)
+        return;
+    end
+    PlotBand(hFig, cache);
 end
 
 
