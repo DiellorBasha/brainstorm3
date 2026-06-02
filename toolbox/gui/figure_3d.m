@@ -1664,6 +1664,18 @@ function DisplayFigurePopup(hFig)
             jItem = gui_component('MenuItem', jPopup, [], 'View sources', IconLoader.ICON_RESULTS, [], @(h,ev)bst_figures('ViewResults',hFig));
             jItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_MASK));
         end
+        % === Eigenmode time series ===
+        % Enabled when the study has a surface head model with computed eigenmodes.
+        if ~isempty(sStudy) && isfield(sStudy, 'iHeadModel') && ~isempty(sStudy.iHeadModel) && (sStudy.iHeadModel >= 1)
+            HmFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
+            HmMat  = in_bst_headmodel(HmFile, 0, 'HeadModelType', 'SurfaceFile');
+            if strcmpi(HmMat.HeadModelType, 'surface')
+                [~, isEig] = in_tess_eigenmodes(HmMat.SurfaceFile);
+                if isEig
+                    gui_component('MenuItem', jPopup, [], 'Eigenmode time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)bst_call(@view_eigenmodes_timeseries, DataFile));
+                end
+            end
+        end
         % === VIEW SPECTRUM ===
         if strcmpi(FigureType, 'Topography') && strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.SubType, '2DLayout') && getappdata(hFig, 'isStatic')
             jItem = gui_component('MenuItem', jPopup, [], [Modality ' Spectrum'], IconLoader.ICON_SPECTRUM, [], @(h,ev)view_spectrum(TfFile, 'Spectrum'));
