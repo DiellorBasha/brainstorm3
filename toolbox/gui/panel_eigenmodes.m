@@ -40,6 +40,15 @@ eval(macro_method);
 end
 
 
+%% ===== PURE: clamped band from a center + half-width =====
+function [lo, hi] = BandFromCenterWidth(center, width, K) %#ok<DEFNU>
+    center = min(max(round(center), 1), K);
+    width  = max(round(width), 0);
+    lo = min(max(center - width, 1), K);
+    hi = min(max(center + width, 1), K);
+end
+
+
 %% ===== PURE: build the [1 x K] weight vector from a window shape =====
 function W = BuildWeights(shape, kLo, kHi, iCenter, K) %#ok<DEFNU>
     % Clamp all indices into [1,K]
