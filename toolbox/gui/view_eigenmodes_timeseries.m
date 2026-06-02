@@ -46,7 +46,7 @@ function hFig = ViewFigure(DataFile)
         return;
     end
     % ----- Study + head model + surface -----
-    [sStudy, iStudy] = bst_get('AnyFile', DataFile); %#ok<ASGLU>
+    [sStudy, ~] = bst_get('AnyFile', DataFile);
     if isempty(sStudy) || ~isfield(sStudy, 'iHeadModel') || isempty(sStudy.iHeadModel) || (sStudy.iHeadModel < 1)
         bst_error('No head model available for this study.', 'Eigenmode time series', 0);
         return;
@@ -102,8 +102,11 @@ function hFig = ViewFigure(DataFile)
     end
 
     % ----- Transform: full coefficient matrix Theta [K_raw x nTime] -----
-    nCh   = numel(iCh);
-    K_raw = min(nCh, double(Eig.nModes));
+    % Use ALL raw modes so paired ranks are always complete (both hemispheres).
+    % bst_eigenmodes_transform's pinv is rank-safe when K_raw >= nCh: high modes
+    % simply receive near-zero, floored coefficients. The panel band selects what
+    % is actually displayed, so computing all modes here costs only one SVD.
+    K_raw = double(Eig.nModes);
     Phi   = double(Eig.Vectors(:, 1:K_raw));
     [Kernel, ~] = bst_eigenmodes_transform(Gain(iCh, :), Phi);   % [K_raw x nCh]
     Theta = Kernel * double(DataMat.F(iCh, :));                  % [K_raw x nTime]
