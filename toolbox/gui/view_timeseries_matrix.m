@@ -166,9 +166,10 @@ end
 %% ===== CONFIGURE FIGURE =====
 % Static dataset ?
 setappdata(hFig, 'isStatic', (GlobalData.DataSet(iDS).Measures.NumberOfSamples <= 2));
-% Get default montage
+% Get default montage (skip when there is no modality to look one up for, e.g.
+% a generic coefficient matrix view: GetCurrentMontage rejects an empty modality)
 MontageName = [];
-if strcmpi(FileType, 'data')
+if strcmpi(FileType, 'data') && ~isempty(Modality)
     sMontage = panel_montage('GetCurrentMontage', Modality);
     if ~isempty(sMontage)
         MontageName = sMontage.Name;
