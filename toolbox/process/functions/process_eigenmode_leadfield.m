@@ -49,7 +49,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     HeadModel = [];
     candidates = [sStudy.iHeadModel, setdiff(1:numel(sStudy.HeadModel), sStudy.iHeadModel)];
     for ic = candidates
-        if isempty(ic) || ic < 1 || ic > numel(sStudy.HeadModel); continue; end
+        if ic < 1 || ic > numel(sStudy.HeadModel); continue; end
         try
             hmC = in_bst_headmodel(sStudy.HeadModel(ic).FileName, 0);
         catch
@@ -95,13 +95,16 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     sHeadModel = db_template('headmodel');
     sHeadModel.FileName      = file_short(OutputFile);
     sHeadModel.Comment       = CompHM.Comment;
-    sHeadModel.HeadModelType = 'surface';
+    sHeadModel.HeadModelType = CompHM.HeadModelType;
     iHM = length(sStudy.HeadModel) + 1;
     sStudy.HeadModel(iHM) = sHeadModel;
     sStudy.iHeadModel     = iHM;
     bst_set('Study', iStudy, sStudy);
     panel_protocols('UpdateNode', 'Study', iStudy);
     panel_protocols('SelectNode', [], file_short(OutputFile));
+    db_save();
 
-    OutputFiles{end+1} = file_short(OutputFile);
+    % The eigenmode head model is a DB side-effect; pass the input files through
+    % unchanged so downstream pipeline steps stay valid.
+    OutputFiles = {sInputs.FileName};
 end

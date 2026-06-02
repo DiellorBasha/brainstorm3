@@ -32,9 +32,11 @@ end
 OutFiles = process_eigenmode_leadfield('Run', ...
     struct('options', struct('nmodes', struct('Value',{{0,'',0}}))), ...
     struct('iStudy', iStudyTarget, 'FileName', '', 'Comment', 'test'));
-assert(~isempty(OutFiles), 'Process must produce a head model file.');
-HM = in_bst_headmodel(OutFiles{1}, 0);
-assert(isfield(HM,'isEigenmode') && HM.isEigenmode==1, 'Output must be flagged isEigenmode.');
+% Process returns the (pass-through) input files; the head model is a DB side-effect.
+sStudyAfter = bst_get('Study', iStudyTarget);
+HM = in_bst_headmodel(sStudyAfter.HeadModel(sStudyAfter.iHeadModel).FileName, 0);
+assert(isfield(HM,'isEigenmode') && HM.isEigenmode==1, ...
+    'Active head model after the process must be an eigenmode leadfield.');
 assert(size(HM.Gain,2) == HM.nModes, 'Gain columns must equal nModes.');
 assert(~isempty(HM.Eigenvalues), 'Eigenvalues must be stored.');
 disp('ALL TESTS PASSED');
