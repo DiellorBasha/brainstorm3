@@ -138,3 +138,16 @@ overlay (`DataSource.FileName`) on a surface with eigenmodes.
   to accept it, but it is not built here.
 - Filtering UX that supplies an impulse/source activation as a standalone evaluation input.
 - The cache-invalidation hook and other follow-ups already tracked in the lever spec.
+
+## Tracked follow-ups (from final review — non-blocking)
+
+Implemented and verified (e2e ran live on a single-component cortex; 2-component
+asymmetry fix unit-covered by `test_eigenmode_lever_paired`):
+
+- **Live 2-component coverage.** Run `test_eigenmode_viewer_e2e` on a genuine bilateral
+  cortex to exercise paired synthesis + repaint on two components live (the headless
+  paired test covers the math; the live viewer path ran only single-component).
+- **Pre-tag broadcasts.** `ViewFigure` open fires `FireModesChanged` from
+  `SetWindowShape`/`SetCurrentMode` before the figure is tagged `EigenView` — harmless
+  (a redundant `UpdateSurfaceData` on any same-surface source map), optionally suppressed
+  by seeding state without broadcast.
