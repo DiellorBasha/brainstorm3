@@ -11,8 +11,10 @@
 
 Register a **Harmonic** source-imaging method: the eigenmode reconstruction **after noise
 whitening but with no source/inverse regularization** (no Tikhonov `λ`, no spatial prior).
-It produces a normal results node you display on the cortex, and the eigenmode time series
-reads that node's operator so the traces are **exactly consistent** with the displayed map.
+It is computable **interactively** from the right-click → **Compute sources** dialog (alongside
+Minimum norm / dSPM / sLORETA) and in **batch** via the existing process. Either way it produces
+a normal results node you display on the cortex, and the eigenmode time series reads that node's
+operator so the traces are **exactly consistent** with the displayed map.
 
 This replaces the current launch path, where the time series was opened from a regularized
 dSPM/MNE figure and computed its own *unwhitened* lead-field transform — a quantity that did
@@ -45,36 +47,52 @@ floored — high spatial modes are nearly invisible to the sensors). "Unregulari
 source regularization**; the noise-covariance conditioning that builds `iW` keeps its standard
 stabilization (it makes the noise inverse well-posed, it is not a source prior).
 
-## Architecture (4 units)
+## Architecture (6 units)
 
 1. **`harmonic` method (`bst_inverse_eigenmodes.m`).** Add `Method='harmonic'`. After building
    the whitener `iW` (existing code path), compute `Kt = bst_eigenmodes_transform(iW*L, Φ)`
    (= `pinv(iW·L·Φ)`, `[K×nCh]`), then `Kernel = Kt * iW`. `EigenGains = ones(K,1)`,
    `SourcePrior = ones(K,1)`. The `SNR` / `PriorAlpha` options are ignored for this method. The
-   returned `Results.ImagingKernel` stays **eigenmode-space** `[K×nCh]` (as for the other
-   methods); `Results` already carries `Whitener`, `nModes`, `GoodChannel`, `Eigenvalues`,
-   `SurfaceFile`. If `NoiseCovFile` is empty, `iW = I` (unwhitened fallback) — same behavior the
-   function already has, surfaced to the user as a warning by the process.
+   returned `Results.ImagingKernel` stays **eigenmode-space** `[K×nCh]` (`= M̃`), as for the other
+   methods; `Results` already carries `Whitener`, `nModes`, `GoodChannel`, `Eigenvalues`,
+   `SurfaceFile`. If `NoiseCovFile` is empty, `iW = I` (unwhitened fallback) — existing behavior,
+   surfaced to the user as a warning.
 
-2. **Process option + results node (`process_eigenmodes_inverse.m`).** Add
-   `'harmonic'` → "Harmonic (unregularized)" to the method dropdown. When the method is
-   `harmonic`, hide/ignore the SNR and prior controls (or leave them inert). For each input,
-   save a **kernel-only results node** via the existing `'sources'` output path with:
-   - `ImagingKernel = Φ · M̃` `[nVert × nCh]` (vertex-space, displayable);
-   - `EigenKernel   = M̃` `[K × nCh]` (new field — the eigenmode-space operator for the viewer);
-   - `Function = 'eigenmode_harmonic'`;
-   - `GoodChannel`, `SurfaceFile`, `HeadModelFile`, `DataFile`, `nComponents=1`, `Whitener`,
-     `Comment = 'Eigenmode HARMONIC (<n|auto> modes)'`, plus the standard `db_template('resultsmat')`
-     fields. Registered with `db_add_data` like any results node.
+2. **Shared node assembly (`bst_inverse_eigenmodes.m` → new local/exported helper, e.g.
+   `BuildHarmonicResults`).** Given the eigenmode-space `M̃`, `Φ`, and metadata, return the fields
+   both compute surfaces save into a results node:
+   - `ImagingKernel = Φ · M̃` `[nVert × nCh]` (vertex-space, displayable on cortex);
+   - `EigenKernel   = M̃` `[K × nCh]` (the eigenmode-space operator the viewer reads);
+   - `Function = 'eigenmode_harmonic'`, `nComponents = 1`, `Whitener`, `GoodChannel`, `nModes`,
+     `SurfaceFile`, a Comment like `'Eigenmode HARMONIC (<n|auto> modes)'`.
+   This keeps the operator math and node shape in **one place**, reused by units 3 and 4.
 
-   (When the existing methods `mne/dspm/sloreta` run with `OutputType=sources`, they continue to
-   behave exactly as today; only the `harmonic` branch adds `EigenKernel`/`Function`.)
+3. **Interactive — Compute sources dialog (`panel_inverse_2018.m` + `process_inverse_2018.m`).**
+   - `panel_inverse_2018.CreatePanel`: add a top-level method radio **"Harmonic (eigenmodes)"**
+     next to the existing radios (lines ~140–146). Enabled only for a **surface** head model
+     (mirrors the MEM gating). When selected, gate off the inapplicable option groups (Min-norm
+     measure, SNR, depth weighting, orientation) and show only what Harmonic needs (a `nModes`
+     field; `0`/empty = auto). `GetPanelContents` maps it to `OPTIONS.InverseMethod = 'harmonic'`
+     (+ `OPTIONS.nModes`). `GetMethodComment('harmonic', …)` returns `'Harmonic'`.
+   - `process_inverse_2018.Compute`: add `case 'harmonic'` to the method `switch` (line ~666).
+     It resolves the surface + noise-cov files, calls
+     `bst_inverse_eigenmodes(HeadModelFile, SurfaceFile, NoiseCovFile, 'Method','harmonic',
+     'nModes',OPTIONS.nModes, 'GoodChannel',GoodChannel)`, then `BuildHarmonicResults(...)` to
+     populate `Results` (`ImagingKernel = Φ·M̃`, `EigenKernel`, `Function`). The existing
+     `ResultsMat` assembly/save path (lines ~713–806) then writes the node unchanged — it just
+     needs to **carry the `EigenKernel` field through** (add it to the copied fields). Harmonic
+     uses `bst_inverse_eigenmodes`' own whitener from the noise-cov file; the dialog's
+     noise-regularization / SNR controls are inert for this method.
 
-3. **Re-point the viewer (`view_eigenmodes_timeseries.m`).** Entry point becomes
+4. **Batch — process option (`process_eigenmodes_inverse.m`).** Add `'harmonic'` →
+   "Harmonic (unregularized)" to the method dropdown; SNR/prior controls inert for it. With
+   `OutputType=sources`, build the node via the same `BuildHarmonicResults` helper (so batch and
+   interactive produce identical nodes). The existing `mne/dspm/sloreta` paths are unchanged.
+
+5. **Re-point the viewer (`view_eigenmodes_timeseries.m`).** Entry point becomes
    `view_eigenmodes_timeseries(ResultsFile)` where `ResultsFile` is a Harmonic node. It:
-   - loads the node (`in_bst_results`/`bst_memory`) → `M̃` (`EigenKernel`), `GoodChannel`,
-     `DataFile`, `SurfaceFile`; errors clearly if `Function ~= 'eigenmode_harmonic'` or
-     `EigenKernel` is missing;
+   - loads the node (`in_bst_results`) → `M̃` (`EigenKernel`), `GoodChannel`, `DataFile`,
+     `SurfaceFile`; errors clearly if `Function ~= 'eigenmode_harmonic'` or `EigenKernel` is missing;
    - resolves the recordings dataset `iDS = bst_memory('LoadDataFile', DataFile)` and reads the
      current window `D = GetRecordingsValues(iDS, GoodChannel, 'UserTimeWindow', 0)` (the lazy
      path already built — raw + imported);
@@ -84,27 +102,29 @@ stabilization (it makes the noise inverse well-posed, it is not a source prior).
    - Everything downstream — band→L/R trace selection, butterfly/column, `FireModesChanged`
      band tracking, `FireCurrentTimeChanged`/`ReloadFigures` page tracking — is **unchanged**;
      only the source of `M̃` and `Theta` differs (read from node + whitened, instead of computed
-     from the head model unwhitened).
+     from the head model unwhitened). `SyncWindow` recomputes `Theta = cache.Kernel * D(newWindow)`.
 
-   The `SyncWindow` re-read recomputes `Theta = cache.Kernel * D(newWindow)` with the cached `M̃`.
-
-4. **Launch from the DB tree (`toolbox/tree/tree_callbacks.m`).** Add an "Eigenmode time series"
-   item to the context menu of a **results node** whose `Function == 'eigenmode_harmonic'`,
-   calling `view_eigenmodes_timeseries(ResultsFile)`. **Remove** the 3D-figure-popup launch added
-   in `figure_3d.m` (it computed the unwhitened transform from any source figure — superseded).
+6. **Launch from the DB tree (`toolbox/tree/tree_callbacks.m`); remove old launch.** Add an
+   "Eigenmode time series" item to the context menu of a **results node** whose
+   `Function == 'eigenmode_harmonic'`, calling `view_eigenmodes_timeseries(ResultsFile)`.
+   **Remove** the 3D-figure-popup launch added in `figure_3d.m` (it computed the unwhitened
+   transform from any source figure — superseded).
 
 ## Data flow
 
 ```
-process_eigenmodes_inverse (Method='harmonic', OutputType='sources')
-   -> bst_inverse_eigenmodes('harmonic'): M̃ = pinv(iW·L·Φ)·iW
-   -> save results node: ImagingKernel = Φ·M̃, EigenKernel = M̃, Function='eigenmode_harmonic'
-        |
-        |  user displays node on cortex  -> u(t) = Φ·M̃·D(t)
-        |  user right-clicks node in tree -> view_eigenmodes_timeseries(ResultsFile)
-        v
-   read M̃ + GoodChannel + DataFile -> θ(t) = M̃·D(window)   (Φ·θ = u, exact)
-   -> band -> L/R traces -> view_timeseries_matrix (butterfly/column, live tracking)
+Compute sources dialog (method = Harmonic)         process_eigenmodes_inverse (Method=harmonic)
+   process_inverse_2018 Compute case 'harmonic'         (batch)
+        \                                               /
+         -> bst_inverse_eigenmodes('harmonic'): M̃ = pinv(iW·L·Φ)·iW
+         -> BuildHarmonicResults: ImagingKernel = Φ·M̃, EigenKernel = M̃, Function='eigenmode_harmonic'
+         -> save + register results node
+                 |
+                 |  display node on cortex   -> u(t) = Φ·M̃·D(t)
+                 |  right-click node in tree  -> view_eigenmodes_timeseries(ResultsFile)
+                 v
+         read M̃ + GoodChannel + DataFile -> θ(t) = M̃·D(window)   (Φ·θ = u, exact)
+         -> band -> L/R traces -> view_timeseries_matrix (butterfly/column, live tracking)
 ```
 
 ## Edge cases & errors
@@ -140,17 +160,20 @@ process_eigenmodes_inverse (Method='harmonic', OutputType='sources')
 - Applying the panel band/window as a regularizing filter to the Harmonic reconstruction (the
   "filter bank" use) — the lever's source-map filtering already exists; this spec only creates
   the raw node + consistent time series.
-- Adding `harmonic` to the main "Compute sources" GUI (`panel_inverse_2018`) — rejected during
-  brainstorming in favor of extending the existing eigenmode inverse process.
 - A free/loose-orientation harmonic inverse — fixed (constrained) orientation only, matching the
   eigenmode basis on the cortex surface.
+- Letting Harmonic use the dialog's per-modality noise-regularization controls — it uses
+  `bst_inverse_eigenmodes`' own whitener from the noise-cov file; the dialog's noise/SNR controls
+  are inert for this method (revisit later if needed).
 
 ## File-level summary
 
 | Unit | File | Change |
 |------|------|--------|
-| `harmonic` method | `toolbox/inverse/bst_inverse_eigenmodes.m` | add `Method='harmonic'` branch |
-| Process option + node | `toolbox/process/functions/process_eigenmodes_inverse.m` | add method; save `EigenKernel`/`Function` |
+| `harmonic` method + node helper | `toolbox/inverse/bst_inverse_eigenmodes.m` | add `Method='harmonic'`; add `BuildHarmonicResults` helper |
+| Interactive method (dialog) | `toolbox/inverse/panel_inverse_2018.m` | add "Harmonic (eigenmodes)" radio + option gating |
+| Interactive compute branch | `toolbox/process/functions/process_inverse_2018.m` | `case 'harmonic'` → delegate + carry `EigenKernel` |
+| Batch process option | `toolbox/process/functions/process_eigenmodes_inverse.m` | add `harmonic` method; node via shared helper |
 | Viewer reads node | `toolbox/gui/view_eigenmodes_timeseries.m` | entry `(ResultsFile)`; read `M̃`; drop self-transform |
 | Tree launch | `toolbox/tree/tree_callbacks.m` | "Eigenmode time series" on Harmonic results node |
 | Remove old launch | `toolbox/gui/figure_3d.m` | remove the popup item |
