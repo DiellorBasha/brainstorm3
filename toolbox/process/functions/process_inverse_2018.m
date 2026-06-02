@@ -152,8 +152,17 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         % Check field names of passed OPTIONS and fill missing ones with default values
         OPTIONS = struct_copy_fields(OPTIONS, Def_OPTIONS, 0);
     end
-    
-    
+    % Ensure nModes default exists for harmonic method (0 = auto-select)
+    if ~isfield(OPTIONS, 'nModes') || isempty(OPTIONS.nModes)
+        OPTIONS.nModes = 0;
+    end
+    % Harmonic kernel is constrained (the eigenmode basis lives on the cortex surface);
+    % force fixed orientation so the saved node's metadata/comment matches the kernel.
+    if strcmpi(OPTIONS.InverseMethod, 'harmonic')
+        OPTIONS.SourceOrient = {'fixed'};
+    end
+
+
     %% ===== GET INPUT INFORMATION =====
     isShared = isempty(iDatas);
     % Get all the study structures
@@ -701,6 +710,34 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 % Get outputs
                 DataFile = OPTIONS.DataFile; 
                 Time     = OPTIONS.DataTime;
+            case 'harmonic'
+                % Unregularized whitened eigenmode (Harmonic) inverse.
+                SurfaceFile  = HeadModelInit.SurfaceFile;
+                NoiseCovFile = '';
+                if ~isempty(sStudyChannel.NoiseCov) && ~isempty(sStudyChannel.NoiseCov(1).FileName)
+                    NoiseCovFile = sStudyChannel.NoiseCov(1).FileName;
+                end
+                % Logical good-channel mask over ALL channels (bst_inverse_eigenmodes expects this)
+                nAllChan = length(ChannelMat.Channel);
+                GoodMask = false(nAllChan, 1);
+                GoodMask(GoodChannel) = true;
+                [InvE, errE] = bst_inverse_eigenmodes(HeadModelFile, SurfaceFile, NoiseCovFile, ...
+                    'Method', 'harmonic', 'nModes', OPTIONS.nModes, 'GoodChannel', GoodMask);
+                if ~isempty(errE)
+                    errMessage = [errMessage errE 10];
+                    break;
+                end
+                % Vertex-space kernel for cortex display
+                [Eig, ~] = in_tess_eigenmodes(SurfaceFile);
+                Kuse   = InvE.nModes;
+                PhiUse = double(Eig.Vectors(:, 1:Kuse));
+                Results = struct();
+                Results.ImagingKernel = PhiUse * InvE.ImagingKernel;   % [nVert x nGoodCh]
+                Results.ImageGridAmp  = [];
+                Results.nComponents   = 1;
+                Results.Whitener      = InvE.Whitener;
+                Results.EigenKernel   = InvE.ImagingKernel;            % M~ [K x nGoodCh]
+                OPTIONS.FunctionName  = 'eigenmode_harmonic';
             otherwise
                 error('Unknown method');
         end
@@ -712,7 +749,10 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         % Copy outputs to a standard results structure
         ResultsMat = db_template('resultsmat');
         ResultsMat = struct_copy_fields(ResultsMat, Results, 1);
-        
+        if strcmpi(OPTIONS.InverseMethod, 'harmonic') && isfield(Results, 'EigenKernel')
+            ResultsMat.EigenKernel = Results.EigenKernel;
+        end
+
         % ===== COMPUTE FULL RESULTS =====
         % Full results
         if (OPTIONS.ComputeKernel == 0) && ~isempty(ResultsMat.ImagingKernel) && ~isempty(DataFile)

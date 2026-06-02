@@ -63,9 +63,9 @@ function sProcess = GetDescription() %#ok<DEFNU>
 
     % === INVERSE METHOD ===
     sProcess.options.method.Comment = {'MNE (minimum norm)', 'dSPM (noise-normalized)', ...
-                                       'sLORETA (standardized)', ...
+                                       'sLORETA (standardized)', 'Harmonic (unregularized)', ...
                                        'Inverse method:'; ...
-                                       'mne', 'dspm', 'sloreta', ''};
+                                       'mne', 'dspm', 'sloreta', 'harmonic', ''};
     sProcess.options.method.Type    = 'radio_linelabel';
     sProcess.options.method.Value   = 'dspm';
 
@@ -256,7 +256,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
 
         % Comment suffix for alpha
         alphaStr = '';
-        if PriorAlpha > 0
+        if PriorAlpha > 0 && ~strcmpi(Method, 'harmonic')
             alphaStr = sprintf(', a=%.1f', PriorAlpha);
         end
 
@@ -284,6 +284,10 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             ResMat.Comment       = sprintf('EigenInv %s (%d modes%s) | %s', ...
                 upper(Method), K, alphaStr, sInput.Comment);
             ResMat.Function      = Method;
+            if strcmpi(Method, 'harmonic')
+                ResMat.Function    = 'eigenmode_harmonic';
+                ResMat.EigenKernel = InvResults.ImagingKernel;   % M̃ [K x nGoodChannels], for the time series
+            end
             ResMat.Time          = [];   % No time for raw kernel
             ResMat.DataFile      = sInput.FileName;
             ResMat.HeadModelFile = HeadModelFile;
@@ -400,6 +404,10 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 ResMat.Comment       = sprintf('EigenInv %s (%d modes%s) | %s', ...
                     upper(Method), K, alphaStr, sInput.Comment);
                 ResMat.Function      = Method;
+                if strcmpi(Method, 'harmonic')
+                    ResMat.Function    = 'eigenmode_harmonic';
+                    ResMat.EigenKernel = InvResults.ImagingKernel;   % M̃ [K x nGoodChannels], for the time series
+                end
                 ResMat.Time          = TimeVector;
                 ResMat.DataFile      = sInput.FileName;
                 ResMat.HeadModelFile = HeadModelFile;
