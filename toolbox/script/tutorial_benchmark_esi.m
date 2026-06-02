@@ -36,30 +36,47 @@ GridLoc = Surf.Vertices;                             % per-vertex positions (sur
 NC = load(file_fullpath(target.ncFile)); C = NC.NoiseCov(goodMask, goodMask);
 SurfStruct = struct('Vertices', Surf.Vertices, 'VertConn', Surf.VertConn);
 
-rows = struct('regime',{},'snr',{},'method',{},'metric',{},'value',{},'realization',{});
-real = 0;
+nMethodsMax = 5; nMetrics = 5;
+nRowsMax = numel(Regimes) * nLoc * numel(SNRs) * nNoise * nMethodsMax * nMetrics;
+rows = repmat(struct('regime','','snr',0,'method','','metric','','value',0,'realization',0), 1, nRowsMax);
+rowIdx = 0;
+iReal = 0;
+nTotal = numel(Regimes) * nLoc * numel(SNRs) * nNoise;
 for ir = 1:numel(Regimes)
   for il = 1:nLoc
     S = bst_benchmark_sources(SurfStruct, Regimes{ir}, 'Seed', il);
     for is = 1:numel(SNRs)
       for inum = 1:nNoise
-        real = real + 1;
-        Sim = bst_benchmark_simulate(L, S.Sources, C, 'SNR', SNRs(is), 'Seed', 1000*il+inum);
-        Est = bst_benchmark_inverse(Sim.F, target.baseHmFile, target.ncFile, target.chFile, goodMask, SNRs(is));
-        tEval = round(size(S.Sources,2)/2);
-        fn = fieldnames(Est);
-        for k = 1:numel(fn)
-            M = bst_benchmark_metrics(S.GT, Est.(fn{k})(:,tEval), GridLoc, S.SeedVertex);
-            mn = {'LocError','AUC','NRMSE','Correlation','SpatialDispersion'};
-            for q = 1:numel(mn)
-                rows(end+1) = struct('regime',Regimes{ir},'snr',SNRs(is),'method',fn{k}, ...
-                    'metric',mn{q},'value',M.(mn{q}),'realization',real); %#ok<AGROW>
+        iReal = iReal + 1;
+        if mod(iReal, max(1, floor(nTotal/10))) == 0
+            fprintf('  ESI benchmark: %d/%d realizations\n', iReal, nTotal);
+        end
+        % Independent noise draw per (regime, location, SNR, draw). The source
+        % LOCATION seed (Seed=il in bst_benchmark_sources) is regime-independent
+        % on purpose, so the same locations are tested across regimes.
+        noiseSeed = ((( (ir-1)*nLoc + (il-1) )*numel(SNRs) + (is-1) )*nNoise) + inum;
+        try
+            Sim = bst_benchmark_simulate(L, S.Sources, C, 'SNR', SNRs(is), 'Seed', noiseSeed);
+            Est = bst_benchmark_inverse(Sim.F, target.baseHmFile, target.ncFile, target.chFile, goodMask, SNRs(is));
+            tEval = round(size(S.Sources,2)/2);
+            fn = fieldnames(Est);
+            for k = 1:numel(fn)
+                M = bst_benchmark_metrics(S.GT, Est.(fn{k})(:,tEval), GridLoc, S.SeedVertex);
+                mn = {'LocError','AUC','NRMSE','Correlation','SpatialDispersion'};
+                for q = 1:numel(mn)
+                    rowIdx = rowIdx + 1;
+                    rows(rowIdx) = struct('regime',Regimes{ir},'snr',SNRs(is),'method',fn{k}, ...
+                        'metric',mn{q},'value',M.(mn{q}),'realization',iReal);
+                end
             end
+        catch ME
+            fprintf(2, '[WARN] realization %d failed: %s\n', iReal, ME.message);
         end
       end
     end
   end
 end
+rows = rows(1:rowIdx);
 
 R = bst_benchmark_report(rows, 'RefMethod','eig_mne_log', 'Seed',1, 'OutDir',OutDir);
 fprintf('ESI benchmark complete: %d rows -> %s\n', numel(rows), OutDir);
