@@ -150,13 +150,18 @@ end
 function ApplySliderLabels(jSlider, K, lo, hi, width)
     import javax.swing.JLabel;
     tbl = java.util.Hashtable();
-    pos = unique(round(linspace(1, K, 5)));
-    for p = pos
-        tbl.put(java.lang.Integer(p), JLabel(num2str(p)));
-    end
+    % Window markers first
     if (width > 0)
         tbl.put(java.lang.Integer(lo), JLabel('['));
         tbl.put(java.lang.Integer(hi), JLabel(']'));
+    end
+    % Eigenmode axis labels (do not clobber a bracket position)
+    pos = unique(round(linspace(1, K, 5)));
+    for p = pos
+        if (width > 0) && (p == lo || p == hi)
+            continue;
+        end
+        tbl.put(java.lang.Integer(p), JLabel(num2str(p)));
     end
     jSlider.setLabelTable(tbl);
     jSlider.setPaintLabels(1);
@@ -326,7 +331,11 @@ function RefreshControls()
         cr = st.CacheEig.CompRank(:); vals = st.CacheEig.Values(:);
         iLo = find(cr == lo, 1); iHi = find(cr == hi, 1);
         if ~isempty(iLo) && ~isempty(iHi)
-            lamStr = sprintf('    lambda %.3g - %.3g', vals(iLo), vals(iHi));
+            if (lo == hi)
+                lamStr = sprintf('    lambda %.3g', vals(iLo));
+            else
+                lamStr = sprintf('    lambda %.3g - %.3g', vals(iLo), vals(iHi));
+            end
         end
     end
     if (width == 0)
