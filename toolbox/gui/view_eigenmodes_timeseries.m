@@ -185,6 +185,27 @@ function [iRows, Labels, Hemi] = GetBandTraces(Component, CompRank, kLo, kHi)
 end
 
 
+%% ===== Re-select the band's rows and redraw on a lever change =====
+function ModesChangedCallback(hFig) %#ok<DEFNU>
+    cache = getappdata(hFig, 'EigenTimeSeries');
+    if isempty(cache)
+        return;
+    end
+    st   = panel_eigenmodes('GetState');
+    band = st.Band;
+    [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
+    if isempty(iRows)
+        return;
+    end
+    F      = cache.Theta(iRows, :);
+    colors = HemiColors(Hemi);
+    % Redraw into the same figure (view_timeseries_matrix replots when hFig is given)
+    view_timeseries_matrix(cache.DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, hFig);
+    % Re-assert our tag (redraw may overwrite figure appdata)
+    setappdata(hFig, 'EigenTimeSeries', cache);
+end
+
+
 %% ===== PURE: hemisphere id -> RGB cell array (left warm, right cool) =====
 function colors = HemiColors(Hemi)
     Hemi = Hemi(:)';
