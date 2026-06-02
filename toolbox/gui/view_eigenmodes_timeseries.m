@@ -38,92 +38,64 @@ end
 end
 
 
-%% ===== GUI: build the eigenmode coefficient time series figure =====
-function hFig = ViewFigure(DataFile)
+%% ===== GUI: build the eigenmode coefficient time series from a Harmonic node =====
+function hFig = ViewFigure(ResultsFile)
     global GlobalData;
     hFig = [];
-    if isempty(DataFile) || ~ischar(DataFile)
-        bst_error('No data file provided.', 'Eigenmode time series', 0);
+    if isempty(ResultsFile) || ~ischar(ResultsFile)
+        bst_error('Open this from an "Eigenmode HARMONIC" results node.', 'Eigenmode time series', 0);
         return;
     end
-    % ----- Study + head model + surface -----
-    [sStudy, ~] = bst_get('AnyFile', DataFile);
-    if isempty(sStudy) || ~isfield(sStudy, 'iHeadModel') || isempty(sStudy.iHeadModel) ...
-            || (sStudy.iHeadModel < 1) || (length(sStudy.HeadModel) < sStudy.iHeadModel)
-        bst_error('No head model available for this study.', 'Eigenmode time series', 0);
+    % ----- Load the Harmonic node (kernel only: LoadFull=0 does NOT multiply by data) -----
+    ResMat = in_bst_results(ResultsFile, 0, 'Function', 'EigenKernel', 'GoodChannel', 'DataFile', 'SurfaceFile');
+    if isempty(ResMat) || ~isfield(ResMat, 'Function') || ~strcmpi(ResMat.Function, 'eigenmode_harmonic') ...
+            || ~isfield(ResMat, 'EigenKernel') || isempty(ResMat.EigenKernel)
+        bst_error(['This is not an Eigenmode HARMONIC results node.' 10 ...
+                   'Compute sources with method "Harmonic (eigenmodes)" first.'], 'Eigenmode time series', 0);
         return;
     end
-    HeadModelFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
-    HeadModelMat  = in_bst_headmodel(HeadModelFile, 0, 'HeadModelType', 'SurfaceFile');
-    if ~strcmpi(HeadModelMat.HeadModelType, 'surface')
-        bst_error('Eigenmode transform requires a surface head model.', 'Eigenmode time series', 0);
+    Mtilde      = double(ResMat.EigenKernel);     % [K x nGoodCh]
+    GoodChannel = ResMat.GoodChannel;             % index vector into the channel file
+    DataFile    = ResMat.DataFile;
+    SurfaceFile = ResMat.SurfaceFile;
+    if isempty(DataFile)
+        bst_error('This Harmonic node has no associated recordings to project.', 'Eigenmode time series', 0);
         return;
     end
-    SurfaceFile = HeadModelMat.SurfaceFile;
 
-    % ----- Eigenmodes -----
+    % ----- Eigenmodes for paired-rank trace mapping (first K columns) -----
     [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
     if ~isComputed
-        bst_error(['No eigenmodes on this surface.' 10 'Run "Compute eigenmodes" first.'], 'Eigenmode time series', 0);
+        bst_error('No eigenmodes on this surface.', 'Eigenmode time series', 0);
         return;
     end
-
-    % ----- Constrained gain (fixed orientation: [nch x nVert]) -----
-    HM   = in_bst_headmodel(HeadModelFile, 1);
-    Gain = double(HM.Gain);
-    if size(Gain, 2) ~= size(Eig.Vectors, 1)
-        bst_error(sprintf(['Head model has %d vertices but eigenmodes have %d.' 10 ...
-            'Recompute the head model.'], size(Gain,2), size(Eig.Vectors,1)), 'Eigenmode time series', 0);
+    K = size(Mtilde, 1);
+    if size(Eig.Vectors, 2) < K
+        bst_error('Eigenmode count is smaller than the Harmonic kernel rank.', 'Eigenmode time series', 0);
         return;
     end
 
     % ----- Load the recordings dataset (raw or imported); read the CURRENT window -----
-    % This is the lazy path used by "Display on cortex": GetRecordingsValues loads
-    % the current page on demand for raw files and returns the displayed window.
     iDS = bst_memory('LoadDataFile', DataFile);
     if isempty(iDS)
         bst_error('Could not load the recordings.', 'Eigenmode time series', 0);
         return;
     end
-    Channels    = GlobalData.DataSet(iDS).Channel;
-    ChannelFlag = GlobalData.DataSet(iDS).Measures.ChannelFlag;
-    if isempty(Channels)
-        bst_error('No channels found for this recording.', 'Eigenmode time series', 0);
-        return;
-    end
-    if isempty(ChannelFlag)
-        ChannelFlag = ones(length(Channels), 1);
-    end
-    iCh = good_channel(Channels, ChannelFlag, 'MEG');
-    if isempty(iCh)
-        iCh = good_channel(Channels, ChannelFlag, 'EEG');
-    end
-    if isempty(iCh)
-        bst_error('No good MEG or EEG channels found.', 'Eigenmode time series', 0);
-        return;
-    end
-
-    % ----- Transform kernel over ALL raw modes (complete pairing; rank-safe pinv) -----
-    K_raw = double(Eig.nModes);
-    Phi   = double(Eig.Vectors(:, 1:K_raw));
-    [Kernel, ~] = bst_eigenmodes_transform(Gain(iCh, :), Phi);   % [K_raw x nCh]
-
-    % ----- Current-window recordings -> coefficients (unscaled: isGradMagScale=0) -----
-    F = bst_memory('GetRecordingsValues', iDS, iCh, 'UserTimeWindow', 0);   % [nCh x nTime]
+    F = bst_memory('GetRecordingsValues', iDS, GoodChannel, 'UserTimeWindow', 0);   % [nGoodCh x nTime]
     [TimeVector, ~] = bst_memory('GetTimeVector', iDS, [], 'UserTimeWindow');
-    Theta = Kernel * F;                                                     % [K_raw x nTime]
+    Theta = Mtilde * F;                                                             % [K x nTime]
 
-    % ----- Cache (kernel + channels let us recompute on window change) -----
+    % ----- Cache (M̃ + GoodChannel let SyncWindow recompute on a window change) -----
     cache = struct( ...
         'SurfaceFile', SurfaceFile, ...
         'DataFile',    DataFile, ...
-        'Kernel',      Kernel, ...
-        'GoodChannel', iCh, ...
-        'Component',   Eig.Component(1:K_raw), ...
-        'CompRank',    Eig.CompRank(1:K_raw), ...
+        'Kernel',      Mtilde, ...
+        'GoodChannel', GoodChannel, ...
+        'Component',   Eig.Component(1:K), ...
+        'CompRank',    Eig.CompRank(1:K), ...
         'Theta',       Theta, ...
         'TimeVector',  TimeVector, ...
-        'WindowTime',  GlobalData.DataSet(iDS).Measures.Time);  % [t0 t1]; CurrentTimeChangedCallback uses it to detect a window change
+        'WindowTime',  GlobalData.DataSet(iDS).Measures.Time);  % [t0 t1]; window-change detection
 
     % ----- Ensure the lever is initialized for this surface (paired ranks) -----
     Kp = double(max(cache.CompRank));
