@@ -204,7 +204,9 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
     colors = HemiColors(Hemi);
     % Redraw into the same figure (view_timeseries_matrix replots when hFig is given)
     view_timeseries_matrix(cache.DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, hFig);
-    % Re-assert our tag + title (redraw overwrites figure appdata and name)
+    % Restore our title (view_timeseries_matrix calls UpdateFigureName, which
+    % overwrites it). The EigenTimeSeries appdata survives the redraw; re-assert
+    % it defensively in case view_timeseries_matrix's behaviour ever changes.
     setappdata(hFig, 'EigenTimeSeries', cache);
     set(hFig, 'Name', ['Eigenmode time series: ' cache.SurfaceFile]);
 end
