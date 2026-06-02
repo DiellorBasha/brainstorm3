@@ -24,7 +24,7 @@ function [Results, errMsg] = bst_inverse_eigenmodes(varargin)
 %   'SNR'       : signal-to-noise ratio for regularization (default 3)
 %   'Unreg'     : logical; if true, ignore SNR and use rank-safe pinv (default false)
 %   'nModes'    : cap on modes used (default: all in the composed model)
-%   'DataTypes' : channel types for the whitener (default {'MEG','MEG MAG','MEG GRAD'})
+%   (no DataTypes option — whitener is computed directly on the subset covariance)
 %
 % Authors: Diellor Basha, 2026
 
@@ -43,7 +43,6 @@ Results = []; errMsg = '';
 
 % Options
 Method = 'mne'; Prior = 'log'; Alpha = 1; SNR = 3; Unreg = false; nModes = [];
-DataTypes = {'MEG','MEG MAG','MEG GRAD'};
 for i = 5:2:numel(varargin)
     switch lower(varargin{i})
         case 'method',    Method    = lower(varargin{i+1});
@@ -52,7 +51,6 @@ for i = 5:2:numel(varargin)
         case 'snr',       SNR       = varargin{i+1};
         case 'unreg',     Unreg     = logical(varargin{i+1});
         case 'nmodes',    nModes    = varargin{i+1};
-        case 'datatypes', DataTypes = varargin{i+1};
     end
 end
 if ~ismember(Method, {'mne','dspm','sloreta'})
@@ -81,14 +79,17 @@ if ~isempty(nModes) && nModes > 0 && nModes < K
 end
 nCh = numel(iGood);
 
-% Whitener iW from noise covariance (Brainstorm convention)
+% Whitener iW = C^(-1/2) from the noise covariance, restricted to good channels.
+% Computed directly (symmetric, regularized SVD) on the already-subset covariance
+% so the dimensions are guaranteed consistent with L_tilde's good-channel rows.
 if ~isempty(NoiseCovFile)
     NC = load(file_fullpath(NoiseCovFile));
-    NoiseCov = NC.NoiseCov(iGood, iGood);
-    iW = bst_whitener(NoiseCov, ChannelFile, DataTypes, []);   % [nCh x nCh]
-    if isempty(iW) || ~isequal(size(iW), [nCh nCh])
-        iW = eye(nCh);
-    end
+    NoiseCov = double(NC.NoiseCov(iGood, iGood));
+    NoiseCov = 0.5 * (NoiseCov + NoiseCov');        % symmetrize
+    [Un, Sn] = svd(NoiseCov);
+    sn = diag(Sn);
+    reg = max(sn) * 1e-6;                            % Tikhonov floor on noise eigenvalues
+    iW = Un * diag(1 ./ sqrt(sn + reg)) * Un';      % [nCh x nCh] symmetric whitener
 else
     iW = eye(nCh);
 end
@@ -176,7 +177,11 @@ if isstruct(P)
         [Uo, ~] = qr(U, 0);
         Proj = eye(nCh) - Uo*Uo';
     end
-elseif isnumeric(P) && isequal(size(P), [numel(iGood) numel(iGood)]+[0 0])
-    Proj = P;     % already a matrix over all channels
+elseif isnumeric(P) && (size(P,1) == size(P,2))
+    if size(P,1) == nCh
+        Proj = P;                    % already restricted to good channels
+    elseif size(P,1) >= max(iGood)
+        Proj = P(iGood, iGood);      % full-channel projector matrix -> subset
+    end
 end
 end
