@@ -24,8 +24,9 @@
 | `toolbox/inverse/bst_resolution_metrics.m` | Create | Resolution-matrix point-spread metrics (validation Level 1). |
 | `toolbox/script/tutorial_eigenmodes_validation.m` | Create | Validation harness: Levels 1–3, writes a results report. |
 | `toolbox/math/bst_eigenmodes_harmonic.m` | Delete | Retired (flat-`R` + unreg switch replaces it). |
-| `toolbox/math/bst_eigenmodes_transform.m` | Delete | Retired. |
+| `toolbox/math/bst_eigenmodes_transform.m` | **Keep** | Shared eigenspectrum infra: `process_eigenmodes_transform`/`_denoise` depend on it for PSD coefficient building. (Plan originally listed it for deletion — corrected during execution.) |
 | `toolbox/gui/view_eigenmodes_timeseries.m` | Delete | Retired (coefficients are a standard matrix node). |
+| `toolbox/inverse/panel_inverse_2018.m`, `toolbox/tree/tree_callbacks.m`, `toolbox/core/bst_figures.m` | Edit | Remove the "Harmonic (eigenmodes)" option/menu/figure hooks wired into the standard inverse GUI. |
 | `dev/tests/test_eigenmodes_harmonic_pure.m`, `test_harmonic_inverse_e2e.m`, `test_eigenmodes_transform_pure.m`, `test_view_eigenmodes_timeseries_pure.m`, `test_eigenmode_timeseries_e2e.m`, `test_eigenmode_viewer_*.m` | Delete | Tests for retired units. |
 
 **Reused helpers (do not modify):** `bst_gain_orient(Gain, GridOrient, GridAtlas)`, `in_tess_eigenmodes(SurfaceFile)` → `(Eigenmodes{.Vectors[nV×nModes], .Values[nModes×1], .nModes}, isComputed)`, `bst_whitener(NoiseCov, ChannelFile, DataTypes, ChannelFlag)`, `tess_laplacian(Vertices, Faces)` → `[L, M]`, `in_bst_headmodel`, `in_bst_channel`, `db_template`, `db_add_data`, `good_channel`.
