@@ -502,7 +502,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         if isForced
             ExpertMode = bst_get('ExpertMode');
             % Left panels
-            jPanelModel.setVisible(isLinear);
+            jPanelModel.setVisible(isLinear && ~isHarm);
             jPanelMeasureMN.setVisible(isLinear && jRadioMethodMn.isSelected() && ~isHarm);
             jPanelMeasureBf.setVisible(isLinear && jRadioMethodBf.isSelected() && ~isHarm);
             jPanelMemInfo.setVisible(~isLinear);

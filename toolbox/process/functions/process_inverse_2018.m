@@ -156,6 +156,11 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     if ~isfield(OPTIONS, 'nModes') || isempty(OPTIONS.nModes)
         OPTIONS.nModes = 0;
     end
+    % Harmonic kernel is constrained (the eigenmode basis lives on the cortex surface);
+    % force fixed orientation so the saved node's metadata/comment matches the kernel.
+    if strcmpi(OPTIONS.InverseMethod, 'harmonic')
+        OPTIONS.SourceOrient = {'fixed'};
+    end
 
 
     %% ===== GET INPUT INFORMATION =====
