@@ -36,5 +36,22 @@ assert(all(diff(Rl) <= 1e-9), 'log prior must be non-increasing in lambda.');
 fprintf('log prior Rl = [%s]\n', sprintf('%.4f ', Rl));
 assert(Rl(end) > 0.5, 'log prior must keep substantial variance on the edge mode (gentle rolloff).');
 
+% Analysis-only kernels must be rejected as priors BY THEIR ADMISSIBILITY FLAG
+% (not merely as "unknown") -- assert the specific error identifier.
+eid = '';
+try, bst_eigenmode_prior(lambdas, K, 'mexhat', 0); catch e, eid = e.identifier; end
+assert(strcmp(eid, 'bst_eigenmode_prior:Inadmissible'), 'mexhat must be rejected as inadmissible.');
+eid = '';
+try, bst_eigenmode_prior(lambdas, K, 'dog', 0); catch e, eid = e.identifier; end
+assert(strcmp(eid, 'bst_eigenmode_prior:Inadmissible'), 'dog must be rejected as inadmissible.');
+% A registered-but-unwired admissible kernel is a distinct, clear error
+eid = '';
+try, bst_eigenmode_prior(lambdas, K, 'matern', 0); catch e, eid = e.identifier; end
+assert(strcmp(eid, 'bst_eigenmode_prior:UnsupportedPrior'), 'matern must report unsupported-prior.');
+% A truly unknown name is UnknownPrior
+eid = '';
+try, bst_eigenmode_prior(lambdas, K, 'no_such', 0); catch e, eid = e.identifier; end
+assert(strcmp(eid, 'bst_eigenmode_prior:UnknownPrior'), 'unknown name must report unknown-prior.');
+
 disp('ALL TESTS PASSED');
 end

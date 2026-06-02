@@ -14,6 +14,11 @@ function R = bst_eigenmode_prior(lambdas, K, priorType, alpha)
 %       'power' : R proportional to lambda_k^(-alpha)   (legacy 1/f-like)
 %       'log'   : R = -log(lambda_mm), GBF millimetre-scale eigenvalues (gentle high-mode rolloff)
 %
+%     The raw spectral shape is delegated to the eigfilter kernel library
+%     (bst_eigfilter_kernel / bst_eigfilter_evaluate: 'flat'/'power'/'log'); this
+%     function keeps the prior's own conventions (DC-mode swap, the 'log' millimetre
+%     rescaling, max(R)=1 normalization, and an admissibility check).
+%
 %     For 'log', eigenvalues are taken on GBF's millimetre scale: Brainstorm
 %     surfaces are in metres and the cotan stiffness is scale-invariant (only the
 %     mass matrix scales with area), so lambda_mm = lambda_m * 1e-6 reproduces a
@@ -45,14 +50,13 @@ end
 
 switch lower(priorType)
     case 'flat'
-        R = ones(K, 1);
-        return;
-
+        g = bst_eigfilter_kernel('flat');
+        R = bst_eigfilter_evaluate(g, lam(1:K));      % ones
     case 'power'
         lamK = lam(1:K);
         lamK = max(lamK, max(lamK) * 1e-12);
-        R = lamK .^ (-alpha);
-
+        g = bst_eigfilter_kernel('power', struct('alpha', alpha));
+        R = bst_eigfilter_evaluate(g, lamK);
     case 'log'
         % GBF 2026 prior on RAW millimetre-scale eigenvalues. Brainstorm surfaces
         % are in metres and the cotan stiffness is scale-invariant (only the mass
@@ -64,12 +68,32 @@ switch lower(priorType)
         M2MM2 = 1e-6;                                  % m^-2 -> mm^-2 (coords scale 1e3)
         lamMM = lam(1:K) * M2MM2;
         lamMM = min(max(lamMM, eps), 1 - 1e-12);       % keep strictly in (0,1)
-        R = -log(lamMM);                               % > 0, gently decreasing
-
+        g = bst_eigfilter_kernel('log');
+        R = bst_eigfilter_evaluate(g, lamMM);
     otherwise
+        % Not one of the wired prior shapes. Use the kernel registry to give a
+        % precise reason: a registered analysis-only kernel (e.g. mexhat/dog) is
+        % rejected by its admissibility flag; a registered admissible kernel is
+        % simply not wired here yet (only flat/power/log carry the prior-specific
+        % scaling and parameterization); an unregistered name is unknown.
+        if any(strcmp(bst_eigfilter_kernel('list'), lower(priorType)))
+            minfo = bst_eigfilter_kernel('info', lower(priorType));
+            if isfield(minfo,'priorAdmissible') && ~minfo.priorAdmissible
+                error('bst_eigenmode_prior:Inadmissible', ...
+                    'Kernel ''%s'' is not admissible as a prior (analysis-only; zero/negative spectral density).', priorType);
+            end
+            error('bst_eigenmode_prior:UnsupportedPrior', ...
+                'Kernel ''%s'' is registered but not wired as a prior shape (use flat, power, or log).', priorType);
+        end
         error('bst_eigenmode_prior:UnknownPrior', 'Unknown priorType: %s', priorType);
 end
 
-% Normalize to max 1
+% Defensive backstop: a prior is a covariance, so it must be finite and >= 0.
+if any(~isfinite(R)) || any(R < 0)
+    error('bst_eigenmode_prior:Inadmissible', ...
+        'Prior ''%s'' produced an invalid (non-finite or negative) covariance.', priorType);
+end
+
+% Normalize to max 1 (flat is already ones; this leaves it unchanged)
 R = R / max(R);
 end
