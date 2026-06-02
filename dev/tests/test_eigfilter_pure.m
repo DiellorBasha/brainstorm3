@@ -71,5 +71,26 @@ for k = {'flat','power','log','inverse_heat','tikhonov','ideal'}
     assert(any(strcmp(nm, k{1})), sprintf('list missing %s.', k{1}));
 end
 
+lpp = [1; 2; 4; 8; 16];
+% matern: (kappa^2 + l)^-nu, decreasing, positive
+gm = bst_eigfilter_design_matern(struct('kappa',1,'nu',1.5));
+assert(max(abs(gm(lpp) - (1 + lpp).^(-1.5))) < 1e-12, 'matern value wrong.');
+assert(all(diff(gm(lpp)) < 0), 'matern must be decreasing.');
+% mexhat band-pass: zero at 0, peak interior, decay; vector t -> bank
+gh = bst_eigfilter_design_mexhat(struct('t',0.1));
+assert(abs(gh(0)) < 1e-12, 'mexhat must be 0 at lambda=0.');
+ll = (0:0.01:50)'; v = gh(ll);
+assert(v(1) < max(v) && v(end) < max(v), 'mexhat must peak in the interior.');
+ghb = bst_eigfilter_design_mexhat(struct('t',[0.05 0.1 0.2]));
+assert(iscell(ghb) && numel(ghb)==3, 'mexhat vector t must return a bank.');
+mh = bst_eigfilter_design_mexhat('meta');
+assert(mh.priorAdmissible == false, 'mexhat must be flagged not prior-admissible.');
+% dog band-pass: non-negative for t1<t2, zero at 0
+gd = bst_eigfilter_design_dog(struct('t1',0.1,'t2',0.4));
+assert(abs(gd(0)) < 1e-12, 'dog must be 0 at lambda=0.');
+assert(all(gd(lpp) >= -1e-12), 'dog must be non-negative for t1<t2.');
+md = bst_eigfilter_design_dog('meta');
+assert(md.priorAdmissible == false, 'dog must be flagged not prior-admissible.');
+
 disp('ALL TESTS PASSED');
 end
