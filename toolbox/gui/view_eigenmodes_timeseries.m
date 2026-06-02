@@ -1,14 +1,15 @@
 function varargout = view_eigenmodes_timeseries(varargin)
 % VIEW_EIGENMODES_TIMESERIES: Plot eigenmode coefficients theta_k(t) over time.
 %
-% USAGE:  hFig = view_eigenmodes_timeseries(DataFile)
+% USAGE:  hFig = view_eigenmodes_timeseries(ResultsFile)   % an "eigenmode_harmonic" node
 %         [iRows, Labels, Hemi] = view_eigenmodes_timeseries('GetBandTraces', Component, CompRank, kLo, kHi)
 %         colors = view_eigenmodes_timeseries('HemiColors', Hemi)
 %         view_eigenmodes_timeseries('ModesChangedCallback', hFig)
 %
-% One trace per eigenmode coefficient (sensor->mode transform), for the paired
-% ranks in the EigenModes panel band. Each paired rank yields a left and a right
-% trace. The figure tracks the panel band live via bst_figures('FireModesChanged').
+% One trace per eigenmode coefficient theta_k(t), read from a Harmonic results
+% node's whitened kernel (EigenKernel = M̃) so the traces are consistent with the
+% displayed Harmonic cortex map. Traces cover the paired ranks in the EigenModes
+% panel band (left + right per rank) and track the band live via FireModesChanged.
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
