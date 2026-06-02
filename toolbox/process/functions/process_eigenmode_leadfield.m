@@ -38,16 +38,33 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     nModes = sProcess.options.nmodes.Value{1};
 
     [sStudy, iStudy] = bst_get('Study', sInputs(1).iStudy);
-    if isempty(sStudy.iHeadModel) || sStudy.iHeadModel < 1
+    if isempty(sStudy.HeadModel)
         bst_report('Error', sProcess, sInputs, 'No head model available for this study.'); return;
     end
-    HeadModelFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
 
-    % Load base head model (unconstrained gain + orientations)
-    HeadModel = in_bst_headmodel(HeadModelFile, 0);
-    if ~strcmpi(HeadModel.HeadModelType, 'surface')
-        bst_report('Error', sProcess, sInputs, 'Eigenmode leadfield requires a surface head model.'); return;
+    % Choose a BASE (non-eigenmode) surface head model. The active model may already
+    % be an eigenmode leadfield (e.g. when re-running this process); never compose on
+    % top of one. Prefer the active head model when it is itself a base surface model.
+    iBase = [];
+    HeadModel = [];
+    candidates = [sStudy.iHeadModel, setdiff(1:numel(sStudy.HeadModel), sStudy.iHeadModel)];
+    for ic = candidates
+        if isempty(ic) || ic < 1 || ic > numel(sStudy.HeadModel); continue; end
+        try
+            hmC = in_bst_headmodel(sStudy.HeadModel(ic).FileName, 0);
+        catch
+            continue;
+        end
+        isEig = isfield(hmC,'isEigenmode') && ~isempty(hmC.isEigenmode) && hmC.isEigenmode;
+        if ~isEig && strcmpi(hmC.HeadModelType, 'surface')
+            iBase = ic; HeadModel = hmC; break;
+        end
     end
+    if isempty(iBase)
+        bst_report('Error', sProcess, sInputs, ...
+            'No base surface head model found (only eigenmode leadfields present).'); return;
+    end
+    HeadModelFile = sStudy.HeadModel(iBase).FileName;
 
     % Load eigenmodes from the head model's surface
     [Eigenmodes, isComputed] = in_tess_eigenmodes(HeadModel.SurfaceFile);
@@ -84,6 +101,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     sStudy.iHeadModel     = iHM;
     bst_set('Study', iStudy, sStudy);
     panel_protocols('UpdateNode', 'Study', iStudy);
+    panel_protocols('SelectNode', [], file_short(OutputFile));
 
     OutputFiles{end+1} = file_short(OutputFile);
 end
