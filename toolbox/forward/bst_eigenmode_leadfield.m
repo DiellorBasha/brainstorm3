@@ -33,6 +33,13 @@ for i = 1:2:numel(varargin)
     end
 end
 
+% Eigenmode composition is defined for surface (constrained) head models only.
+if isfield(HeadModel, 'HeadModelType') && ~isempty(HeadModel.HeadModelType) ...
+        && ~strcmpi(HeadModel.HeadModelType, 'surface')
+    error('bst_eigenmode_leadfield:NotSurface', ...
+        'Eigenmode leadfield requires a surface head model (got ''%s'').', HeadModel.HeadModelType);
+end
+
 % Constrained leadfield: [nCh x nVert]
 Lc = bst_gain_orient(double(HeadModel.Gain), HeadModel.GridOrient, ...
     getfield_default(HeadModel, 'GridAtlas', []));

@@ -57,5 +57,16 @@ assert(isempty(CompHM.GridLoc) && isempty(CompHM.GridOrient), 'GridLoc/GridOrien
 CompHM2 = bst_eigenmode_leadfield(HeadModel, Eig, 'nModes', 999);
 assert(CompHM2.nModes == (K+1), 'nModes must clamp to available count.');
 
+% Non-surface head model must be rejected with a clear error
+HMvol = HeadModel; HMvol.HeadModelType = 'volume';
+errId = '';
+try
+    bst_eigenmode_leadfield(HMvol, Eig, 'nModes', K);
+catch ME
+    errId = ME.identifier;
+end
+assert(strcmp(errId, 'bst_eigenmode_leadfield:NotSurface'), ...
+    'Volume head model must raise bst_eigenmode_leadfield:NotSurface.');
+
 disp('ALL TESTS PASSED');
 end
