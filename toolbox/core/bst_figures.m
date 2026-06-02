@@ -1925,9 +1925,10 @@ function ReloadFigures(FigureTypes, isFastUpdate, isResetAxes)
                     end
                     % Reload
                     if ~isempty(getappdata(Figure.hFigure, 'EigenTimeSeries'))
-                        % Eigenmode time series: replot cached coefficients (current
-                        % window); never view_matrix/view_scouts on the raw DataFile.
-                        view_eigenmodes_timeseries('ReloadCallback', Figure.hFigure);
+                        % Eigenmode time series: re-read the current window (raw page
+                        % change) and replot cached coefficients; never
+                        % view_matrix/view_scouts on the raw DataFile.
+                        view_eigenmodes_timeseries('ReloadCallback', Figure.hFigure, iDS);
                     elseif ~isempty(StatInfo)
                         view_statcluster(StatInfo.StatFile, StatInfo.DisplayMode, [], Figure.hFigure);
                     elseif ~isempty(ResultsFiles)

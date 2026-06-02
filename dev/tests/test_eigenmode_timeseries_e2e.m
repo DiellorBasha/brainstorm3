@@ -68,6 +68,20 @@ assert(~isempty(cacheR) && isfield(cacheR, 'Theta'), 'Cache must survive reload.
 assert(strcmp(getfield(getappdata(hFig, 'TsInfo'), 'DisplayMode'), 'column'), ...
     'Reload must keep the toggled column display mode.'); %#ok<GFLD>
 
+% --- Regression: a raw PAGE change reloads via ReloadFigures with the cached
+% window now stale (pointing at the old page). The reload must re-read the
+% current window, not leave the figure on the previous page (time-0 revert).
+cacheStale = getappdata(hFig, 'EigenTimeSeries');
+realWin = cacheStale.WindowTime;            % == Measures.Time of the live window
+cacheStale.WindowTime = realWin + 1000;     % simulate a page change left it stale
+setappdata(hFig, 'EigenTimeSeries', cacheStale);
+bst_figures('ReloadFigures', hFig, 0);
+cacheSync = getappdata(hFig, 'EigenTimeSeries');
+assert(isequal(cacheSync.WindowTime, realWin), ...
+    'Reload must re-sync the cached window to the live recording (page tracking).');
+assert(numel(cacheSync.TimeVector) == size(cacheSync.Theta, 2), ...
+    'Re-read Theta and TimeVector must stay consistent.');
+
 % Expected trace count for the current band
 iRows0 = view_eigenmodes_timeseries('GetBandTraces', cache.Component, cache.CompRank, st0.Band(1), st0.Band(2));
 

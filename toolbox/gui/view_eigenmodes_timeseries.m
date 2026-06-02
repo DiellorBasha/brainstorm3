@@ -201,13 +201,41 @@ function RefreshTraces(hFig)
 end
 
 
-%% ===== Figure reload (display-mode toggle, montage change, "reload all"):
-%%       replot the cached coefficients; never reload the raw file via view_matrix =====
-function ReloadCallback(hFig) %#ok<DEFNU>
+%% ===== Re-read the displayed window into the cache IF its bounds changed (a raw
+%%       page change). Returns the (possibly updated) cache and a changed flag. =====
+function [cache, changed] = SyncWindow(hFig, iDS, cache)
+    global GlobalData;
+    changed = false;
+    if isempty(iDS) || (iDS < 1) || (iDS > numel(GlobalData.DataSet))
+        return;
+    end
+    if isempty(GlobalData.DataSet(iDS).DataFile) || ~file_compare(GlobalData.DataSet(iDS).DataFile, cache.DataFile)
+        return;   % not our recordings dataset
+    end
+    Win = GlobalData.DataSet(iDS).Measures.Time;
+    if isequal(Win, cache.WindowTime)
+        return;   % same window: nothing to re-read
+    end
+    F = bst_memory('GetRecordingsValues', iDS, cache.GoodChannel, 'UserTimeWindow', 0);
+    [TimeVector, ~] = bst_memory('GetTimeVector', iDS, [], 'UserTimeWindow');
+    cache.Theta      = cache.Kernel * F;
+    cache.TimeVector = TimeVector;
+    cache.WindowTime = Win;
+    setappdata(hFig, 'EigenTimeSeries', cache);
+    changed = true;
+end
+
+
+%% ===== Figure reload (display-mode toggle, montage change, raw PAGE change,
+%%       "reload all"): re-read the current window if it changed, then replot the
+%%       cached coefficients. Never reloads the raw file via view_matrix. =====
+function ReloadCallback(hFig, iDS) %#ok<DEFNU>
+    if (nargin < 2), iDS = []; end
     cache = getappdata(hFig, 'EigenTimeSeries');
     if isempty(cache) || ~isfield(cache, 'Band') || isempty(cache.Band)
         return;
     end
+    cache = SyncWindow(hFig, iDS, cache);
     PlotBand(hFig, cache);
 end
 
@@ -249,30 +277,18 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
 end
 
 
-%% ===== Displayed window changed (e.g. raw page scroll): re-read + recompute =====
+%% ===== Time cursor moved: re-read + replot only if it crossed into a new raw
+%%       page (window bounds changed). A move within the page is a cheap no-op. =====
 function CurrentTimeChangedCallback(hFig, iDS) %#ok<DEFNU>
-    global GlobalData;
+    if (nargin < 2), iDS = []; end
     cache = getappdata(hFig, 'EigenTimeSeries');
-    if isempty(cache)
+    if isempty(cache) || ~isfield(cache, 'Band') || isempty(cache.Band)
         return;
     end
-    if (nargin < 2) || isempty(iDS) || (iDS < 1) || (iDS > numel(GlobalData.DataSet))
-        return;
+    [cache, changed] = SyncWindow(hFig, iDS, cache);
+    if changed
+        PlotBand(hFig, cache);
     end
-    % Only re-read when the displayed window bounds actually changed (a raw page
-    % scroll). Moving the time cursor within the same page leaves Measures.Time
-    % unchanged, so this is a cheap no-op on every cursor move.
-    Win = GlobalData.DataSet(iDS).Measures.Time;
-    if isequal(Win, cache.WindowTime)
-        return;
-    end
-    F = bst_memory('GetRecordingsValues', iDS, cache.GoodChannel, 'UserTimeWindow', 0);
-    [TimeVector, ~] = bst_memory('GetTimeVector', iDS, [], 'UserTimeWindow');
-    cache.Theta      = cache.Kernel * F;
-    cache.TimeVector = TimeVector;
-    cache.WindowTime = Win;
-    setappdata(hFig, 'EigenTimeSeries', cache);
-    RefreshTraces(hFig);
 end
 
 
