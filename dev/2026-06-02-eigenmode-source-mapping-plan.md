@@ -447,14 +447,14 @@ function R = bst_eigenmode_prior(lambdas, K, priorType, alpha)
 %     priorType:
 %       'flat'  : R = ones(K,1)                         (no spectral prior)
 %       'power' : R ∝ lambda_k^(-alpha)                 (legacy 1/f-like)
-%       'log'   : R ∝ -log(lambda_k / lambda_ref)   (2026 GBF log prior; covariance)
+%       'log'   : R = -log(lambda_mm), lambda_mm = lambda_m*1e-6  (2026 GBF, mm scale)
 %
-%     For 'log', eigenvalues are normalized into (0,1) by lambda_ref (the first
-%     discarded eigenvalue, i.e. lambda(K+1), else lambda(K)*(1+eps)). This is a
-%     pure shift in log-space: it preserves eigenvalue ratios/ordering and only
-%     guarantees -1/log(.) > 0. The DC mode (lambda~0) is swapped to lambda(2).
-%     R is normalized so max(R) = 1; absolute scale is absorbed by the global
-%     regularizer in the inverse.
+%     For 'log', eigenvalues are taken on GBF's millimetre scale (lambda_mm =
+%     lambda_m*1e-6; cotan stiffness is scale-invariant, only mass/area scales, so
+%     eigenvectors are unchanged). With lambda_mm in (0,1), R = -log(lambda_mm) > 0
+%     with a gentle high-mode rolloff (large additive offset ~13.8). The DC mode
+%     (lambda~0) is swapped to lambda(2). R is normalized so max(R) = 1; absolute
+%     scale is absorbed by the global regularizer in the inverse.
 %
 % Authors: Diellor Basha, 2026
 
@@ -479,17 +479,14 @@ switch lower(priorType)
         R = lamK .^ (-alpha);
 
     case 'log'
-        % Reference scale = first discarded eigenvalue (else just above max used)
-        if nAvail >= K+1
-            lamRef = lambdas(K+1);
-        else
-            lamRef = lam(K) * (1 + 1e-6);
-        end
-        lamRef = max(lamRef, lam(K) * (1 + 1e-12));   % ensure strictly > lam(K)
-        lamTilde = lam(1:K) / lamRef;                  % in (0,1)
-        lamTilde = min(lamTilde, 1 - 1e-12);
-        R = -log(lamTilde);                            % = log(lamRef/lam) > 0, decreasing in lambda
-                                                       % (R is the covariance; GBF's -1/log lambda is the precision)
+        % GBF millimetre scale: lambda_mm = lambda_m * 1e-6 (cotan stiffness is
+        % scale-invariant; only the mass/area scales). Raw mm eigenvalues are in
+        % (0,1) so R = -log(lambda_mm) > 0 with a gentle high-mode rolloff.
+        % NOTE: an earlier draft normalized by lamRef=lambda(K+1); that annihilated
+        % the highest retained modes (~1e-7) and hurt localization — use raw mm scale.
+        lamMM = lam(1:K) * 1e-6;
+        lamMM = min(max(lamMM, eps), 1 - 1e-12);       % strictly in (0,1)
+        R = -log(lamMM);                               % > 0, gently decreasing in lambda
 
     otherwise
         error('bst_eigenmode_prior:UnknownPrior', 'Unknown priorType: %s', priorType);
@@ -1362,5 +1359,5 @@ git commit -m "$(printf 'Eigenmode validation: harness (resolution + simulation 
 ## Notes & decisions carried from the spec
 
 - **Default `K`:** the composer keeps all available modes; the inverse defaults to all modes in the composed model. (Spec §6 left open whether to clamp to `nChannels`. The solver is well-posed for `K > nChannels` because the spectral prior `R` regularizes — GBF's regime — so we do **not** clamp by default. The harmonic/`Unreg` path *does* require `K ≤ nChannels`; its test uses `K=5 < nCh=8`.)
-- **`λ_ref` for the log prior:** first discarded eigenvalue `λ_{K+1}`, else `λ_K·(1+ε)`. Implemented in `bst_eigenmode_prior`.
+- **Log-prior scale:** GBF millimetre scale `λ_mm = λ_m·1e−6` (raw, no `λ_ref` normalization — the `λ_{K+1}` draft annihilated the highest modes and was reverted after validation). Implemented in `bst_eigenmode_prior`.
 - **Whitening/projector reuse:** `bst_whitener` for the whitener; SSP assembled from `ChannelMat.Projector` in `eigenmode_projector`. Order: project → whiten, folded into the kernel so it maps RAW data.

@@ -147,26 +147,32 @@ The spectral prior **is** the source covariance `R` in the standard inverse
 Default = **2026 log prior**. GBF's penalty is `Λ·diag(−1/log λ_k)`, i.e.
 `Σ⁻¹ ∝ −1/log λ_k`, so `R = diag(−log λ_k)` up to scale.
 
-**Eigenvalue normalization (interpretation-safe).** `−log λ_k` is positive only for
-`λ_k < 1`. GBF achieves this implicitly via millimeter mesh units; Brainstorm uses
-SI meters. Rather than depend on unit choice, we set the reference scale explicitly
-and dimensionlessly:
+**Eigenvalue scale — match GBF exactly (millimetre mesh).** `−log λ_k` is positive
+only for `λ_k < 1`. GBF achieves this by building the mesh in **millimetres**.
+Brainstorm surfaces are in **metres**, but the cotan stiffness is scale-invariant and
+only the mass matrix scales with area, so converting is exact and leaves the
+eigenvectors unchanged:
 
 ```
-λ̃_k = λ_k / λ_ref ,   λ_ref = λ_{K+1}  (first discarded eigenvalue; else λ_K·(1+ε))
-R_k ∝ −log(λ̃_k) = log(λ_ref / λ_k)
+λ_mm = λ_m · 1e−6        (m⁻² → mm⁻²; coordinate scale 1e3 ⇒ eigenvalue scale 1e−6)
+R_k  ∝ −log(λ_mm,k)      (DC mode λ_1≈0 swapped to λ_2; clamp λ_mm ∈ (0,1))
 ```
 
 (`R` is the source *covariance*. GBF writes the penalty as the *precision*
 `Σ⁻¹ = −1/log λ`, so the covariance is `R = Σ = −log λ` — positive and **decreasing**
-in `λ` (smooth low-`λ` modes get more prior variance, fine modes less).)
+in `λ`: smooth low-`λ` modes get more prior variance, fine modes less.)
 
-This is a **pure shift in log-space** (`−log(λ_k/λ_ref) = −log λ_k + log λ_ref`), so it
-**preserves all eigenvalue ratios and ordering** — the interpretation of each mode
-as the `k`-th spatial-frequency band is untouched. It only guarantees
-`λ̃_k ∈ (0,1)` ⇒ `R_k > 0`. The DC mode `λ_1≈0` is handled by the GBF swap
-(`λ_1 ← λ_2`). `R` is normalized so `max(R)=1`; absolute scale is absorbed by the
-global regularizer.
+The millimetre scale adds a large constant offset (`−log(1e−6) ≈ 13.8`) to every
+`R_k`, so the high modes are **gently** rolled off rather than annihilated — the edge
+mode keeps ≈0.25–0.8× the DC variance. `R` is normalized so `max(R)=1`; absolute
+scale is absorbed by the global regularizer. This is intentionally **scale-dependent**
+(the millimetre scale is physical) — that is the GBF design.
+
+> **Why not a dimensionless `λ_ref` normalization?** An earlier draft normalized by
+> `λ_ref = λ_{K+1}` to be unit-independent. Validation (Level 1 below) showed this
+> drives the highest *retained* mode's variance to ~1e−7 — it deletes the modes that
+> localize, giving ~2× worse localization than dSPM. GBF's raw millimetre scaling
+> avoids this. **Lesson: reproduce GBF's scaling literally; do not re-derive it.**
 
 **Prior options:** `log` (default) · `flat` (`R = I`) · `power` (`λ^{−α}`, legacy).
 The retired **harmonic** behavior = `flat` prior **with regularization disabled**
