@@ -11,17 +11,19 @@ if ~brainstorm('status')
     brainstorm nogui
 end
 
-% --- Resolve a usable data file by scanning all studies in the protocol ---
+% --- Resolve a usable study by scanning all studies in the protocol ---
 sProtocol = bst_get('ProtocolStudies');
 if isempty(sProtocol) || ~isfield(sProtocol, 'Study') || isempty(sProtocol.Study)
     disp('SKIP: no protocol loaded.');
     return;
 end
-DataFile = '';
+% Find a study with surface head model + eigenmodes + noise cov + a data file
+found = [];
 for iS = 1:numel(sProtocol.Study)
     s = sProtocol.Study(iS);
     if ~isfield(s,'iHeadModel') || isempty(s.iHeadModel) || (s.iHeadModel < 1) ...
-            || (length(s.HeadModel) < s.iHeadModel) || ~isfield(s,'Data') || isempty(s.Data)
+            || (length(s.HeadModel) < s.iHeadModel) || ~isfield(s,'Data') || isempty(s.Data) ...
+            || ~isfield(s,'NoiseCov') || isempty(s.NoiseCov) || isempty(s.NoiseCov(1).FileName)
         continue;
     end
     try
@@ -29,27 +31,64 @@ for iS = 1:numel(sProtocol.Study)
         if strcmpi(hm.HeadModelType, 'surface')
             [~, isEig] = in_tess_eigenmodes(hm.SurfaceFile);
             if isEig
-                % Raw and imported both work: the viewer reads the current
-                % displayed window lazily (GetRecordingsValues).
-                DataFile = s.Data(1).FileName;
+                found = struct('hmFile', s.HeadModel(s.iHeadModel).FileName, ...
+                    'surf', hm.SurfaceFile, 'ncFile', s.NoiseCov(1).FileName, ...
+                    'dataFile', s.Data(1).FileName);
                 break;
             end
         end
     catch
-        % Unreadable head model / surface: skip this study.
     end
 end
-if isempty(DataFile)
-    disp('SKIP: no study with surface head model + eigenmodes + recordings.');
+if isempty(found)
+    disp('SKIP: no study with surface head model + eigenmodes + noise cov + data.');
     return;
 end
+[sStudyT, iStudyT] = bst_get('AnyFile', found.dataFile);
 
-% --- Open the viewer ---
-hFig = view_eigenmodes_timeseries(DataFile);
+% Build a temporary Harmonic node via the engine (mirrors what the GUI saves)
+HM = in_bst_headmodel(found.hmFile, 1);                 % constrained [nch x nVert]
+goodMask = all(isfinite(double(HM.Gain)), 2);
+[InvE, errE] = bst_inverse_eigenmodes(found.hmFile, found.surf, found.ncFile, ...
+    'Method', 'harmonic', 'nModes', 0, 'GoodChannel', goodMask);
+assert(isempty(errE), ['harmonic inverse failed: ' errE]);
+Kh   = InvE.nModes;
+[EigT, ~] = in_tess_eigenmodes(found.surf);
+PhiT = double(EigT.Vectors(:, 1:Kh));
+ResMat = db_template('resultsmat');
+ResMat.ImagingKernel = PhiT * InvE.ImagingKernel;       % [nVert x nGoodCh]
+ResMat.ImageGridAmp  = [];
+ResMat.nComponents   = 1;
+ResMat.Function      = 'eigenmode_harmonic';
+ResMat.EigenKernel   = InvE.ImagingKernel;              % M̃ [K x nGoodCh]
+ResMat.GoodChannel   = InvE.GoodChannel;
+ResMat.Whitener      = InvE.Whitener;
+ResMat.SurfaceFile   = found.surf;
+ResMat.HeadModelFile = found.hmFile;
+ResMat.HeadModelType = 'surface';
+ResMat.DataFile      = found.dataFile;
+ResMat.Comment       = 'TEST Eigenmode HARMONIC';
+ResMat.Time          = [];
+StudyDir   = bst_fileparts(file_fullpath(sStudyT.FileName));
+NodeFile   = bst_process('GetNewFilename', StudyDir, 'results_TESTharmonic');
+bst_save(NodeFile, ResMat, 'v6');
+db_add_data(iStudyT, NodeFile, ResMat);
+nodeRel = file_short(NodeFile);
+% Always clean up the temp node + figure, however the test exits
+cleanupNode = onCleanup(@() cleanupHarmonic(NodeFile, iStudyT)); %#ok<NASGU>
+
+% --- Open the viewer FROM the Harmonic node ---
+hFig = view_eigenmodes_timeseries(nodeRel);
 assert(~isempty(hFig) && ishandle(hFig), 'Viewer figure was not created.');
 cache = getappdata(hFig, 'EigenTimeSeries');
 assert(~isempty(cache) && isfield(cache, 'Theta'), 'Figure missing EigenTimeSeries cache.');
 assert(size(cache.Theta,2) == numel(cache.TimeVector), 'Theta time dimension must match TimeVector.');
+
+% Consistency: the cached Theta must equal M̃ * D for the current window
+iDSt = bst_memory('LoadDataFile', found.dataFile);
+Dwin = bst_memory('GetRecordingsValues', iDSt, cache.GoodChannel, 'UserTimeWindow', 0);
+assert(max(abs(cache.Theta(:) - reshape(InvE.ImagingKernel * Dwin, [], 1))) < 1e-6 * (1 + max(abs(cache.Theta(:)))), ...
+    'Cached Theta must equal EigenKernel * D(window).');
 
 % --- Snapshot panel state; restore (and close figure) on any exit path ---
 st0 = panel_eigenmodes('GetState');
@@ -107,5 +146,17 @@ function restorePanel(hFig, st0)
         panel_eigenmodes('SetBand', st0.Band(1), st0.Band(2));
     catch
         % Best-effort restore.
+    end
+end
+
+% Delete the temporary Harmonic node and reload the study (DB stays consistent).
+function cleanupHarmonic(NodeFile, iStudy)
+    try
+        if exist(file_fullpath(NodeFile), 'file')
+            file_delete(file_fullpath(NodeFile), 1);
+            db_reload_studies(iStudy);
+        end
+    catch
+        % Best-effort cleanup.
     end
 end

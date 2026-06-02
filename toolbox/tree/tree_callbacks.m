@@ -1836,6 +1836,19 @@ switch (lower(action))
                     if ismember(sStudy.Result(iResult).HeadModelType, {'surface'}) && ~isempty(sSubject) && ~isempty(sSubject.iCortex)
                         gui_component('MenuItem', jMenuActivations, [], 'View eigenspectrum', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
                     end
+                    % === EIGENMODE TIME SERIES (Harmonic nodes only) ===
+                    if (length(bstNodes) == 1) && ismember(sStudy.Result(iResult).HeadModelType, {'surface'})
+                        isHarm = false;
+                        try
+                            ResHdr = in_bst_results(filenameRelative, 0, 'Function');
+                            isHarm = ~isempty(ResHdr) && isfield(ResHdr, 'Function') && strcmpi(ResHdr.Function, 'eigenmode_harmonic');
+                        catch
+                            isHarm = false;
+                        end
+                        if isHarm
+                            gui_component('MenuItem', jMenuActivations, [], 'Eigenmode time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)bst_call(@view_eigenmodes_timeseries, filenameRelative));
+                        end
+                    end
                     % === DISPLAY ON MRI ===
                     % Find anatomy volumes (exclude atlases)
                     if ~isempty(sSubject.Anatomy)
