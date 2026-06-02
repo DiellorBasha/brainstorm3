@@ -755,8 +755,8 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
         % ===== EIGENMODE COMPOSITION ("Cortex surface harmonics") =====
         if isEigenSpace
             baseHM = OPTIONS.HeadModelMat;            % in-memory base (no file written)
-            [Eig, isEig] = in_tess_eigenmodes(baseHM.SurfaceFile);
-            if ~isEig
+            [Eig, isEigBase] = in_tess_eigenmodes(baseHM.SurfaceFile);
+            if ~isEigBase
                 errMessage = 'No eigenmodes on the cortex surface. Compute eigenmodes first.';
                 continue;
             end
@@ -765,7 +765,7 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
                 nModesReq = sMethod.nModes;
             end
             CompHM = bst_eigenmode_leadfield(baseHM, Eig, 'nModes', nModesReq);
-            CompHM.Comment = OPTIONS.Comment;         % already "<base> | harmonic" (set by UpdateComment)
+            CompHM.Comment = OPTIONS.Comment;         % from sMethod.Comment (GUI dialog text or caller-supplied), e.g. "<base> | harmonic"
             CompHM = bst_history('add', CompHM, 'eigenmode_leadfield', ...
                 sprintf('Eigenmode leadfield (%d modes) composed in Compute head model', CompHM.nModes));
             % Save only the harmonic node
@@ -786,7 +786,7 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
             sStudy.iHeadModel = iHeadModel;
             bst_set('Study', iStudy, sStudy);
             panel_protocols('UpdateNode', 'Study', iStudy);
-            OutputFiles{end+1} = file_short(OutputFile);
+            OutputFiles{end+1} = OutputFile;
             continue;     % skip the normal base-node save block
         end
 
