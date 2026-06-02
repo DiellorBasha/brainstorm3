@@ -22,7 +22,17 @@ for iS = 1:numel(sStudies.Study)
     if isfield(hm,'isEigenmode') && hm.isEigenmode==1 ...
             && isfield(s,'NoiseCov') && ~isempty(s.NoiseCov) && ~isempty(s.NoiseCov(1).FileName) ...
             && ~isempty(s.Data)
-        iStudyTarget = iS; iDataFile = 1; break;
+        % Need an IMPORTED (non-raw) recording: the coefficients matrix node is
+        % only produced for imported data, not raw links.
+        iImp = [];
+        for kD = 1:numel(s.Data)
+            if ~isfield(s.Data(kD),'DataType') || ~strcmpi(s.Data(kD).DataType, 'raw')
+                iImp = kD; break;
+            end
+        end
+        if ~isempty(iImp)
+            iStudyTarget = iS; iDataFile = iImp; break;
+        end
     end
 end
 if isempty(iStudyTarget)
