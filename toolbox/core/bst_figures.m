@@ -987,11 +987,6 @@ function FireCurrentTimeChanged(ForceTime)
                 case 'Video'
                     figure_video('CurrentTimeChangedCallback', sFig.hFigure);
             end
-            % Eigenmode time series: re-read recordings when the displayed window
-            % changes (raw page scroll). Runs in addition to the cursor update above.
-            if ~isempty(getappdata(sFig.hFigure, 'EigenTimeSeries'))
-                view_eigenmodes_timeseries('CurrentTimeChangedCallback', sFig.hFigure, iDS);
-            end
         end
     end
 end
@@ -1013,14 +1008,6 @@ function FireModesChanged() %#ok<DEFNU>
         for iFig = 1:length(GlobalData.DataSet(iDS).Figure)
             sFig = GlobalData.DataSet(iDS).Figure(iFig);
             if strcmpi(get(sFig.hFigure, 'Visible'), 'off')
-                continue;
-            end
-            % Eigenmode time series client (not a 3D figure): re-select band rows.
-            etsInfo = getappdata(sFig.hFigure, 'EigenTimeSeries');
-            if ~isempty(etsInfo)
-                if file_compare(etsInfo.SurfaceFile, SurfaceFile)
-                    view_eigenmodes_timeseries('ModesChangedCallback', sFig.hFigure);
-                end
                 continue;
             end
             if ~strcmpi(sFig.Id.Type, '3DViz')
@@ -1924,12 +1911,7 @@ function ReloadFigures(FigureTypes, isFastUpdate, isResetAxes)
                         end
                     end
                     % Reload
-                    if ~isempty(getappdata(Figure.hFigure, 'EigenTimeSeries'))
-                        % Eigenmode time series: re-read the current window (raw page
-                        % change) and replot cached coefficients; never
-                        % view_matrix/view_scouts on the raw DataFile.
-                        view_eigenmodes_timeseries('ReloadCallback', Figure.hFigure, iDS);
-                    elseif ~isempty(StatInfo)
+                    if ~isempty(StatInfo)
                         view_statcluster(StatInfo.StatFile, StatInfo.DisplayMode, [], Figure.hFigure);
                     elseif ~isempty(ResultsFiles)
                         view_scouts(ResultsFiles, 'SelectedScouts', Figure.hFigure);
