@@ -16,6 +16,11 @@ function h = bst_eigenmodes_filter_gain(lambdas, FilterType, varargin)
 %     (exp(-t*lambda)), 'inverse_heat' (exp(+t*lambda) clamped at MaxGain),
 %     'tikhonov' (1/(1+beta*lambda)), 'custom' (user TransferFn handle).
 %
+%     The analytic lambda-kernels ('heat', 'inverse_heat', 'tikhonov') delegate
+%     to the eigfilter library via bst_eigfilter_kernel / bst_eigfilter_evaluate;
+%     the index masks ('lowpass'/'highpass'/'bandpass') and 'custom' are computed
+%     in place here.
+%
 % INPUTS:
 %     lambdas    : [K x 1] eigenvalues (K = number of modes).
 %     FilterType : one of the types above.
@@ -31,7 +36,8 @@ function h = bst_eigenmodes_filter_gain(lambdas, FilterType, varargin)
 % OUTPUTS:
 %     h : [K x 1] gain vector.
 %
-% SEE ALSO: bst_eigenmodes_filter, process_eigenmodes_coeffsfilter
+% SEE ALSO: bst_eigenmodes_filter, process_eigenmodes_coeffsfilter,
+%           bst_eigfilter_kernel, bst_eigfilter_evaluate
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -91,17 +97,20 @@ switch lower(FilterType)
         if DiffusionTime <= 0
             error('DiffusionTime must be positive (got %g).', DiffusionTime);
         end
-        h = exp(-DiffusionTime * lambdas);
+        g = bst_eigfilter_kernel('heat', struct('t', DiffusionTime));
+        h = bst_eigfilter_evaluate(g, lambdas);
     case 'inverse_heat'
         if DiffusionTime <= 0
             error('DiffusionTime must be positive (got %g).', DiffusionTime);
         end
-        h = min(exp(DiffusionTime * lambdas), MaxGain);
+        g = bst_eigfilter_kernel('inverse_heat', struct('t', DiffusionTime, 'maxgain', MaxGain));
+        h = bst_eigfilter_evaluate(g, lambdas);
     case 'tikhonov'
         if RegBeta < 0
             error('RegBeta must be non-negative (got %g).', RegBeta);
         end
-        h = 1 ./ (1 + RegBeta * lambdas);
+        g = bst_eigfilter_kernel('tikhonov', struct('beta', RegBeta));
+        h = bst_eigfilter_evaluate(g, lambdas);
     case 'custom'
         if isempty(TransferFn) || ~isa(TransferFn, 'function_handle')
             error('Custom filter requires a TransferFn option (function handle).');
