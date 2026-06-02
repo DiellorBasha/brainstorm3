@@ -146,28 +146,66 @@ function Shape_Callback(shape)
 end
 
 
+%% ===== PURE: panel context from front-figure facts =====
+function c = ClassifyContext(facts) %#ok<DEFNU>
+    c = struct('kind','none','selectEnabled',false,'activeEnabled',false);
+    if facts.isEigenView
+        c.kind='view';   c.selectEnabled=true;  c.activeEnabled=false;
+    elseif facts.hasSourceModes
+        c.kind='source'; c.selectEnabled=true;  c.activeEnabled=true;
+    end
+end
+
+
 %% ===== UPDATE PANEL: populate/enable from the active figure's surface =====
 function UpdatePanel(hFig) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', 'EigenModes');
-    if isempty(ctrl)
-        return;
+    if isempty(ctrl), return; end
+    if (nargin < 1) || isempty(hFig) || ~ishandle(hFig)
+        hFig = bst_figures('GetCurrentFigure', '3D');
     end
-    SurfaceFile = GetFigureSurfaceWithModes(hFig);
-    isEligible = ~isempty(SurfaceFile);
-    SetPanelEnabled(ctrl, isEligible);
-    if ~isEligible
-        ctrl.jLabelReadout.setText('no eigenmodes');
+    isEigenView = ~isempty(hFig) && ishandle(hFig) && ~isempty(getappdata(hFig, 'EigenView'));
+    SurfaceFile = '';
+    if isEigenView
+        ev = getappdata(hFig, 'EigenView'); SurfaceFile = ev.SurfaceFile;
+    elseif ~isempty(hFig) && ishandle(hFig)
+        SurfaceFile = GetFigureSurfaceWithModes(hFig);
+    end
+    facts = struct('isEigenView', isEigenView, 'hasSourceModes', ~isEigenView && ~isempty(SurfaceFile));
+    c = ClassifyContext(facts);
+    % Selection controls + the Active toggle, gated by context
+    SetSelectEnabled(ctrl, c.selectEnabled);
+    ctrl.jCheckActive.setEnabled(c.activeEnabled);
+    ctrl.jCheckActive.setVisible(c.activeEnabled);
+    if ~strcmp(c.kind, 'source')
+        SetActive(0);                          % no stale filtering off-source
+    end
+    if strcmp(c.kind, 'none')
+        ctrl.jLabelReadout.setText('no eigenmode view');
         return;
     end
     [Eig, ~] = in_tess_eigenmodes(SurfaceFile);
-    K = Eig.nModes;
-    % (Re)initialise state if the surface changed
+    K = double(max(Eig.CompRank));
     st = GetState();
     if ~file_compare(st.SurfaceFile, SurfaceFile) || (st.nModes ~= K)
         ResetState(SurfaceFile, K);
+        if isEigenView
+            SetWindowShape('single'); SetCurrentMode(1);
+        end
     end
-    ctrl.jSliderLo.setMaximum(K);  ctrl.jSliderHi.setMaximum(K);
+    ctrl.jSliderLo.setMaximum(K); ctrl.jSliderHi.setMaximum(K);
     RefreshControls();
+end
+
+
+%% ===== helpers =====
+function SetSelectEnabled(ctrl, isOn)
+    sel = {'jSliderLo','jSliderHi','jLabelBand','jRadioSingle','jRadioBox','jRadioTaper','jRadioGain'};
+    for i = 1:numel(sel)
+        if isfield(ctrl, sel{i}) && isa(ctrl.(sel{i}), 'javax.swing.JComponent')
+            ctrl.(sel{i}).setEnabled(logical(isOn));
+        end
+    end
 end
 
 
@@ -198,16 +236,6 @@ end
 
 
 %% ===== helpers =====
-function SetPanelEnabled(ctrl, isOn)
-    fn = fieldnames(ctrl);
-    for i = 1:numel(fn)
-        c = ctrl.(fn{i});
-        if isa(c, 'javax.swing.JComponent')
-            c.setEnabled(logical(isOn));
-        end
-    end
-end
-
 function SurfaceFile = GetFigureSurfaceWithModes(hFig)
     SurfaceFile = '';
     if isempty(hFig) || ~ishandle(hFig)
@@ -323,7 +351,11 @@ end
 function SetActive(isActive) %#ok<DEFNU>
     global GlobalData;
     GetState();
-    GlobalData.UserModes.isActive = logical(isActive);
+    isActive = logical(isActive);
+    if isActive == GlobalData.UserModes.isActive
+        return;                      % no change -> no broadcast
+    end
+    GlobalData.UserModes.isActive = isActive;
     NotifyChanged();
 end
 
@@ -332,6 +364,12 @@ end
 function W = GetWeights() %#ok<DEFNU>
     st = GetState();
     W = st.Weights;
+end
+
+%% ===== STATE: read the current center mode index =====
+function k = GetCurrentMode() %#ok<DEFNU>
+    st = GetState();
+    k = st.iCurrentMode;
 end
 
 %% ===== QUERY: is the lever actively filtering this surface? =====
@@ -417,10 +455,12 @@ function uF = ApplyToColumn(SurfaceFile, u) %#ok<DEFNU>
     if (size(u,1) ~= size(Eig.Vectors,1)) || (size(u,2) ~= 1)
         return;
     end
+    CompRank = Eig.CompRank(:);
+    Kpaired  = max(CompRank);
     W = GlobalData.UserModes.Weights;
-    if isempty(W) || (numel(W) ~= Eig.nModes)
+    if isempty(W) || (numel(W) ~= Kpaired)
         return;
     end
-    % Reconstruct via the core spectral filter (custom transfer = our weights)
-    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) W(:));
+    wRaw = W(CompRank);                         % expand paired -> raw columns
+    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) wRaw(:));
 end

@@ -887,6 +887,9 @@ function DeleteFigure(hFigure, varargin)
     if ishandle(hFigure) && isappdata(hFigure, 'Surface')
         % Signals the "Surfaces" and "Scouts" panel that a figure was closed
         panel_surface('UpdatePanel');
+        if gui_brainstorm('isTabVisible', 'EigenModes')
+            panel_eigenmodes('UpdatePanel');
+        end
         % Remove scouts references
         panel_scout('RemoveScoutsFromFigure', hFigure);
         % Reset "Coordinates" panel
@@ -1018,11 +1021,13 @@ function FireModesChanged() %#ok<DEFNU>
             if ~isMatch
                 continue;
             end
-            % UpdateSurfaceData recomputes the displayed column (filtered via
-            % panel_eigenmodes('ApplyToColumn') once Task 6 wires it in) and
-            % repaints it: it calls UpdateSurfaceColormap internally, which
-            % triggers UpdateSurfaceColor per data surface (same as FireCurrentTimeChanged).
-            panel_surface('UpdateSurfaceData', sFig.hFigure);
+            % Eigenmode-view figures own their own synthesis path; all others
+            % go through the standard filter path.
+            if ~isempty(getappdata(sFig.hFigure, 'EigenView'))
+                view_eigenmodes('ModesChangedCallback', sFig.hFigure);
+            else
+                panel_surface('UpdateSurfaceData', sFig.hFigure);
+            end
         end
     end
 end

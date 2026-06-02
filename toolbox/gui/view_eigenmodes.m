@@ -3,10 +3,13 @@ function varargout = view_eigenmodes(varargin)
 %
 % USAGE:  hFig = view_eigenmodes(SurfaceFile)
 %         [Grid, K, Info] = view_eigenmodes('BuildPairedGrid', Eigenmodes)
+%         col  = view_eigenmodes('SynthColumn', PairedGrid, W)
+%         view_eigenmodes('ModesChangedCallback', hFig)
 %
-% The viewer displays each component's rank-k mode together (mode k shows both
-% hemispheres) as a registered Brainstorm Source result, so the standard colormap
-% UI applies; Left/Right arrows step modes.
+% The viewer initialises the eigenmode lever (panel_eigenmodes) for the
+% surface's K_paired modes and registers a single-frame Source result whose
+% ImageGridAmp is re-synthesised live whenever the lever changes via
+% bst_figures('FireModesChanged') -> ModesChangedCallback.
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -28,7 +31,7 @@ function varargout = view_eigenmodes(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'BuildPairedGrid')
+if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'BuildPairedGrid','SynthColumn','ModesChangedCallback'}))
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -59,6 +62,16 @@ function [Grid, K, Info] = BuildPairedGrid(Eig)
 end
 
 
+%% ===== PURE: synthesized display column = PairedGrid * W(:) =====
+function col = SynthColumn(PairedGrid, W) %#ok<DEFNU>
+    W = W(:);
+    if (numel(W) ~= size(PairedGrid,2))
+        error('view_eigenmodes:SynthColumn: weight length (%d) must equal K_paired (%d).', numel(W), size(PairedGrid,2));
+    end
+    col = PairedGrid * W;
+end
+
+
 %% ===== GUI: display the paired modes as a transient registered Source result =====
 function hFig = ViewFigure(SurfaceFile, ~)
     hFig = [];
@@ -77,20 +90,27 @@ function hFig = ViewFigure(SurfaceFile, ~)
         return;
     end
     % Build paired display grid (mode k shows every component's rank-k mode)
-    [Grid, K, Info] = BuildPairedGrid(Eig);
+    [Grid, Kp, Info] = BuildPairedGrid(Eig);
 
-    % Build a Source result (modes as the "time" axis)
+    % Initialise the lever for this surface and select mode 1
+    panel_eigenmodes('ResetState', SurfaceFile, Kp);
+    panel_eigenmodes('SetWindowShape', 'single');
+    panel_eigenmodes('SetCurrentMode', 1);
+    W0 = panel_eigenmodes('GetWeights');
+
+    % Build a single-frame Source result (two-sample static — valid for source display)
+    col0 = SynthColumn(Grid, W0);
     ResMat = db_template('resultsmat');
-    ResMat.ImageGridAmp  = Grid;
+    ResMat.ImageGridAmp  = [col0 col0];     % 2 samples => valid static result
     ResMat.ImagingKernel = [];
     ResMat.nComponents   = 1;
-    ResMat.Time          = 1:K;
+    ResMat.Time          = [0 1];
     ResMat.SurfaceFile   = SurfaceFile;
     ResMat.HeadModelType = 'surface';
     ResMat.nAvg          = 1;
     ResMat.Leff          = 1;
     ResMat.ColormapType  = 'stat2';   % diverging, non-absolute (signed +/- lobes) without touching 'source'
-    ResMat.Comment       = sprintf('Eigenmode viewer (%d modes/component, %d component(s))', K, Eig.nComponents);
+    ResMat.Comment       = sprintf('Eigenmode viewer (%d modes/component)', Kp);
     ResMat = bst_history('add', ResMat, 'eigenmodes_view', 'Transient eigenmode viewer result');
 
     % Save to the intra study and register
@@ -114,54 +134,42 @@ function hFig = ViewFigure(SurfaceFile, ~)
     end
     set(hFig, 'Name', ['Eigenmodes: ' SurfaceFile]);
 
-    % Current mode (closure state), starting at mode 1
-    curMode = 1;
-    % Bottom-left legend
+    % Tag the figure so FireModesChanged can route to ModesChangedCallback
+    setappdata(hFig, 'EigenView', struct('SurfaceFile', SurfaceFile, 'PairedGrid', Grid, 'Info', Info, 'ResultsFile', file_short(OutputFile)));
+
+    % Bottom-left legend (handle stored in EigenView so ModesChangedCallback can update it)
     hLabel = uicontrol('Style', 'text', 'String', '...', 'Units', 'Pixels', ...
         'Position', [6 0 560 20], 'HorizontalAlignment', 'left', ...
         'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
         'ForegroundColor', [.9 .9 .9], 'BackgroundColor', [0 0 0], 'Parent', hFig);
-    % Custom keyboard stepping (drives the global time = mode index) + legend
+    ev = getappdata(hFig, 'EigenView'); ev.LabelHandle = hLabel; setappdata(hFig, 'EigenView', ev);
+    % Custom keyboard stepping (drives the lever)
     KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
     set(hFig, 'KeyPressFcn', @KeyPress_Callback);
     % Auto-remove the transient result when the figure is destroyed
     set(hFig, 'DeleteFcn', @(h,e) CleanupResult());
-    % Initial position + legend
-    SetMode(1);
+    % Show + populate the panel
+    gui_brainstorm('ShowToolTab', 'EigenModes');
+    panel_eigenmodes('UpdatePanel', hFig);
+    % Initial repaint + label (driven by ModesChangedCallback so it stays consistent)
+    ModesChangedCallback(hFig);
 
-    % ===== NESTED: move to mode k and refresh the legend =====
-    function SetMode(k)
-        curMode = min(max(round(k), 1), K);
-        panel_time('SetCurrentTime', curMode);   % Time vector is 1:K, so time==mode index
-        % Per-component eigenvalue(s) for this mode (rank == curMode)
-        lv = Info.Values(Info.CompRank == curMode);
-        if numel(lv) >= 2
-            lamStr = sprintf('lambda = [%.4g, %.4g]', lv(1), lv(2));
-        elseif ~isempty(lv)
-            lamStr = sprintf('lambda = %.4g', lv(1));
-        else
-            lamStr = 'lambda = n/a';
-        end
-        set(hLabel, 'String', sprintf('Mode %d / %d     %s', curMode, K, lamStr));
-    end
-
-    % ===== NESTED: keyboard navigation =====
+    % ===== NESTED: keyboard navigation via the lever =====
     function KeyPress_Callback(h, keyEvent)
+        cur = 1;
+        try
+            cur = panel_eigenmodes('GetCurrentMode');
+        catch
+        end
         switch (keyEvent.Key)
-            case 'leftarrow',  SetMode(curMode - 1);
-            case 'rightarrow', SetMode(curMode + 1);
-            case 'pageup',     SetMode(curMode + 10);
-            case 'pagedown',   SetMode(curMode - 10);
+            case 'leftarrow',  panel_eigenmodes('SetCurrentMode', cur - 1);
+            case 'rightarrow', panel_eigenmodes('SetCurrentMode', cur + 1);
+            case 'pageup',     panel_eigenmodes('SetCurrentMode', cur + 10);
+            case 'pagedown',   panel_eigenmodes('SetCurrentMode', cur - 10);
             case 'h'
-                java_dialog('msgbox', ...
-                    ['Eigenmode viewer shortcuts:' 10 10 ...
-                     '   Left / Right arrow  :  previous / next mode' 10 ...
-                     '   Page Up / Page Down :  +/- 10 modes' 10 ...
-                     '   H                   :  this help'], 'Eigenmode viewer');
+                java_dialog('msgbox', ['Eigenmode viewer:' 10 '  Left/Right: step mode' 10 '  PgUp/PgDn: +/-10' 10 '  Use the "Spatial scale (eigenmodes)" panel to superpose a range.'], 'Eigenmode viewer');
             otherwise
-                if ~isempty(KeyPressFcn_bak)
-                    KeyPressFcn_bak(h, keyEvent);
-                end
+                if ~isempty(KeyPressFcn_bak), KeyPressFcn_bak(h, keyEvent); end
         end
     end
 
@@ -173,5 +181,40 @@ function hFig = ViewFigure(SurfaceFile, ~)
         catch
             % Non-fatal: leave the node if cleanup fails (user can delete it)
         end
+    end
+end
+
+
+%% ===== Re-synthesize the viewer's displayed column on a lever change =====
+function ModesChangedCallback(hFig) %#ok<DEFNU>
+    global GlobalData;
+    ev = getappdata(hFig, 'EigenView');
+    if isempty(ev), return; end
+    W = panel_eigenmodes('GetWeights');
+    if isempty(W) || (numel(W) ~= size(ev.PairedGrid,2)), return; end
+    col = SynthColumn(ev.PairedGrid, W);
+    [iDS, iResult] = bst_memory('GetDataSetResult', ev.ResultsFile);
+    if isempty(iDS), return; end
+    GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp = [col col];
+    panel_surface('UpdateSurfaceData', hFig);
+    % Update bottom-left legend
+    if isfield(ev, 'LabelHandle') && ishandle(ev.LabelHandle)
+        K = size(ev.PairedGrid, 2);
+        nKeep = nnz(W > 1e-6);
+        lo = find(W > 1e-6, 1, 'first'); hi = find(W > 1e-6, 1, 'last');
+        cur = 1;
+        try, cur = panel_eigenmodes('GetCurrentMode'); catch, end
+        % Representative eigenvalue for the current paired rank
+        lamStr = '';
+        if isfield(ev, 'Info') && isfield(ev.Info, 'Values') && isfield(ev.Info, 'CompRank')
+            ik = find(ev.Info.CompRank(:) == cur, 1);
+            if ~isempty(ik), lamStr = sprintf('    lambda = %.4g', ev.Info.Values(ik)); end
+        end
+        if (nKeep <= 1)
+            str = sprintf('Mode %d / %d%s', cur, K, lamStr);
+        else
+            str = sprintf('Modes %d-%d / %d   (%d modes)', lo, hi, K, nKeep);
+        end
+        set(ev.LabelHandle, 'String', str);
     end
 end
