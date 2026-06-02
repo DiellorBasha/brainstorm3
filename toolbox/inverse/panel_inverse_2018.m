@@ -140,6 +140,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         jRadioMethodMn  = gui_component('radio', jPanelMethod, [],   'Minimum norm imaging', jGroupMethod, '', @Method_Callback, []);
         jRadioMethodBf  = gui_component('radio', jPanelMethod, 'br', 'LCMV beamformer',      jGroupMethod, '', @Method_Callback, []);
         jRadioMethodDip = gui_component('radio', jPanelMethod, 'br', 'Dipole modeling',      jGroupMethod, '', @Method_Callback, []);
+        jRadioMethodHarm = gui_component('radio', jPanelMethod, 'br', 'Harmonic (eigenmodes)', jGroupMethod, '', @Method_Callback, []);
         if ~isProcess
             jRadioMethodMem = gui_component('radio', jPanelMethod, 'br', 'MEM: Max entropy on the mean', jGroupMethod, '', @Method_Callback, []);
         else
@@ -150,6 +151,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
             case 'minnorm',  jRadioMethodMn.setSelected(1);
             case 'gls',      jRadioMethodDip.setSelected(1);
             case 'lcmv',     jRadioMethodBf.setSelected(1);
+            case 'harmonic', jRadioMethodHarm.setSelected(1);
             case 'mem',      disp('BST> Warning: Running MEM from a script is not handled yet.');
         end
         % Disable Beamformer if no data covariance
@@ -165,7 +167,11 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         if ~isempty(jRadioMethodMem) && ~isProcess && (~strcmpi(HeadModelType, 'surface') || isShared)
             jRadioMethodMem.setEnabled(0);
         end
-        
+        % Harmonic (eigenmode) inverse requires a surface head model
+        if ~isProcess && ~strcmpi(HeadModelType, 'surface')
+            jRadioMethodHarm.setEnabled(0);
+        end
+
     c.gridy = 1;
     jPanelLeft.add(jPanelMethod, c);
     
@@ -374,6 +380,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
             'jRadioMethodMn',  jRadioMethodMn, ...
             'jRadioMethodBf',  jRadioMethodBf, ...
             'jRadioMethodDip', jRadioMethodDip, ...
+            'jRadioMethodHarm', jRadioMethodHarm, ...
             ... % ==== PANEL: MEASURE ====
             'jRadioMnCurrent',   jRadioMnCurrent, ...
             'jRadioMnDspm',      jRadioMnDspm, ...
@@ -490,19 +497,20 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         end
         % Get the main categories of options
         isLinear = isempty(jRadioMethodMem) || ~jRadioMethodMem.isSelected();
+        isHarm = ~isempty(jRadioMethodHarm) && jRadioMethodHarm.isSelected();
         % Expert mode / Normal mode
         if isForced
             ExpertMode = bst_get('ExpertMode');
             % Left panels
             jPanelModel.setVisible(isLinear);
-            jPanelMeasureMN.setVisible(isLinear && jRadioMethodMn.isSelected());
-            jPanelMeasureBf.setVisible(isLinear && jRadioMethodBf.isSelected());
+            jPanelMeasureMN.setVisible(isLinear && jRadioMethodMn.isSelected() && ~isHarm);
+            jPanelMeasureBf.setVisible(isLinear && jRadioMethodBf.isSelected() && ~isHarm);
             jPanelMemInfo.setVisible(~isLinear);
             % Right panels (expert)
             jPanelRight.setVisible(ExpertMode);
             jPanelNoiseCov.setVisible(isLinear);
-            jPanelSnr.setVisible(isLinear && ~jRadioMethodDip.isSelected() && ~jRadioMethodBf.isSelected());
-            jPanelDepth.setVisible(isLinear && jRadioMethodMn.isSelected() && ~jRadioMnSloreta.isSelected());
+            jPanelSnr.setVisible(isLinear && ~jRadioMethodDip.isSelected() && ~jRadioMethodBf.isSelected() && ~isHarm);
+            jPanelDepth.setVisible(isLinear && jRadioMethodMn.isSelected() && ~jRadioMnSloreta.isSelected() && ~isHarm);
             jPanelOutput.setVisible(isLinear && ~isProcess);
             % Update expert button 
             if ExpertMode
@@ -743,6 +751,9 @@ function [Method, Measure] = GetSelectedMethod(ctrl)
         if ctrl.jRadioMethodBfNai.isSelected()
             Measure = 'nai';
         end
+    elseif isfield(ctrl, 'jRadioMethodHarm') && ~isempty(ctrl.jRadioMethodHarm) && ctrl.jRadioMethodHarm.isSelected()
+        Method  = 'harmonic';
+        Measure = 'amplitude';
     end
 end
 
@@ -764,6 +775,8 @@ function Comment = GetMethodComment(Method, Measure)
             end
         case 'mem'
             Comment = 'MEM';
+        case 'harmonic'
+            Comment = 'Harmonic';
     end
 end
 
