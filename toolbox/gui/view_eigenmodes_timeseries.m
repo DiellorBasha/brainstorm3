@@ -38,6 +38,119 @@ end
 end
 
 
+%% ===== GUI: build the eigenmode coefficient time series figure =====
+function hFig = ViewFigure(DataFile)
+    hFig = [];
+    if isempty(DataFile)
+        bst_error('No data file provided.', 'Eigenmode time series', 0);
+        return;
+    end
+    % ----- Study + head model + surface -----
+    [sStudy, iStudy] = bst_get('AnyFile', DataFile); %#ok<ASGLU>
+    if isempty(sStudy) || ~isfield(sStudy, 'iHeadModel') || isempty(sStudy.iHeadModel) || (sStudy.iHeadModel < 1)
+        bst_error('No head model available for this study.', 'Eigenmode time series', 0);
+        return;
+    end
+    HeadModelFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
+    HeadModelMat  = in_bst_headmodel(HeadModelFile, 0, 'HeadModelType', 'SurfaceFile');
+    if ~strcmpi(HeadModelMat.HeadModelType, 'surface')
+        bst_error('Eigenmode transform requires a surface head model.', 'Eigenmode time series', 0);
+        return;
+    end
+    SurfaceFile = HeadModelMat.SurfaceFile;
+
+    % ----- Eigenmodes -----
+    [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
+    if ~isComputed
+        bst_error(['No eigenmodes on this surface.' 10 'Run "Compute eigenmodes" first.'], 'Eigenmode time series', 0);
+        return;
+    end
+
+    % ----- Constrained gain (fixed orientation: [nch x nVert]) -----
+    HM   = in_bst_headmodel(HeadModelFile, 1);
+    Gain = double(HM.Gain);
+    if size(Gain, 2) ~= size(Eig.Vectors, 1)
+        bst_error(sprintf(['Head model has %d vertices but eigenmodes have %d.' 10 ...
+            'Recompute the head model.'], size(Gain,2), size(Eig.Vectors,1)), 'Eigenmode time series', 0);
+        return;
+    end
+
+    % ----- Channels + recordings -----
+    ChannelFile = bst_get('ChannelFileForStudy', sStudy.FileName);
+    if isempty(ChannelFile)
+        bst_error('No channel file found.', 'Eigenmode time series', 0);
+        return;
+    end
+    ChannelMat = in_bst_channel(ChannelFile);
+    DataMat    = in_bst_data(DataFile);
+    if isstruct(DataMat.F)
+        bst_error('Eigenmode time series requires imported (non-raw) recordings.', 'Eigenmode time series', 0);
+        return;
+    end
+    if isfield(DataMat, 'ChannelFlag') && ~isempty(DataMat.ChannelFlag)
+        ChannelFlag = DataMat.ChannelFlag;
+    else
+        ChannelFlag = ones(length(ChannelMat.Channel), 1);
+    end
+    iCh = good_channel(ChannelMat.Channel, ChannelFlag, 'MEG');
+    if isempty(iCh)
+        iCh = good_channel(ChannelMat.Channel, ChannelFlag, 'EEG');
+    end
+    if isempty(iCh)
+        bst_error('No good MEG or EEG channels found.', 'Eigenmode time series', 0);
+        return;
+    end
+
+    % ----- Transform: full coefficient matrix Theta [K_raw x nTime] -----
+    nCh   = numel(iCh);
+    K_raw = min(nCh, double(Eig.nModes));
+    Phi   = double(Eig.Vectors(:, 1:K_raw));
+    [Kernel, ~] = bst_eigenmodes_transform(Gain(iCh, :), Phi);   % [K_raw x nCh]
+    Theta = Kernel * double(DataMat.F(iCh, :));                  % [K_raw x nTime]
+
+    % ----- Cache everything the live refresh needs -----
+    cache = struct( ...
+        'SurfaceFile', SurfaceFile, ...
+        'DataFile',    DataFile, ...
+        'Theta',       Theta, ...
+        'Component',   Eig.Component(1:K_raw), ...
+        'CompRank',    Eig.CompRank(1:K_raw), ...
+        'TimeVector',  DataMat.Time);
+
+    % ----- Ensure the lever is initialized for this surface (paired ranks) -----
+    Kp = double(max(cache.CompRank));
+    st = panel_eigenmodes('GetState');
+    if ~file_compare(st.SurfaceFile, SurfaceFile) || (st.nModes ~= Kp)
+        panel_eigenmodes('ResetState', SurfaceFile, Kp);
+    end
+    band = panel_eigenmodes('GetState');
+    band = band.Band;
+
+    % ----- First plot -----
+    [iRows, Labels, Hemi] = GetBandTraces(cache.Component, cache.CompRank, band(1), band(2));
+    if isempty(iRows)
+        bst_error('No eigenmodes in the selected band.', 'Eigenmode time series', 0);
+        return;
+    end
+    F      = cache.Theta(iRows, :);
+    colors = HemiColors(Hemi);
+    hFig = view_timeseries_matrix(DataFile, {F}, cache.TimeVector, '', {'Eigenmode coefficients'}, Labels, colors, []);
+    if isempty(hFig)
+        return;
+    end
+    set(hFig, 'Name', ['Eigenmode time series: ' SurfaceFile]);
+    setappdata(hFig, 'EigenTimeSeries', cache);
+
+    % ----- Show + sync the panel -----
+    gui_brainstorm('ShowToolTab', 'EigenModes');
+    try
+        panel_eigenmodes('RefreshControls');
+    catch
+        % Non-fatal: the panel still works, controls just won't pre-sync.
+    end
+end
+
+
 %% ===== PURE: band (paired-rank) -> raw-column traces =====
 % For each paired rank k in kLo:kHi, emit its left column(s) then right column(s).
 % Labels carry an L/R suffix only when the data has two components.
