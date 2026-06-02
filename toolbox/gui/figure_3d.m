@@ -1666,14 +1666,21 @@ function DisplayFigurePopup(hFig)
         end
         % === Eigenmode time series ===
         % Enabled when the study has a surface head model with computed eigenmodes.
-        if ~isempty(sStudy) && isfield(sStudy, 'iHeadModel') && ~isempty(sStudy.iHeadModel) && (sStudy.iHeadModel >= 1)
-            HmFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
-            HmMat  = in_bst_headmodel(HmFile, 0, 'HeadModelType', 'SurfaceFile');
-            if strcmpi(HmMat.HeadModelType, 'surface')
-                [~, isEig] = in_tess_eigenmodes(HmMat.SurfaceFile);
-                if isEig
-                    gui_component('MenuItem', jPopup, [], 'Eigenmode time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)bst_call(@view_eigenmodes_timeseries, DataFile));
+        % Wrapped in try/catch: a missing/corrupt head model or surface file must
+        % suppress this item silently, never break the whole popup.
+        if ~isempty(sStudy) && isfield(sStudy, 'iHeadModel') && ~isempty(sStudy.iHeadModel) ...
+                && (sStudy.iHeadModel >= 1) && (length(sStudy.HeadModel) >= sStudy.iHeadModel)
+            try
+                HmFile = sStudy.HeadModel(sStudy.iHeadModel).FileName;
+                HmMat  = in_bst_headmodel(HmFile, 0, 'HeadModelType', 'SurfaceFile');
+                if strcmpi(HmMat.HeadModelType, 'surface')
+                    [~, isEig] = in_tess_eigenmodes(HmMat.SurfaceFile);
+                    if isEig
+                        gui_component('MenuItem', jPopup, [], 'Eigenmode time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)bst_call(@view_eigenmodes_timeseries, DataFile));
+                    end
                 end
+            catch
+                % Non-fatal: skip the item if the head model / surface can't be read.
             end
         end
         % === VIEW SPECTRUM ===
