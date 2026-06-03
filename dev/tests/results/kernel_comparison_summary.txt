@@ -1,0 +1,7 @@
+Kernel comparison (TutorialAuditory, ico5)  sources=20484 channels=272
+SVD eff.rank99: MNEdepth=140  MNEnoDepth=146  Eigen=133
+no-depth vs Eigen: weight r=0.6721
+cos sim (noDepth vs Eigen): mean=0.6880 median=0.7637 min=-0.9522  (cos<0.9: 83.4%)
+norm ratio (Eigen/noDepth): median=1.6139
+resolution diagonal r=0.7710 ; PSF median noDepth=546 Eigen=2286
+row-norm CV: MNEdepth=0.399 MNEnoDepth=0.713
