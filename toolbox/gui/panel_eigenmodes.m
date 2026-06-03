@@ -206,6 +206,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jRadioSynth.setSelected(1);
     jLabelVtx = gui_component('Label', jPanelNew, 'br', 'Delta vertex:'); %#ok<NASGU>
     jTextVtx  = gui_component('Text', jPanelNew, '', '1', [], '', @(h,ev)Vertex_Callback());
+    jTogglePick = gui_component('Toggle', jPanelNew, '', 'Pick', [], 'Click the cortex to place the delta', @(h,ev)Pick_Callback());
 
     ctrl = struct('jPanelTop',      jPanelNew, ...
                   'jCheckActive',   jCheckActive, ...
@@ -228,7 +229,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                   'jReadoutP2',     jReadoutP2, ...
                   'jRadioSynth',    jRadioSynth, ...
                   'jRadioDelta',    jRadioDelta, ...
-                  'jTextVtx',       jTextVtx);
+                  'jTextVtx',       jTextVtx, ...
+                  'jTogglePick',    jTogglePick);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
@@ -363,6 +365,38 @@ function Vertex_Callback()
     if ~isnan(v); SetDeltaVertex(v); end
 end
 
+function Pick_Callback()
+    global GlobalData;
+    GetState();
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    if ctrl.jTogglePick.isSelected()
+        hFig = bst_figures('GetCurrentFigure', '3D');
+        if isempty(hFig) || ~ishandle(hFig); ctrl.jTogglePick.setSelected(0); return; end
+        setappdata(hFig, 'EigfilterPickBak', get(hFig, 'WindowButtonDownFcn'));
+        set(hFig, 'WindowButtonDownFcn', @(h,e) PickVertex(h));
+        GlobalData.UserModes.PickFig = hFig;        % remember which figure we hooked
+    else
+        % Restore the SAME figure we hooked (not whatever is current now)
+        hFig = [];
+        if isfield(GlobalData.UserModes, 'PickFig'); hFig = GlobalData.UserModes.PickFig; end
+        if ~isempty(hFig) && ishandle(hFig) && ~isempty(getappdata(hFig,'EigfilterPickBak'))
+            set(hFig, 'WindowButtonDownFcn', getappdata(hFig,'EigfilterPickBak'));
+        end
+        GlobalData.UserModes.PickFig = [];
+    end
+end
+
+function PickVertex(hFig)
+    st = GetState();
+    if isempty(st.CacheEig); return; end
+    % Use Brainstorm's ray/surface vertex picker (rejects MRI clicks with AcceptMri=0)
+    iv = panel_coordinates('SelectPoint', hFig, 0);
+    if isempty(iv); return; end
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    ctrl.jTextVtx.setText(num2str(iv));
+    SetDeltaVertex(iv);
+end
+
 
 %% ===== KERNEL HELPERS: param-slider read + relabel + response plot =====
 %% ===== PURE: slider bounds for a kernel param; ok=false if not scalar-adjustable =====
@@ -482,7 +516,7 @@ end
 %% ===== helpers =====
 function SetSelectEnabled(ctrl, isOn)
     sel = {'jSliderCenter','jTextWidth','jRadioBox','jRadioTaper','jRadioGauss', ...
-           'jRadioKernel','jComboKernel','jSliderP1','jSliderP2','jRadioSynth','jRadioDelta','jTextVtx'};
+           'jRadioKernel','jComboKernel','jSliderP1','jSliderP2','jRadioSynth','jRadioDelta','jTextVtx','jTogglePick'};
     for i = 1:numel(sel)
         if isfield(ctrl, sel{i}) && isa(ctrl.(sel{i}), 'javax.swing.JComponent')
             ctrl.(sel{i}).setEnabled(logical(isOn));
@@ -684,6 +718,9 @@ function SetWeightMode(mode) %#ok<DEFNU>
     global GlobalData;
     GetState();
     GlobalData.UserModes.WeightMode = lower(mode);
+    if ~strcmpi(mode, 'kernel')
+        view_eigfilter_response('close');   % no kernel response to show in window mode
+    end
     RecomputeWeights();
     NotifyChanged();
 end
@@ -708,11 +745,21 @@ function SetKernelParam(idx, value) %#ok<DEFNU>
     global GlobalData;
     GetState();
     fn = fieldnames(GlobalData.UserModes.KernelParams);
-    if idx <= numel(fn)
-        GlobalData.UserModes.KernelParams.(fn{idx}) = value;
-        RecomputeWeights();
-        NotifyChanged();
+    if idx > numel(fn); return; end
+    pNew = GlobalData.UserModes.KernelParams;
+    pNew.(fn{idx}) = value;
+    % Validate before committing: some kernels have cross-parameter constraints
+    % (e.g. dog requires t1 < t2). On violation, keep the prior valid parameters and
+    % snap the slider back instead of throwing an uncaught error.
+    try
+        bst_eigfilter_kernel(GlobalData.UserModes.KernelName, pNew);
+    catch
+        RefreshKernelControls();   % revert the slider to the last valid value (GUI only)
+        return;
     end
+    GlobalData.UserModes.KernelParams = pNew;
+    RecomputeWeights();
+    NotifyChanged();
 end
 
 %% ===== STATE: display mode for eigenmode-view ('synthesis' | 'delta') =====

@@ -69,5 +69,20 @@ mi = bst_eigfilter_kernel('info', 'ideal');
 [~, ~, oki] = panel_eigenmodes('ParamRange', mi.params.band);
 assert(~oki, 'ideal band (non-scalar default, no range field) must be flagged non-adjustable.');
 
+% --- dog t1<t2 constraint: a violating param must be swallowed, not thrown, and not committed ---
+GlobalData.UserModes.WeightMode = 'kernel';
+panel_eigenmodes('SetKernelName', 'dog');                 % defaults t1=0.01 < t2=0.04
+pdog = GlobalData.UserModes.KernelParams;
+threw = false;
+try
+    panel_eigenmodes('SetKernelParam', 1, pdog.t2 + 1);   % t1 > t2 -> invalid
+catch
+    threw = true;
+end
+assert(~threw, 'invalid dog t1>t2 must be swallowed, not thrown.');
+assert(GlobalData.UserModes.KernelParams.t1 == pdog.t1, 'invalid param must not be committed.');
+panel_eigenmodes('SetKernelParam', 1, pdog.t2/2);         % t1 < t2 -> valid
+assert(GlobalData.UserModes.KernelParams.t1 == pdog.t2/2, 'valid param must commit.');
+
 disp('ALL TESTS PASSED');
 end
