@@ -35,5 +35,31 @@ assert(isequal(size(ps),[nV 1]), 'point-spread must be [nVert x 1].');
 assert(all(isfinite(ps)), 'point-spread must be finite.');
 assert(abs(ps(3)) == max(abs(ps)), 'heat point-spread must peak at the impulse vertex.');
 
+% --- GetDisplayColumn: synthesis = PairedGrid*W; delta = point-spread ---
+% Set up panel state for the synthetic surface (no real DB needed: use a fake file).
+global GlobalData;
+panel_eigenmodes('ResetState', 'fake_surf.mat', m);
+GlobalData.UserModes.CacheSurfaceFile = 'fake_surf.mat';
+GlobalData.UserModes.CacheEig  = Eig;
+GlobalData.UserModes.CacheMass = speye(nV);
+GlobalData.UserModes.WeightMode = 'kernel';
+GlobalData.UserModes.KernelName = 'heat';
+GlobalData.UserModes.KernelParams = struct('t',0.05);
+panel_eigenmodes('RecomputeWeights');   % fills Weights + KernelFn
+
+PairedGrid = zeros(nV, m);
+for k = 1:m; PairedGrid(:,k) = sum(Eig.Vectors(:, Eig.CompRank==k), 2); end
+
+GlobalData.UserModes.DisplayMode = 'synthesis';
+colS = panel_eigenmodes('GetDisplayColumn', 'fake_surf.mat', PairedGrid);
+assert(isequal(size(colS),[nV 1]), 'synthesis column shape.');
+assert(max(abs(colS - PairedGrid*GlobalData.UserModes.Weights(:))) < 1e-12, 'synthesis = PairedGrid*W.');
+
+GlobalData.UserModes.DisplayMode = 'delta';
+GlobalData.UserModes.DeltaVertex = 6;   % RH vertex
+colD = panel_eigenmodes('GetDisplayColumn', 'fake_surf.mat', PairedGrid);
+assert(isequal(size(colD),[nV 1]) && all(isfinite(colD)), 'delta column shape/finite.');
+assert(abs(colD(6)) == max(abs(colD)), 'delta point-spread peaks at the impulse vertex.');
+
 disp('ALL TESTS PASSED');
 end

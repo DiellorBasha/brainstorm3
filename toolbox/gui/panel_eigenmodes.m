@@ -451,6 +451,9 @@ function ResetState(SurfaceFile, K) %#ok<DEFNU>
     GlobalData.UserModes.iCurrentMode = round(mean(GlobalData.UserModes.Band));
     GlobalData.UserModes.WindowShape  = 'box';
     GlobalData.UserModes.isActive     = 0;
+    GlobalData.UserModes.WeightMode   = 'window';     % fresh surface starts in window mode
+    GlobalData.UserModes.DisplayMode  = 'synthesis';  % (not stale kernel/delta from a prior surface)
+    GlobalData.UserModes.KernelFn     = [];
     RecomputeWeights();
 end
 
@@ -633,6 +636,35 @@ function uF = ApplyToColumn(SurfaceFile, u) %#ok<DEFNU>
     if isempty(W) || (numel(W) ~= Kpaired)
         return;
     end
-    wRaw = W(CompRank);                         % expand paired -> raw columns
-    uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) wRaw(:));
+    if strcmpi(st.WeightMode, 'kernel') && ~isempty(st.KernelFn)
+        % Kernel: apply g at each RAW mode's lambda (exact), not per paired rank.
+        uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', st.KernelFn);
+    else
+        wRaw = W(CompRank);                    % expand paired -> raw columns
+        uF = bst_eigenmodes_filter(Eig, u, M, 'custom', 'TransferFn', @(l) wRaw(:));
+    end
+end
+
+
+%% ===== DISPLAY: column for an eigenmode-view figure (synthesis or delta) =====
+function col = GetDisplayColumn(SurfaceFile, PairedGrid) %#ok<DEFNU>
+    global GlobalData;
+    st = GetState();
+    W  = st.Weights;
+    if strcmpi(st.DisplayMode, 'delta')
+        if ~EnsureCache(SurfaceFile)
+            col = PairedGrid * W(:); return;   % fallback if cache missing
+        end
+        Eig = GlobalData.UserModes.CacheEig;
+        M   = GlobalData.UserModes.CacheMass;
+        if strcmpi(st.WeightMode, 'kernel') && ~isempty(st.KernelFn)
+            tf = st.KernelFn;
+        else
+            wRaw = W(Eig.CompRank(:));
+            tf = @(l) wRaw(:);
+        end
+        col = DeltaPointSpread(Eig, M, tf, st.DeltaVertex);
+    else
+        col = PairedGrid * W(:);
+    end
 end
