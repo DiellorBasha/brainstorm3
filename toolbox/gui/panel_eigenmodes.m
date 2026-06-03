@@ -92,6 +92,47 @@ function W = BuildWeights(shape, kLo, kHi, iCenter, K) %#ok<DEFNU>
 end
 
 
+%% ===== PURE: representative eigenvalue per paired rank =====
+function lam = PairedLambda(Eig) %#ok<DEFNU>
+    % Assumes CompRank is contiguous 1..K (guaranteed by tess_eigenmodes /
+    % in_tess_eigenmodes); a gap would yield mean([]) = NaN for that rank.
+    cr  = Eig.CompRank(:);
+    val = Eig.Values(:);
+    K   = max(cr);
+    lam = zeros(K,1);
+    for k = 1:K
+        lam(k) = mean(val(cr == k));   % L/R near-symmetric -> shared representative lambda
+    end
+end
+
+%% ===== PURE: paired weights from a spectral kernel =====
+function [W, g] = KernelPairedWeights(Eig, name, params) %#ok<DEFNU>
+    g   = bst_eigfilter_kernel(name, params);
+    lam = PairedLambda(Eig);
+    W   = bst_eigfilter_evaluate(g, lam)';    % 1 x Kpaired
+end
+
+%% ===== PURE: slider bounds for a kernel parameter (log heuristic) =====
+function [smin, smax] = KernelSliderRange(pdef, prange) %#ok<DEFNU>
+    if isempty(pdef) || ~isfinite(pdef) || pdef <= 0; pdef = 1; end
+    smin = pdef / 100;
+    smax = pdef * 100;
+    if numel(prange) == 2
+        if isfinite(prange(1)); smin = max(smin, prange(1) + eps); end
+        if isfinite(prange(2)); smax = min(smax, prange(2)); end
+    end
+    if smax <= smin; smax = smin * 100; end
+end
+
+%% ===== PURE: delta (impulse) point-spread = Phi*diag(g)*Phi'*M*e_i =====
+function ps = DeltaPointSpread(Eig, MassMatrix, g, iVertex) %#ok<DEFNU>
+    nV = size(Eig.Vectors, 1);
+    iVertex = min(max(round(iVertex), 1), nV);
+    e = zeros(nV, 1); e(iVertex) = 1;
+    ps = bst_eigenmodes_filter(Eig, e, MassMatrix, 'custom', 'TransferFn', g);
+end
+
+
 %% ===== CREATE PANEL =====
 function bstPanelNew = CreatePanel() %#ok<DEFNU>
     panelName = 'EigenModes';
@@ -388,7 +429,13 @@ function st = GetState()
             'isActive',     0,  ...
             'CacheSurfaceFile', '', ...
             'CacheEig',     [], ...
-            'CacheMass',    []);
+            'CacheMass',    [], ...
+            'WeightMode',   'window', ...    % 'window' | 'kernel'
+            'KernelName',   'heat', ...
+            'KernelParams', struct('t',0.01), ...
+            'KernelFn',     [], ...
+            'DisplayMode',  'synthesis', ... % 'synthesis' | 'delta'
+            'DeltaVertex',  1);
     end
     st = GlobalData.UserModes;
 end
@@ -411,8 +458,21 @@ end
 function RecomputeWeights()
     global GlobalData;
     st = GlobalData.UserModes;
-    GlobalData.UserModes.Weights = BuildWeights(st.WindowShape, ...
-        st.Band(1), st.Band(2), st.iCurrentMode, st.nModes);
+    if strcmpi(st.WeightMode, 'kernel')
+        % Kernel weighting: W(k)=g(lambda_paired_k); store the raw-lambda handle too.
+        if ~EnsureCache(st.SurfaceFile)
+            GlobalData.UserModes.KernelFn = [];   % no stale handle if cache unavailable
+            return;
+        end
+        Eig = GlobalData.UserModes.CacheEig;
+        [W, g] = KernelPairedWeights(Eig, st.KernelName, st.KernelParams);
+        GlobalData.UserModes.Weights  = W;
+        GlobalData.UserModes.KernelFn = g;
+    else
+        GlobalData.UserModes.Weights = BuildWeights(st.WindowShape, ...
+            st.Band(1), st.Band(2), st.iCurrentMode, st.nModes);
+        GlobalData.UserModes.KernelFn = [];
+    end
 end
 
 %% ===== STATE: set band (clamped); recentre iCurrentMode to band midpoint =====
