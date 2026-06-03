@@ -56,22 +56,23 @@ if (size(MassMatrix, 1) ~= nV) || (size(MassMatrix, 2) ~= nV)
     error('MassMatrix must be %dx%d.', nV, nV);
 end
 
-%% ===== MODE RANGE =====
-if isempty(ModeRange)
-    ModeRange = [1, nModes];
-end
-ModeRange(1) = max(1, ModeRange(1));
-ModeRange(2) = min(nModes, ModeRange(2));
-iModes = ModeRange(1):ModeRange(2);
-if isempty(iModes)
-    error('Empty mode range [%d, %d] (have %d modes).', ModeRange(1), ModeRange(2), nModes);
-end
+%% ===== FORWARD TRANSFORM (all modes, stored order) =====
+Coeffs = manifold_ft(Phi, MassMatrix, Data);   % [nModes x nTime]
 
-%% ===== PROJECT: c_k = phi_k' * M * u =====
-Coeffs = Phi' * (MassMatrix * Data);   % [nModes x nTime]
-
-%% ===== RECONSTRUCT (if requested) =====
+%% ===== RECONSTRUCT over the CANONICAL mode range (if requested) =====
 if nargout >= 2
-    Reconstructed = Phi(:, iModes) * Coeffs(iModes, :);   % [nV x nTime]
+    if isempty(ModeRange); ModeRange = [1, nModes]; end
+    ModeRange(1) = max(1, ModeRange(1));
+    ModeRange(2) = min(nModes, ModeRange(2));
+    if ModeRange(2) < ModeRange(1)
+        error('Empty mode range [%d, %d] (have %d modes).', ModeRange(1), ModeRange(2), nModes);
+    end
+    if isfield(Eigenmodes,'Order') && ~isempty(Eigenmodes.Order)
+        Order = double(Eigenmodes.Order(:));
+    else
+        [~, Order] = sort(double(Eigenmodes.Values(:)), 'ascend');
+    end
+    iSel = Order(ModeRange(1):ModeRange(2));
+    Reconstructed = manifold_ift(Phi(:, iSel), Coeffs(iSel, :));   % [nV x nTime]
 end
 end
