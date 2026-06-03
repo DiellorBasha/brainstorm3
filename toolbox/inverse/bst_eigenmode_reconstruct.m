@@ -19,29 +19,33 @@ function ImagingKernel = bst_eigenmode_reconstruct(SurfaceOrPhi, ModeKernel, Mod
 % Authors: Diellor Basha, 2026
 
 K = size(ModeKernel, 1);
+idx = [];   % resolved below
 if ischar(SurfaceOrPhi)
     [Eig, isComputed] = in_tess_eigenmodes(SurfaceOrPhi);
     if ~isComputed
         error(['No eigenmodes on surface: ' SurfaceOrPhi '. Run "Compute eigenmodes" first.']);
     end
     Phi = double(Eig.Vectors);
+    % Default to the surface's canonical order when no explicit selection is given.
+    if (nargin < 3 || isempty(ModeIndices))
+        idx = Eig.Order(:);
+    else
+        idx = ModeIndices(:);
+    end
 else
     Phi = double(SurfaceOrPhi);
+    if (nargin >= 3) && ~isempty(ModeIndices)
+        idx = ModeIndices(:);
+    else
+        idx = (1:K)';   % bare Phi matrix, no order known: positional fallback
+    end
 end
-if (nargin >= 3) && ~isempty(ModeIndices)
-    idx = ModeIndices(:);
-    if numel(idx) < K
-        error('Fewer mode indices (%d) than kernel modes (%d).', numel(idx), K);
-    end
-    idx = idx(1:K);
-    if max(idx) > size(Phi, 2)
-        error('Mode index %d exceeds available eigenmodes (%d).', max(idx), size(Phi,2));
-    end
-    ImagingKernel = Phi(:, idx) * ModeKernel;
-else
-    if size(Phi, 2) < K
-        error('Surface has fewer eigenmodes (%d) than kernel modes (%d).', size(Phi,2), K);
-    end
-    ImagingKernel = Phi(:, 1:K) * ModeKernel;
+if numel(idx) < K
+    error('Fewer mode indices (%d) than kernel modes (%d).', numel(idx), K);
 end
+idx = idx(1:K);
+if max(idx) > size(Phi, 2)
+    error('Mode index %d exceeds available eigenmodes (%d).', max(idx), size(Phi,2));
+end
+ImagingKernel = manifold_ift(Phi(:, idx), ModeKernel);   % [nV x nGoodCh]
 end
