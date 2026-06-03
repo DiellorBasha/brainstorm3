@@ -192,7 +192,8 @@ function ModesChangedCallback(hFig) %#ok<DEFNU>
     if isempty(ev), return; end
     W = panel_eigenmodes('GetWeights');
     if isempty(W) || (numel(W) ~= size(ev.PairedGrid,2)), return; end
-    col = SynthColumn(ev.PairedGrid, W);
+    % The panel decides synthesis vs delta point-spread (and window vs kernel).
+    col = panel_eigenmodes('GetDisplayColumn', ev.SurfaceFile, ev.PairedGrid);
     [iDS, iResult] = bst_memory('GetDataSetResult', ev.ResultsFile);
     if isempty(iDS), return; end
     GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp = [col col];
