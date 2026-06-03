@@ -4,41 +4,41 @@
 
 | regime | method | median | IQR | n |
 |---|---|---|---|---|
-| focal | wmne | 12.88 | 14.49 | 150 |
-| focal | dspm | 10.71 | 8.10 | 150 |
+| focal | wmne | 15.25 | 16.35 | 150 |
+| focal | dspm | 9.34 | 9.34 | 150 |
 | focal | sloreta | 0.00 | 0.00 | 150 |
-| focal | eig_mne_log | 17.13 | 19.13 | 150 |
-| focal | eig_dspm_log | 17.40 | 19.70 | 150 |
-| patch | wmne | 12.11 | 12.04 | 150 |
-| patch | dspm | 13.02 | 8.99 | 150 |
-| patch | sloreta | 5.71 | 8.97 | 150 |
-| patch | eig_mne_log | 13.60 | 14.68 | 150 |
-| patch | eig_dspm_log | 15.67 | 16.41 | 150 |
-| distributed | wmne | 17.94 | 12.43 | 150 |
-| distributed | dspm | 15.93 | 11.97 | 150 |
-| distributed | sloreta | 10.15 | 8.14 | 150 |
-| distributed | eig_mne_log | 20.60 | 17.56 | 150 |
-| distributed | eig_dspm_log | 23.21 | 18.47 | 150 |
+| focal | eig_mne_log | 18.15 | 18.60 | 150 |
+| focal | eig_dspm_log | 18.41 | 19.71 | 150 |
+| patch | wmne | 13.79 | 11.83 | 150 |
+| patch | dspm | 12.20 | 8.74 | 150 |
+| patch | sloreta | 4.65 | 4.78 | 150 |
+| patch | eig_mne_log | 15.05 | 19.81 | 150 |
+| patch | eig_dspm_log | 20.77 | 24.41 | 150 |
+| distributed | wmne | 20.05 | 14.26 | 150 |
+| distributed | dspm | 16.38 | 14.50 | 150 |
+| distributed | sloreta | 10.94 | 8.62 | 150 |
+| distributed | eig_mne_log | 23.10 | 26.29 | 150 |
+| distributed | eig_dspm_log | 26.63 | 28.08 | 150 |
 
 ## Paired Wilcoxon (eig vs standard), LocError
 
 | regime | eig | vs | median diff (mm) | n | p |
 |---|---|---|---|---|---|
-| focal | eig_mne_log | wmne | +1.96 | 150 | 7.742e-06 |
-| focal | eig_mne_log | dspm | +7.13 | 150 | 1.054e-08 |
-| focal | eig_mne_log | sloreta | +15.63 | 150 | 2.168e-25 |
-| focal | eig_dspm_log | wmne | +1.75 | 150 | 3.366e-07 |
-| focal | eig_dspm_log | dspm | +6.94 | 150 | 6.208e-10 |
-| focal | eig_dspm_log | sloreta | +16.69 | 150 | 7.296e-26 |
-| patch | eig_mne_log | wmne | +0.30 | 150 | 0.008055 |
-| patch | eig_mne_log | dspm | +1.57 | 150 | 0.05047 |
-| patch | eig_mne_log | sloreta | +6.28 | 150 | 1.616e-16 |
-| patch | eig_dspm_log | wmne | +2.00 | 150 | 2.476e-07 |
-| patch | eig_dspm_log | dspm | +3.70 | 150 | 0.000969 |
-| patch | eig_dspm_log | sloreta | +8.83 | 150 | 4.233e-19 |
-| distributed | eig_mne_log | wmne | +0.08 | 150 | 0.1938 |
-| distributed | eig_mne_log | dspm | +7.04 | 150 | 0.0003401 |
-| distributed | eig_mne_log | sloreta | +9.59 | 150 | 2.259e-15 |
-| distributed | eig_dspm_log | wmne | +2.51 | 150 | 0.0002458 |
-| distributed | eig_dspm_log | dspm | +8.18 | 150 | 1.909e-06 |
-| distributed | eig_dspm_log | sloreta | +10.70 | 150 | 1.606e-19 |
+| focal | eig_mne_log | wmne | +0.31 | 150 | 0.08938 |
+| focal | eig_mne_log | dspm | +7.16 | 150 | 7.233e-09 |
+| focal | eig_mne_log | sloreta | +16.80 | 150 | 1.203e-24 |
+| focal | eig_dspm_log | wmne | +2.96 | 150 | 0.0007728 |
+| focal | eig_dspm_log | dspm | +8.25 | 150 | 3.196e-11 |
+| focal | eig_dspm_log | sloreta | +17.73 | 150 | 2.689e-25 |
+| patch | eig_mne_log | wmne | +0.00 | 150 | 0.04284 |
+| patch | eig_mne_log | dspm | +4.03 | 150 | 9.722e-06 |
+| patch | eig_mne_log | sloreta | +10.42 | 150 | 6.521e-23 |
+| patch | eig_dspm_log | wmne | +4.51 | 150 | 6.393e-11 |
+| patch | eig_dspm_log | dspm | +6.91 | 150 | 6.096e-12 |
+| patch | eig_dspm_log | sloreta | +16.12 | 150 | 3.601e-24 |
+| distributed | eig_mne_log | wmne | +0.83 | 150 | 0.004806 |
+| distributed | eig_mne_log | dspm | +6.80 | 150 | 1.07e-07 |
+| distributed | eig_mne_log | sloreta | +13.11 | 150 | 5.4e-19 |
+| distributed | eig_dspm_log | wmne | +4.20 | 150 | 3.579e-07 |
+| distributed | eig_dspm_log | dspm | +11.68 | 150 | 1.267e-11 |
+| distributed | eig_dspm_log | sloreta | +17.26 | 150 | 5.168e-22 |
