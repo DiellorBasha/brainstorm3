@@ -64,14 +64,21 @@ if isempty(eigHmFile)
     warning('bst_benchmark_inverse: no eigenmode head model found in study; skipping eig_mne_log, eig_dspm_log.');
 end
 if ~isempty(eigHmFile)
+    % The eigenmode leadfield selects modes in GLOBAL eigenvalue order across
+    % hemispheres (headmodel.ModeIndices), not the stored first-K columns. The
+    % mode-space kernel must be reconstructed against those same columns/order,
+    % so pass ModeIndices to bst_eigenmode_reconstruct. A naive Phi(:,1:K) slice
+    % would mix in the wrong (single-hemisphere) modes and scramble the estimate.
+    eigHM = in_bst_headmodel(eigHmFile, 0);
+    modeIdx = [];
+    if isfield(eigHM,'ModeIndices'); modeIdx = eigHM.ModeIndices; end
     eigCfg = {'mne','eig_mne_log'; 'dspm','eig_dspm_log'};
     for k = 1:size(eigCfg,1)
         [Inv, errE] = bst_inverse_eigenmodes(eigHmFile, ncFile, chFile, goodMask, ...
             'Method', eigCfg{k,1}, 'Prior', 'log', 'SNR', snrLin, 'nModes', nModes);
         if ~isempty(errE); continue; end
-        [EigK,~] = in_tess_eigenmodes(Inv.SurfaceFile);
-        Phi = double(EigK.Vectors(:, 1:Inv.nModes));
-        Est.(eigCfg{k,2}) = (Phi * Inv.ImagingKernel) * F;
+        ImagingKernel = bst_eigenmode_reconstruct(Inv.SurfaceFile, Inv.ImagingKernel, modeIdx);
+        Est.(eigCfg{k,2}) = ImagingKernel * F;
     end
 end
 
