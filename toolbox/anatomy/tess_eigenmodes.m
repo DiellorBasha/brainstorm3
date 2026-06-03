@@ -208,6 +208,10 @@ Eigenmodes.Values      = ValuesAll;
 Eigenmodes.nModes      = numel(ValuesAll);
 Eigenmodes.Component   = Component;
 Eigenmodes.CompRank    = CompRank;
+% Canonical mode order: global eigenvalue sort across all components. The single
+% ordering every consumer uses (Vectors(:,Order(1:K))), so "first K" means the
+% whole-brain lowest spatial frequencies, not one hemisphere.
+[~, Eigenmodes.Order]  = sort(ValuesAll, 'ascend');
 Eigenmodes.nComponents   = nComp;
 Eigenmodes.MassMatrix    = M;   % whole-mesh mass matrix [nV x nV] sparse (basis is M-orthonormal)
 Eigenmodes.MassType      = MassType;            % 'barycentric' | 'voronoi' | 'galerkin'

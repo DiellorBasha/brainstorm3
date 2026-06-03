@@ -55,6 +55,10 @@ end
 if ~isfield(Eigenmodes, 'CompRank') || isempty(Eigenmodes.CompRank)
     Eigenmodes.CompRank = (1:nK)';
 end
+% Backfill the canonical global eigenvalue order for legacy files (pre-Order).
+if ~isfield(Eigenmodes, 'Order') || isempty(Eigenmodes.Order) || numel(Eigenmodes.Order) ~= nK
+    [~, Eigenmodes.Order] = sort(double(Eigenmodes.Values(:)), 'ascend');
+end
 if ~isfield(Eigenmodes, 'nComponents') || isempty(Eigenmodes.nComponents)
     Eigenmodes.nComponents = max(Eigenmodes.Component(:));
 end
