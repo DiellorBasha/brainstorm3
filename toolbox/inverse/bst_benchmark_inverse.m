@@ -51,10 +51,14 @@ end
 
 % ----- Eigenmode variants via the eigenmode head model in this study -----
 sStudy = bst_get('AnyFile', baseHmFile);
-eigHmFile = '';
+eigHmFile = ''; nEigBest = 0;
 for ih = 1:numel(sStudy.HeadModel)
     try hm = in_bst_headmodel(sStudy.HeadModel(ih).FileName,0); catch; continue; end
-    if isfield(hm,'isEigenmode') && hm.isEigenmode; eigHmFile = sStudy.HeadModel(ih).FileName; break; end
+    % Pick the eigenmode head model with the MOST modes: a study may carry stale
+    % low-mode eigenmode models from earlier runs, but the K-sweep needs the full one.
+    if isfield(hm,'isEigenmode') && hm.isEigenmode && size(hm.Gain,2) > nEigBest
+        nEigBest = size(hm.Gain,2); eigHmFile = sStudy.HeadModel(ih).FileName;
+    end
 end
 if isempty(eigHmFile)
     warning('bst_benchmark_inverse: no eigenmode head model found in study; skipping eig_mne_log, eig_dspm_log.');
