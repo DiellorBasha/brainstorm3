@@ -247,3 +247,29 @@ and are hidden/ignored in the dialog and the solver branch.
 | `toolbox/inverse/bst_eigenmode_reconstruct.m` (new, standalone) | Load Φ, return `Φ·M̃` and optional `M̃` |
 | `toolbox/process/functions/process_eigenmodes_inverse.m` | Reduce to thin wrapper over `Compute()` |
 | `dev/tests/test_inverse_eigenmodes_pure.m`, `dev/tests/test_eigenmodes_inverse_e2e.m` | Extend coverage (incl. `bst_noise_whitener` parity vs. the 2018 inline whitener) |
+
+## Fix: across-hemisphere mode selection (one-hemisphere bug)
+
+`tess_eigenmodes` solves each hemisphere as a separate connected component and
+stores the eigenvectors **grouped by component** (`[LH modes…, RH modes…]`,
+not globally sorted by eigenvalue). The forward composer
+(`bst_eigenmode_leadfield`) and the inverse reconstruction
+(`bst_eigenmode_reconstruct`) originally took the **first K columns**
+(`Phi(:,1:K)`), so when "Number of modes" `K` was ≤ the per-hemisphere count
+(e.g. `K=300` with 300 modes per hemisphere), the leadfield and reconstruction
+spanned **only the left hemisphere** — the right hemisphere received exactly zero
+sources.
+
+**Fix:** select the **K globally-lowest-eigenvalue** modes across all components
+(both hemispheres), recorded in `headmodel.ModeIndices` so the leadfield and the
+reconstruction use the exact same columns in the same order. "Number of modes"
+now means a **total** budget (≈ K/2 per hemisphere for near-symmetric
+hemispheres). Files: `bst_eigenmode_leadfield.m` (selection + `ModeIndices`),
+`bst_eigenmode_reconstruct.m` (optional `ModeIndices` arg; falls back to
+`Phi(:,1:K)` for old head models), `process_inverse_2018.m` (loads/passes
+`ModeIndices`). Regression: `dev/tests/test_eigenmode_hemisphere_pure.m`.
+
+**ACTION REQUIRED:** existing eigenmode head models have the one-hemisphere
+selection baked into their `Gain` and lack `ModeIndices`; they must be
+**recomputed** ("Compute head model" → Cortex surface harmonics) to get
+both-hemisphere coverage.

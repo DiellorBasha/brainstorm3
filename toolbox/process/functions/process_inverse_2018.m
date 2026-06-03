@@ -735,7 +735,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 end
                 % L_tilde is already SSP-projected + avg-ref'd + good-channel only.
                 L_tilde = double(HeadModel.Gain);                 % [nGoodCh x K]
-                HMeig = in_bst_headmodel(HeadModelFile, 0, 'Eigenvalues', 'SurfaceFile', 'nModes');
+                HMeig = in_bst_headmodel(HeadModelFile, 0, 'Eigenvalues', 'SurfaceFile', 'nModes', 'ModeIndices');
                 lambdas = double(HMeig.Eigenvalues(:));
                 K = size(L_tilde, 2);
                 if numel(lambdas) < K
@@ -773,7 +773,14 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 ModeKernel = bst_inverse_eigenmodes('SolvePure', L_tilde, lambdas, iW, ProjEig, ...
                     OPTIONS.InverseMeasure, OPTIONS.EigenmodePrior, 1, snrVal, false);   % [K x nGoodCh]
                 Results = struct();
-                Results.ImagingKernel   = bst_eigenmode_reconstruct(HMeig.SurfaceFile, ModeKernel); % [nVert x nGoodCh]
+                % ModeIndices: which Phi columns the leadfield used, in solve order
+                % (records the across-hemisphere selection). Old head models lack it
+                % -> reconstruct falls back to Phi(:,1:K) and must be recomputed.
+                eigModeIdx = [];
+                if isfield(HMeig, 'ModeIndices') && ~isempty(HMeig.ModeIndices)
+                    eigModeIdx = HMeig.ModeIndices;
+                end
+                Results.ImagingKernel   = bst_eigenmode_reconstruct(HMeig.SurfaceFile, ModeKernel, eigModeIdx); % [nVert x nGoodCh]
                 Results.ImageGridAmp    = [];
                 Results.nComponents     = 1;
                 Results.Function        = ['eigenmode_' OPTIONS.InverseMeasure];

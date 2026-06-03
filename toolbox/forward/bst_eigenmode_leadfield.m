@@ -60,10 +60,19 @@ if isempty(nModes) || nModes <= 0
 else
     K = min(nModes, nModesAll);
 end
-Phi = Phi(:, 1:K);
+% Select the K globally-lowest-eigenvalue modes across ALL connected components
+% (hemispheres). Eigenmodes are stored grouped by component (tess_eigenmodes
+% solves each hemisphere separately and concatenates), so a naive first-K slice
+% Phi(:,1:K) would keep only one hemisphere. Sort by eigenvalue and keep the K
+% lowest spatial frequencies whole-brain. The selected column indices are
+% recorded in ModeIndices so the inverse reconstruction
+% (bst_eigenmode_reconstruct) uses the exact same modes in the same order.
+[~, order] = sort(Values, 'ascend');
+sel = order(1:K);
+PhiSel = Phi(:, sel);
 
 % Compose: L~ = L * Phi   [nCh x K]
-L_tilde = Lc * Phi;
+L_tilde = Lc * PhiSel;
 
 % Build composed head-model struct
 CompHM = HeadModel;
@@ -73,7 +82,8 @@ CompHM.GridOrient  = [];
 CompHM.GridAtlas   = [];
 CompHM.isEigenmode = 1;
 CompHM.nModes      = K;
-CompHM.Eigenvalues = Values(1:K);
+CompHM.Eigenvalues = Values(sel);
+CompHM.ModeIndices = sel(:);
 CompHM.HeadModelType = 'surface';
 CompHM.Comment     = sprintf('Eigenmode leadfield (%d modes) | %s', K, ...
     getfield_default(HeadModel, 'Comment', ''));
