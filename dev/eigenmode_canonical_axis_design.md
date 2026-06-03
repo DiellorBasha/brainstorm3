@@ -1,119 +1,109 @@
 # Canonical Eigenmode Axis — Design (Foundation A)
 
-**Date:** 2026-06-03
+**Date:** 2026-06-03 (rev 2)
 **Author:** Diellor Basha (with Claude)
-**Status:** Design — approved in brainstorming; pending spec review before the implementation plan
+**Status:** Design — approved in brainstorming; revised for the pure `manifold_ft`/`manifold_ift` pair; pending spec review before the implementation plan
 **Scope:** Foundation refactor only. The eigenmode time-series ↔ cortical-activation viewer (Feature B) is a separate, later cycle that depends on this.
 
 ## Motivation
 
 A cortical surface file has **one** vertex axis (Vertices/faces) shared by all clients without divergence. The Laplace–Beltrami eigenmodes are the **Fourier space of that same surface**, so they should likewise be a single canonical axis per surface, shared by every consumer.
 
-Today they are not. The surface's stored eigenmodes are **grouped by hemisphere** (component 1's modes, then component 2's), sorted only *within* each component, not globally:
+Today they are not. The stored eigenmodes are **grouped by hemisphere** (cols 1–1000 = hemisphere-1, 1001–2000 = hemisphere-2; sorted only *within* each, not globally):
 
 ```
-total modes = 2000, components = 2
-issorted(Values) = 0
+total modes = 2000, components = 2, issorted(Values) = 0
 component-2 starts at stored index 1001   (so first 1000 stored modes are all hemisphere-1)
 ```
 
-Because of this, consumers that take a subset re-invent mode selection differently:
+So consumers that take a subset re-invent mode selection differently:
 - `bst_eigenmode_leadfield` re-sorts globally by eigenvalue and records its own `ModeIndices` on the composed head model.
-- `process_eigenmodes_transform` / `bst_eigenmodes_transform` naively take `Vectors(:,1:K)` — which for K<1000 is **entirely hemisphere-1** (a real bias bug).
+- `process_eigenmodes_transform` naively takes `Vectors(:,1:K)` — for K<1000 that is **entirely hemisphere-1** (a real bias bug).
 - `bst_eigenmode_reconstruct` takes `ModeIndices` if given, else falls back to first-K.
 
-These are different selections of the same modes. (This is the same class of bug found and fixed in the benchmark's `bst_benchmark_inverse`.)
+These are different selections of the same modes (the same bug class fixed in the benchmark's `bst_benchmark_inverse`).
 
-## Principle
+## Principles
 
-There is **one canonical, globally eigenvalue-sorted ordering of a surface's eigenmodes**, stored with the eigenmode structure in the surface file, and **every consumer selects modes through one shared accessor**. The mode-selection index is not retired — it is relocated to its canonical home and made informative.
-
-This cleanly separates two machineries that both rest on the same axis:
-- **Source-mapping machinery:** eigenmode leadfield (sensor↔eigenmode) + inverse + reconstruction (eigenmode↔vertex).
-- **Analytic machinery (separate):** forward eigenmode transform (eigenspectrum: any vertex pattern → coefficients, `Φ'M·u`) and inverse eigenmode transform (coefficients → vertices, `Φ·c`).
+1. **One canonical, globally eigenvalue-sorted ordering** of a surface's eigenmodes, stored with the eigenmode structure (`Eigenmodes.Order`). It is the single index; every consumer selects through it (`Vectors(:, Order(1:K))`).
+2. **The analytic transform is pure math, named for what it is — a manifold Fourier transform.** Forward `manifold_ft(Φ,M,U) = Φ'·M·U` (vertex → mode coefficients); inverse `manifold_ift(Φ,C) = Φ·C` (coefficients/kernel → vertex). Pure functions in `toolbox/math/`, independent of files, sensors, or selection.
+3. **Source-mapping machinery is separate** from this analytic core: the eigenmode leadfield (`L·Φ`) + inverse + reconstruction build *on top of* the same `Φ` and the same canonical `Order`.
 
 ## Design
 
 ### 1. Canonical mode index — `Eigenmodes.Order`
 
-The `Eigenmodes` struct in the surface file gains a stored field:
+The `Eigenmodes` struct in the surface file gains:
+- **`Eigenmodes.Order`** : `[nModes×1]` permutation sorting the stored modes by **global eigenvalue ascending** (interleaving hemispheres).
 
-- **`Eigenmodes.Order`** : `[nModes×1]` permutation that orders the stored modes by **global eigenvalue ascending** (interleaving hemispheres).
+It is *informative*: with `.Component`/`.CompRank`, canonical rank `k` is fully described — stored column `Order(k)`, eigenvalue `Values(Order(k))`, hemisphere `Component(Order(k))`, within-hemisphere rank `CompRank(Order(k))`. "First K canonical modes" = `Vectors(:, Order(1:K))` = whole-brain lowest spatial frequencies, never hemisphere-biased.
 
-It is *informative*: with the existing `.Component` and `.CompRank` tags, every canonical mode is fully described. For canonical rank `k`:
-- stored column = `Order(k)`
-- spatial frequency = `Values(Order(k))`
-- hemisphere = `Component(Order(k))`, within-hemisphere rank = `CompRank(Order(k))`
+- `tess_eigenmodes` writes `.Order` at computation time (`sort(Values,'ascend')`).
+- `in_tess_eigenmodes` **backfills** `.Order` on read for legacy files (same pattern it uses for `.Component`/`.CompRank`) — transparent, no migration.
 
-"Give me the first K canonical modes" → `Vectors(:, Order(1:K))` = whole-brain lowest-spatial-frequency modes, never hemisphere-biased.
+**No dedicated accessor.** Selection is the inline idiom `Vectors(:, Order(1:K))`. The stored `Order` *is* the single shared index; a wrapper function would add a layer without adding correctness.
 
-**Who fills it:**
-- `tess_eigenmodes` writes `.Order` at computation time (one global `sort(Values, 'ascend')`).
-- `in_tess_eigenmodes` **backfills** `.Order` on read if a legacy file lacks it (same pattern it already uses for `.Component`/`.CompRank`), so old protocols work transparently with no migration step.
+### 2. Pure analytic transforms — `manifold_ft` / `manifold_ift`
 
-### 2. Single shared accessor — `bst_eigenmodes_canonical`
+New, in `toolbox/math/`:
+- **`manifold_ft(Phi, M, U)` → `C = Phi' * (M * U)`** — forward manifold Fourier transform, `[K×nTime]`. `Phi` is the (already-selected) eigenvector matrix; `M` the mass matrix (basis is M-orthonormal, so the forward needs `M`).
+- **`manifold_ift(Phi, C)` → `U = Phi * C`** — inverse manifold Fourier transform, `[nV×nTime]` or `[nV×nCh]`. Works identically for coefficient vectors and mode-space kernels. No `M` needed.
 
-```
-[Phi, lambdas, prov] = bst_eigenmodes_canonical(Eig, K)
-```
-Returns `Vectors(:, Order(1:K))`, the matching eigenvalues `Values(Order(1:K))`, and provenance (`Component`/`CompRank` for the selected modes). `K` omitted/empty ⇒ all modes. This is the **one** place that turns "I want K modes" into eigenvector columns. Every consumer goes through it.
+These are pure (no I/O, no selection, no validation beyond dimension checks). They are the analytic machinery in named form.
 
-### 3. Consumers re-grounded on the accessor
+### 3. `project` / `reconstruct` become thin wrappers (callers untouched)
 
-Wherever code does `Vectors(:,1:K)` or computes its own sort, it calls the accessor instead.
+`bst_eigenmodes_project` and `bst_eigenmode_reconstruct` have **12 callers** between them, including the production inverse `process_inverse_2018` and the pushed `bst_benchmark_inverse`. Rather than retire them (high churn/risk to the validated Eigen-MNE path), they become thin wrappers over the pure pair, holding only the non-math concerns:
 
-**Source-mapping machinery:**
-- `bst_eigenmode_leadfield` — stop computing its own global sort + `ModeIndices`. Compose `L̃ = L · Vectors(:, Order)` over **all** modes via the accessor; copy `Eig.Order` into the composed head model for self-containment (derived, never recomputed).
-- `bst_eigenmode_reconstruct` — select via the accessor (`Φ(:, Order(1:K)) · ModeKernel`); the index it consumes *is* the canonical `Order` (from the surface, or the head model's copy). The first-K fallback is removed.
-- `bst_inverse_eigenmodes` — unchanged math; its `nModes` cap now means "first-K of the canonical axis," whole-brain-correct for free.
+- **`bst_eigenmodes_project`** = validate + `manifold_ft(Vectors, M, Data)`; optional reconstruct output via `manifold_ift`, with any `ModeRange` selecting over the canonical `Order`.
+- **`bst_eigenmode_reconstruct`** = load surface eigenmodes (if given a file) + select canonical `Order` + `manifold_ift(Phi(:,Order(1:K)), ModeKernel)`. The hemisphere-bias fix is applied here, inside the wrapper.
 
-**Analytic machinery (the bug-carriers today):**
-- `process_eigenmodes_transform` / `bst_eigenmodes_transform` — replace naive `Vectors(:,1:K)` with the accessor. **This is where the hemisphere-bias bug lived; it is fixed here.** Reconstruction becomes `Φ(:, Order(1:K)) · Θ`.
-- `bst_eigenmodes_project` — when it truncates to a mode range, that range is over the canonical `Order`.
+Full retirement of these two wrappers (callers migrating directly to `manifold_ft`/`manifold_ift`) is an **optional later cleanup**, out of scope for this foundation.
 
-**Viewers** (`view_eigenmodes`, `panel_eigenmodes`, `view_eigenmode_spectrum`) — wherever the lever indexes "mode k" or truncates a band, `k` maps to canonical rank via `Order`. The pair-by-`CompRank` grid is unaffected (tags travel with the modes).
+### 4. Source-mapping consumers re-grounded on `Order`
 
-Net: exactly one selection path, used by source-mapping and analytic consumers alike.
+- **`bst_eigenmode_leadfield`** — stop computing its own global sort + `ModeIndices`. Compose `L̃ = L · Vectors(:, Order)` over **all** modes (truncation moves to the inverse); copy `Order` into the composed head model as `ModeIndices` (derived, not recomputed).
+- **`bst_inverse_eigenmodes`** — unchanged math; its `nModes` cap now means "first-K of the canonical axis," correct for free (the composed Gain is canonical-ordered).
+- **`process_eigenmodes_transform`** — replace `Vectors(:,1:K)` with `Vectors(:, Order(1:K))` (the bias fix). Its reconstruction stays self-consistent.
 
-### 4. Leadfield contract + ensure-if-empty
+**Viewers** (`view_eigenmodes`, `panel_eigenmodes`, `view_eigenmode_spectrum`) carry **no** first-K slice — they pair by `CompRank` tags — so they need no change for correctness here. The mode-k↔canonical-rank UX alignment is part of Feature B.
 
-- **Leadfield uses all canonical modes — no independent truncation.** `bst_eigenmode_leadfield` composes `L̃ = L · Vectors(:, Order)` over all stored modes. K-capping (e.g. the benchmark K-sweep) moves to the **inverse** (`bst_inverse_eigenmodes` `nModes` = first-K of canonical). The forward node is purely "the leadfield expressed in the surface's Fourier basis."
-- **`bst_eigenmodes_ensure(SurfaceFile)`** — new helper: return the surface's canonical eigenmodes if present; otherwise compute the default (**1000 modes/hemisphere**, barycentric mass, remove-DC), store them, and return. The leadfield and any source-mapping consumer call this. It is the principled home for what `bench_fixtures` does ad hoc.
-  - The default does **not** repair. On a non-manifold surface it errors with a clear "remesh to ico / repair manually" message, because repair changes vertex count and breaks surface↔leadfield↔eigenmode consistency (the benchmark lesson; ico5 avoids it).
+### 5. Leadfield contract + ensure-if-empty
 
-### 5. Backward compatibility — consistency-preserving by construction
+- **Leadfield uses all canonical modes — no independent truncation.** K-capping moves to `bst_inverse_eigenmodes` (first-K of canonical).
+- **`bst_eigenmodes_ensure(SurfaceFile)`** — new helper: return the surface's canonical eigenmodes if present; else compute the default (**1000 modes/hemisphere**, barycentric mass, remove-DC), store, return. The default does **not** repair: a non-manifold surface errors with a clear "remesh to ico" message (repair changes vertex count and breaks surface↔leadfield↔eigenmode consistency; ico5 avoids it). This is the principled home for what `bench_fixtures` does ad hoc.
 
-The *old* `bst_eigenmode_leadfield` already sorted globally by eigenvalue; it merely stored that index in the wrong place (the composed head model instead of the surface). Therefore:
+### 6. Backward compatibility — consistency-preserving by construction
+
+The *old* `bst_eigenmode_leadfield` already sorted globally by eigenvalue; it merely stored that index on the head model instead of the surface. Therefore:
 - Legacy surface eigenmodes without `.Order` → backfilled on read. Transparent.
-- Legacy composed head models' `ModeIndices` **already equal** the new canonical `Order(1:K)` (both are the global eigenvalue sort), so existing eigenmode kernels — including the validated `Eigen-MNE` in TutorialAuditory — **stay correct**. No migration, no recompute.
-- The only genuinely buggy behavior (hemisphere-biased `Vectors(:,1:K)` in the analytic transform) is the one behavior that changes.
+- Legacy composed head models' `ModeIndices` **already equal** the canonical `Order(1:K)`, so existing eigenmode kernels — including the validated `Eigen-MNE` in TutorialAuditory — **stay correct**. No migration.
+- The only genuinely buggy behavior (`Vectors(:,1:K)` in the transform) is the one behavior that changes.
 
 The refactor is **consistency-preserving for all source-mapping data** and **bug-fixing for the analytic transform**.
 
 ## Testing
 
-**Canonical index (pure):**
-- `Values(Order)` globally ascending; `Order` a valid permutation of `1:nModes`.
-- Discriminating test: on a 2-hemisphere surface, `Order(1:600)` spans **both** components in a balanced split (old first-K was 600/0).
-- Provenance: `Component/CompRank/Values` indexed by `Order(k)` are mutually consistent.
+**Pure transforms:** `manifold_ft`/`manifold_ift` round-trip on an M-orthonormal basis (`manifold_ift(Φ, manifold_ft(Φ,M,u)) == u` within tol); dimension errors raised; `manifold_ift` works for both a vector and a matrix `C`.
 
-**Backfill + accessor (pure):** a legacy struct lacking `.Order` gets it filled on read, matching a fresh compute; `bst_eigenmodes_canonical(Eig,K)` returns the right columns/eigenvalues/provenance.
+**Canonical index (pure + e2e):** `Values(Order)` globally ascending; `Order` a valid permutation. Discriminating e2e: on the 2-hemisphere cortex, `Order(1:600)` spans **both** components (old first-K = one hemisphere). Backfill: a legacy struct lacking `.Order` gets it filled on read.
 
-**Consistency / no-regression (e2e, safety net):** on TutorialAuditory —
-- new canonical-path leadfield Gain **equals** the existing composed eigenmode-HM Gain;
-- Eigen-MNE reconstructed through the accessor **equals** the stored, validated Eigen-MNE kernel.
+**Wrapper equivalence (pure):** `bst_eigenmodes_project` equals `manifold_ft` (+ ranged `manifold_ift`); `bst_eigenmode_reconstruct` with explicit `ModeIndices` equals with canonical default.
 
-**Bug-fix (behavior that should change):** `process_eigenmodes_transform` at K<1000 selects whole-brain modes (assert both components present); transform→reconstruct round-trip still recovers the field.
+**Consistency / no-regression (e2e, safety net):** on TutorialAuditory — new canonical-path leadfield Gain **equals** the existing composed eigenmode-HM Gain; the stored, validated Eigen-MNE kernel reconstructs **identically**.
 
-**ensure-if-empty (e2e):** `bst_eigenmodes_ensure` computes 1000/hemi + stores + returns canonical on a bare surface; idempotent on re-call; errors clearly (no silent repair) on a non-manifold surface.
+**Bug-fix (behavior that should change):** `process_eigenmodes_transform` at K<1000 selects whole-brain modes (assert both components present); end-to-end transform runs and is finite.
 
-**Regression sweep:** re-run existing eigenmode tests (`test_eigenmode_leadfield_*`, `test_inverse_eigenmodes_*`, `test_eigenmode_reconstruct_*`, `test_kernel_comparison`) green.
+**ensure-if-empty (e2e):** returns canonical fast when present (idempotent); errors clearly (no silent repair) on a non-manifold surface.
+
+**Regression sweep:** re-run existing eigenmode tests (`test_eigenmode_leadfield_*`, `test_inverse_eigenmodes_*`, `test_eigenmode_reconstruct_*`, `test_eigenmodes_project_pure`, `test_kernel_comparison`) green.
 
 All follow the `dev/tests` pattern (function, `addpath`, brainstorm, `assert`, `ALL TESTS PASSED`); pure where possible, e2e for protocol-dependent equivalence checks.
 
 ## Out of scope
 
-- **Feature B** — the eigenmode time-series ↔ cortical-activation linked viewer (complex amplitude/phase, eigenfilters, time-frequency integration). Separate spec/plan once this foundation lands.
-- Re-sorting the stored `Vectors` array on disk (we use the stored `Order` index instead, leaving `Vectors` stable).
-- Reorganizing the analytic transform/project into a new module beyond adopting the canonical accessor.
-- Changing the inverse math, priors, or the eigenfilter library.
+- **Feature B** — the eigenmode time-series ↔ cortical-activation viewer.
+- **Full retirement** of `bst_eigenmodes_project` / `bst_eigenmode_reconstruct` (caller migration to the pure pair) — optional later cleanup.
+- Re-sorting the stored `Vectors` on disk (we use the `Order` index instead).
+- Changing inverse math, priors, or the eigenfilter library.
+- Viewer mode-k↔canonical-rank UX (Feature B).
