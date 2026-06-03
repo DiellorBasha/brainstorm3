@@ -1,7 +1,7 @@
-function Est = bst_benchmark_inverse(F, baseHmFile, ncFile, chFile, goodMask, SNR)
+function Est = bst_benchmark_inverse(F, baseHmFile, ncFile, chFile, goodMask, SNR, nModes)
 % BST_BENCHMARK_INVERSE: Reconstruct simulated data with the comparator panel.
 %
-% USAGE:  Est = bst_benchmark_inverse(F, baseHmFile, ncFile, chFile, goodMask, SNR)
+% USAGE:  Est = bst_benchmark_inverse(F, baseHmFile, ncFile, chFile, goodMask, SNR, nModes)
 %
 % INPUTS:
 %   F          [nGoodCh x nTime]  simulated good-channel sensor data
@@ -10,11 +10,13 @@ function Est = bst_benchmark_inverse(F, baseHmFile, ncFile, chFile, goodMask, SN
 %   chFile     char               channel file
 %   goodMask   [nAllCh x 1]       logical good-channel mask
 %   SNR        scalar             SNR in dB (converted internally to a linear amplitude ratio for the inverse regularizers)
+%   nModes     scalar (optional)  cap eigenmode count for the K-sweep (default [] = all composed modes)
 %
 % OUTPUT struct Est: one [nVert x nTime] vertex estimate per method field:
 %   .wmne .dspm .sloreta .eig_mne_log .eig_dspm_log
 %
 % Authors: Diellor Basha, 2026
+if nargin < 7; nModes = []; end
 Est = struct();
 iGood = find(goodMask(:));
 snrLin = 10^(SNR/20);   % dB power-SNR -> linear amplitude-SNR for the inverse regularizers
@@ -61,7 +63,7 @@ if ~isempty(eigHmFile)
     eigCfg = {'mne','eig_mne_log'; 'dspm','eig_dspm_log'};
     for k = 1:size(eigCfg,1)
         [Inv, errE] = bst_inverse_eigenmodes(eigHmFile, ncFile, chFile, goodMask, ...
-            'Method', eigCfg{k,1}, 'Prior', 'log', 'SNR', snrLin);
+            'Method', eigCfg{k,1}, 'Prior', 'log', 'SNR', snrLin, 'nModes', nModes);
         if ~isempty(errE); continue; end
         [EigK,~] = in_tess_eigenmodes(Inv.SurfaceFile);
         Phi = double(EigK.Vectors(:, 1:Inv.nModes));
