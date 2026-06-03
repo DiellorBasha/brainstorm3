@@ -79,7 +79,7 @@ for ir=1:numel(regimes)
     end
     for is=1:numel(stdMethods)
         ref = median(locOf(stdMethods(is), regimes(ir)));
-        yline(ref, '--', char(stdMethods(is)), 'LabelHorizontalAlignment','left');
+        yline(ref, '--', char(stdMethods(is)), 'LabelHorizontalAlignment','left', 'HandleVisibility','off');
     end
     xlabel('Total modes K'); ylabel('Median LocError (mm)'); title(regimes(ir)); grid on;
     if ir==1; legend('Location','northeast'); end
