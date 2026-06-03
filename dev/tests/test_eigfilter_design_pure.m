@@ -61,5 +61,13 @@ colD = panel_eigenmodes('GetDisplayColumn', 'fake_surf.mat', PairedGrid);
 assert(isequal(size(colD),[nV 1]) && all(isfinite(colD)), 'delta column shape/finite.');
 assert(abs(colD(6)) == max(abs(colD)), 'delta point-spread peaks at the impulse vertex.');
 
+% --- ParamRange: scalar params adjustable; ideal's 2-element 'band' is not (no crash) ---
+mh = bst_eigfilter_kernel('info', 'heat');
+[smn, smx, okh] = panel_eigenmodes('ParamRange', mh.params.t);
+assert(okh && smn > 0 && smx > smn, 'heat t must be adjustable with valid bounds.');
+mi = bst_eigfilter_kernel('info', 'ideal');
+[~, ~, oki] = panel_eigenmodes('ParamRange', mi.params.band);
+assert(~oki, 'ideal band (non-scalar default, no range field) must be flagged non-adjustable.');
+
 disp('ALL TESTS PASSED');
 end

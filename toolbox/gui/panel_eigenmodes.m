@@ -124,6 +124,16 @@ function [smin, smax] = KernelSliderRange(pdef, prange) %#ok<DEFNU>
     if smax <= smin; smax = smin * 100; end
 end
 
+%% ===== PURE: integer slider position (0..1000) <-> log-interpolated value =====
+function v = SliderToValue(islide, smin, smax) %#ok<DEFNU>
+    t = min(max(islide,0),1000) / 1000;
+    v = smin * (smax/smin)^t;       % geometric (log) interpolation
+end
+function islide = ValueToSlider(v, smin, smax) %#ok<DEFNU>
+    v = min(max(v, smin), smax);
+    islide = round(1000 * log(v/smin) / log(smax/smin));
+end
+
 %% ===== PURE: delta (impulse) point-spread = Phi*diag(g)*Phi'*M*e_i =====
 function ps = DeltaPointSpread(Eig, MassMatrix, g, iVertex) %#ok<DEFNU>
     nV = size(Eig.Vectors, 1);
@@ -172,6 +182,31 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jRadioGauss = gui_component('Radio', jPanelNew, '',  'Gauss', jGroup, '', @(h,ev)Shape_Callback('gain'));
     jRadioBox.setSelected(1);
 
+    jRadioKernel = gui_component('Radio', jPanelNew, '',  'Kernel', jGroup, '', @(h,ev)Shape_Callback('kernel'));
+    % Kernel dropdown (populated from the eigfilter registry)
+    jLabelKernel = gui_component('Label', jPanelNew, 'br', 'Kernel:'); %#ok<NASGU>
+    kernelNames  = bst_eigfilter_kernel('list');
+    jComboKernel = gui_component('ComboBox', jPanelNew, 'hfill', [], {kernelNames}, '', @(h,ev)KernelChanged_Callback());
+    % Two generic parameter sliders (relabeled per kernel; integer 0..1000 -> log value)
+    jLabelP1 = gui_component('Label', jPanelNew, 'br', 'p1');
+    jSliderP1 = JSlider(0, 1000, 500);
+    java_setcb(jSliderP1, 'StateChangedCallback', @(h,ev)ParamPreview_Callback(1), 'MouseReleasedCallback', @(h,ev)Param_Callback(1));
+    jPanelNew.add('hfill', jSliderP1);
+    jReadoutP1 = gui_component('Label', jPanelNew, '', '');
+    jLabelP2 = gui_component('Label', jPanelNew, 'br', 'p2');
+    jSliderP2 = JSlider(0, 1000, 500);
+    java_setcb(jSliderP2, 'StateChangedCallback', @(h,ev)ParamPreview_Callback(2), 'MouseReleasedCallback', @(h,ev)Param_Callback(2));
+    jPanelNew.add('hfill', jSliderP2);
+    jReadoutP2 = gui_component('Label', jPanelNew, '', '');
+    % Display mode + delta vertex (eigenmode-view figures)
+    jGroupDisp = ButtonGroup();
+    jLabelDisp = gui_component('Label', jPanelNew, 'br', 'Show:'); %#ok<NASGU>
+    jRadioSynth = gui_component('Radio', jPanelNew, '', 'Synthesis', jGroupDisp, '', @(h,ev)Display_Callback('synthesis'));
+    jRadioDelta = gui_component('Radio', jPanelNew, '', 'Delta',     jGroupDisp, '', @(h,ev)Display_Callback('delta'));
+    jRadioSynth.setSelected(1);
+    jLabelVtx = gui_component('Label', jPanelNew, 'br', 'Delta vertex:'); %#ok<NASGU>
+    jTextVtx  = gui_component('Text', jPanelNew, '', '1', [], '', @(h,ev)Vertex_Callback());
+
     ctrl = struct('jPanelTop',      jPanelNew, ...
                   'jCheckActive',   jCheckActive, ...
                   'jLabelReadout',  jLabelReadout, ...
@@ -182,7 +217,18 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                   'jLabelShape',    jLabelShape, ...
                   'jRadioBox',      jRadioBox, ...
                   'jRadioTaper',    jRadioTaper, ...
-                  'jRadioGauss',    jRadioGauss);
+                  'jRadioGauss',    jRadioGauss, ...
+                  'jRadioKernel',   jRadioKernel, ...
+                  'jComboKernel',   jComboKernel, ...
+                  'jLabelP1',       jLabelP1, ...
+                  'jSliderP1',      jSliderP1, ...
+                  'jReadoutP1',     jReadoutP1, ...
+                  'jLabelP2',       jLabelP2, ...
+                  'jSliderP2',      jSliderP2, ...
+                  'jReadoutP2',     jReadoutP2, ...
+                  'jRadioSynth',    jRadioSynth, ...
+                  'jRadioDelta',    jRadioDelta, ...
+                  'jTextVtx',       jTextVtx);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
@@ -249,6 +295,11 @@ function Width_Callback()
 end
 
 function Shape_Callback(shape)
+    if strcmpi(shape, 'kernel')
+        SetWeightMode('kernel');
+        return;
+    end
+    SetWeightMode('window');     % any window shape leaves kernel mode
     ctrl = bst_get('PanelControls', 'EigenModes');
     w = ReadWidth(ctrl, GetState().nModes);
     if (w == 0)
@@ -275,6 +326,104 @@ function shape = CurrentShape(ctrl)
     else
         shape = 'box';
     end
+end
+
+
+%% ===== KERNEL CALLBACKS (read controls -> kernel state verbs) =====
+function KernelChanged_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    name = char(ctrl.jComboKernel.getSelectedItem());
+    SetKernelName(name);
+    RefreshKernelControls();
+    UpdateResponsePlot();
+end
+
+function Param_Callback(idx)
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    v = ReadParamSlider(ctrl, idx);
+    if ~isempty(v); SetKernelParam(idx, v); end
+    UpdateResponsePlot();
+end
+
+function ParamPreview_Callback(idx)
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    sl = ctrl.(sprintf('jSliderP%d', idx));
+    if ~sl.getValueIsAdjusting(); return; end
+    v = ReadParamSlider(ctrl, idx);
+    if ~isempty(v); ctrl.(sprintf('jReadoutP%d', idx)).setText(sprintf('%.4g', v)); end
+end
+
+function Display_Callback(mode)
+    SetDisplayMode(mode);
+end
+
+function Vertex_Callback()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    v = str2double(char(ctrl.jTextVtx.getText()));
+    if ~isnan(v); SetDeltaVertex(v); end
+end
+
+
+%% ===== KERNEL HELPERS: param-slider read + relabel + response plot =====
+%% ===== PURE: slider bounds for a kernel param; ok=false if not scalar-adjustable =====
+% Robust to params that lack a 'range' field or carry a non-scalar default (e.g.
+% ideal's 2-element 'band'): those are flagged non-adjustable so the slider logic
+% disables them instead of crashing.
+function [smin, smax, ok] = ParamRange(pinfo) %#ok<DEFNU>
+    smin = 0; smax = 1;
+    ok = isfield(pinfo,'default') && isnumeric(pinfo.default) && isscalar(pinfo.default);
+    if ~ok; return; end
+    prange = [];
+    if isfield(pinfo,'range'); prange = pinfo.range; end
+    [smin, smax] = KernelSliderRange(pinfo.default, prange);
+end
+
+function v = ReadParamSlider(ctrl, idx)
+    v = [];
+    st = GetState();
+    meta = bst_eigfilter_kernel('info', st.KernelName);
+    fn = fieldnames(meta.params);
+    if idx > numel(fn); return; end
+    [smin, smax, ok] = ParamRange(meta.params.(fn{idx}));
+    if ~ok; return; end                          % non-scalar param: not slider-adjustable
+    sl = ctrl.(sprintf('jSliderP%d', idx));
+    v = SliderToValue(sl.getValue(), smin, smax);
+end
+
+function RefreshKernelControls()
+    ctrl = bst_get('PanelControls', 'EigenModes');
+    if isempty(ctrl) || ~isfield(ctrl,'jComboKernel'); return; end
+    st = GetState();
+    meta = bst_eigfilter_kernel('info', st.KernelName);
+    fn = fieldnames(meta.params);
+    for idx = 1:2
+        L  = ctrl.(sprintf('jLabelP%d', idx));
+        S  = ctrl.(sprintf('jSliderP%d', idx));
+        RO = ctrl.(sprintf('jReadoutP%d', idx));
+        if idx <= numel(fn)
+            [smin, smax, ok] = ParamRange(meta.params.(fn{idx}));
+            L.setEnabled(true); L.setText(fn{idx});
+            S.setEnabled(ok); RO.setEnabled(ok);
+            if ok
+                S.setValue(ValueToSlider(st.KernelParams.(fn{idx}), smin, smax));
+                RO.setText(sprintf('%.4g', st.KernelParams.(fn{idx})));
+            else
+                RO.setText('(fixed)');           % non-scalar param uses its default
+            end
+        else
+            L.setEnabled(false); L.setText(sprintf('p%d', idx));
+            S.setEnabled(false); RO.setEnabled(false); RO.setText('');
+        end
+    end
+end
+
+function UpdateResponsePlot()
+    st = GetState();
+    if ~strcmpi(st.WeightMode,'kernel') || isempty(st.CacheEig); return; end
+    g = st.KernelFn;
+    if isempty(g); g = bst_eigfilter_kernel(st.KernelName, st.KernelParams); end
+    meta = bst_eigfilter_kernel('info', st.KernelName);
+    view_eigfilter_response(g, st.CacheEig.Values(:), meta.display);
 end
 
 
@@ -332,7 +481,8 @@ end
 
 %% ===== helpers =====
 function SetSelectEnabled(ctrl, isOn)
-    sel = {'jSliderCenter','jTextWidth','jRadioBox','jRadioTaper','jRadioGauss'};
+    sel = {'jSliderCenter','jTextWidth','jRadioBox','jRadioTaper','jRadioGauss', ...
+           'jRadioKernel','jComboKernel','jSliderP1','jSliderP2','jRadioSynth','jRadioDelta','jTextVtx'};
     for i = 1:numel(sel)
         if isfield(ctrl, sel{i}) && isa(ctrl.(sel{i}), 'javax.swing.JComponent')
             ctrl.(sel{i}).setEnabled(logical(isOn));
@@ -364,6 +514,13 @@ function RefreshControls()
         case 'tapered', ctrl.jRadioTaper.setSelected(true);
         case 'gain',    ctrl.jRadioGauss.setSelected(true);
         otherwise,      ctrl.jRadioBox.setSelected(true);
+    end
+    if isfield(ctrl,'jRadioKernel')
+        ctrl.jRadioKernel.setSelected(strcmpi(st.WeightMode,'kernel'));
+        ctrl.jRadioSynth.setSelected(strcmpi(st.DisplayMode,'synthesis'));
+        ctrl.jRadioDelta.setSelected(strcmpi(st.DisplayMode,'delta'));
+        ctrl.jTextVtx.setText(num2str(st.DeltaVertex));
+        RefreshKernelControls();
     end
     nKeep = nnz(st.Weights > 1e-6);
     lamStr = '';
@@ -519,6 +676,56 @@ function SetWindowShape(shape) %#ok<DEFNU>
         GlobalData.UserModes.BandSpan = 0;   % zero width so the slider stays single
     end
     RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: weight mode ('window' | 'kernel') =====
+function SetWeightMode(mode) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    GlobalData.UserModes.WeightMode = lower(mode);
+    RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: select a spectral kernel (resets params to defaults) =====
+function SetKernelName(name) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    meta = bst_eigfilter_kernel('info', name);
+    p = struct();
+    fn = fieldnames(meta.params);
+    for i = 1:numel(fn); p.(fn{i}) = meta.params.(fn{i}).default; end
+    GlobalData.UserModes.KernelName   = name;
+    GlobalData.UserModes.KernelParams = p;
+    GlobalData.UserModes.WeightMode   = 'kernel';
+    RecomputeWeights();
+    NotifyChanged();
+end
+
+%% ===== STATE: set one kernel parameter by index =====
+function SetKernelParam(idx, value) %#ok<DEFNU>
+    global GlobalData;
+    GetState();
+    fn = fieldnames(GlobalData.UserModes.KernelParams);
+    if idx <= numel(fn)
+        GlobalData.UserModes.KernelParams.(fn{idx}) = value;
+        RecomputeWeights();
+        NotifyChanged();
+    end
+end
+
+%% ===== STATE: display mode for eigenmode-view ('synthesis' | 'delta') =====
+function SetDisplayMode(mode) %#ok<DEFNU>
+    global GlobalData; GetState();
+    GlobalData.UserModes.DisplayMode = lower(mode);
+    NotifyChanged();
+end
+
+%% ===== STATE: delta (impulse) source vertex =====
+function SetDeltaVertex(v) %#ok<DEFNU>
+    global GlobalData; GetState();
+    GlobalData.UserModes.DeltaVertex = max(round(v),1);
     NotifyChanged();
 end
 
