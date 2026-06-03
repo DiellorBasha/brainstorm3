@@ -54,20 +54,20 @@ if size(Lc,2) ~= nVert
         'Leadfield has %d sources but eigenmodes have %d vertices.', size(Lc,2), nVert);
 end
 
-% Clamp K
+% Clamp K (default: all modes; truncation is an inverse-side concern).
 if isempty(nModes) || nModes <= 0
     K = nModesAll;
 else
     K = min(nModes, nModesAll);
 end
-% Select the K globally-lowest-eigenvalue modes across ALL connected components
-% (hemispheres). Eigenmodes are stored grouped by component (tess_eigenmodes
-% solves each hemisphere separately and concatenates), so a naive first-K slice
-% Phi(:,1:K) would keep only one hemisphere. Sort by eigenvalue and keep the K
-% lowest spatial frequencies whole-brain. The selected column indices are
-% recorded in ModeIndices so the inverse reconstruction
-% (bst_eigenmode_reconstruct) uses the exact same modes in the same order.
-[~, order] = sort(Values, 'ascend');
+% Canonical selection from the surface's single global eigenvalue order. Recorded as
+% ModeIndices so the inverse reconstruction (bst_eigenmode_reconstruct) uses the same
+% modes in the same order.
+if isfield(Eigenmodes,'Order') && ~isempty(Eigenmodes.Order) && numel(Eigenmodes.Order)==nModesAll
+    order = double(Eigenmodes.Order(:));
+else
+    [~, order] = sort(Values, 'ascend');
+end
 sel = order(1:K);
 PhiSel = Phi(:, sel);
 
