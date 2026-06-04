@@ -80,6 +80,13 @@ These were settled before design and constrain the implementation:
   proven to machine precision by the `tess_laplacian` parity test).
 - The connection Laplacian assembly requires a clean 2-manifold; nxr throws
   `nxr:nonManifold` otherwise.
+- **nxr's `solve` is real-only.** `mxToEigenSparse` (`marshal.h:108`) rejects a
+  complex sparse matrix (`"expected real double sparse matrix"`), so
+  `nxr_compute('solve', K, M, k)` cannot consume the complex `K`. The complex
+  Hermitian generalized eigenproblem `K φ = λ M φ` is solved natively by
+  **MATLAB `eigs`** (which handles a Hermitian `K` + Hermitian-PD `M`). Wiring a
+  proper nxr-side solve (via the real2N packing + pair recombination) is an
+  eigenmode-milestone concern, not M1.
 
 ## 4. Interface
 
@@ -134,37 +141,40 @@ geometry-central's Levi-Civita transport vectors).
 ## 7. Tests
 
 Function-style scripts under `dev/tests/` (repo idiom; run via the MATLAB MCP,
-not `runtests`). Tests load the **real Brainstorm cortex** from the current
-`TutorialAnatomy` protocol — `cortex_20484V` — so they exercise the true tess
-file pattern (genuine cortical geometry, two hemisphere components, the
-`TessMat` struct we expect downstream) rather than a synthetic sphere. Resolve
-the surface via the DB (e.g. `bst_get('ProtocolInfo')` →
-`bst_get('SurfaceFileByType', ..., 'Cortex')` / a `cortex_20484V` match) and
-`in_tess_bst` to obtain `Vertices`/`Faces`.
+not `runtests`). Tests load a **real 20484-vertex Brainstorm cortex** so they
+exercise the true tess file pattern (genuine cortical geometry, two hemisphere
+components, the `TessMat` struct we expect downstream) rather than a synthetic
+sphere. The resolver matches a `Cortex` surface by **vertex count (20484)** —
+not by filename — preferring one with a FreeSurfer registration sphere, via
+`bst_get('ProtocolSubjects')` + `in_tess_bst`. On this machine the match is
+**TutorialAuditory / Subject01** (`tess_cortex_*_low.mat`, nV=20484, with
+Reg.Sphere + Structures atlas); there is no `TutorialAnatomy` protocol. Tests
+skip cleanly if no 20484-vertex cortex is loaded.
 
-1. **Smoke** (`test_connection_laplacian_smoke.m`): on `cortex_20484V`, assemble
-   `K`; assert `N x N` (`N = nV`), complex, sparse, Hermitian; `M` diagonal and
-   positive; `Info` fields correct (including string `Domain`/`Format`).
+1. **Smoke** (`test_connection_laplacian_smoke.m`): on the 20484-vertex cortex,
+   assemble `K`; assert `N x N` (`N = nV`), complex, sparse, Hermitian; `M`
+   diagonal and positive; `Info` fields correct (including string `Domain`/`Format`).
 2. **Spectral sanity** (`test_connection_laplacian_spectrum.m`): solve the
-   smallest `k` modes via `nxr_compute('solve', K, M, k)`; assert eigenvalues
-   real and ≥ 0; the lowest non-trivial mode is a smooth field (qualitative —
+   smallest `k` modes with **MATLAB `eigs(K, M, k, 'smallestabs')`** (nxr's solve
+   is real-only — see §3); assert eigenvalues are real (negligible imaginary
+   part) and ≥ 0; the lowest non-trivial mode is a smooth field (qualitative —
    full spectral validation belongs to the eigenmode milestone). Note the
    whole-mesh operator is block-diagonal across the two hemispheres.
 3. **nSym variants** (`test_connection_laplacian_nsym.m`): `nSym = 1, 2, 4` each
-   assemble and remain Hermitian on `cortex_20484V`.
+   assemble and remain Hermitian on the 20484-vertex cortex.
 4. **Backend guard** (`test_connection_laplacian_guard.m`): with nxr unloaded,
    an informative error is raised.
 
-The tests assume the `TutorialAnatomy` protocol is loaded with `cortex_20484V`
-present; they skip with a clear message if the surface cannot be resolved (so
-they degrade gracefully on a machine without that protocol).
+The tests resolve a 20484-vertex cortex from the loaded protocol (on this
+machine: TutorialAuditory / Subject01) and skip with a clear message if none is
+present, so they degrade gracefully on a machine without a suitable protocol.
 
 ## 8. Files
 
 | Path | Change |
 |---|---|
 | `toolbox/anatomy/tess_connection_laplacian.m` | New: the operator function, with its own local `nxr_is_loaded` subfunction. |
-| `dev/tests/test_connection_laplacian_*.m` | New: the four tests above (load `cortex_20484V` from `TutorialAnatomy`). |
+| `dev/tests/test_connection_laplacian_*.m` | New: the four tests above (resolve a 20484-vertex cortex from the loaded protocol). |
 
 `tess_laplacian.m` is **not** modified.
 

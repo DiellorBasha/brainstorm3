@@ -17,7 +17,7 @@
 | Path | Responsibility |
 |---|---|
 | `toolbox/anatomy/tess_connection_laplacian.m` | The operator function + a local `nxr_is_loaded` subfunction (copy of `tess_laplacian`'s; no shared-helper refactor). |
-| `dev/tests/test_connection_laplacian_smoke.m` | Assemble on real `cortex_20484V`; assert shape/complex/Hermitian/mass/Info. |
+| `dev/tests/test_connection_laplacian_smoke.m` | Assemble on a real 20484-vertex cortex; assert shape/complex/Hermitian/mass/Info. |
 | `dev/tests/test_connection_laplacian_spectrum.m` | Smallest-`k` modes via MATLAB `eigs`; eigenvalues real & ≥ 0. |
 | `dev/tests/test_connection_laplacian_nsym.m` | `nSym = 1,2,4` each assemble and stay Hermitian. |
 | `dev/tests/test_connection_laplacian_guard.m` | nxr unloaded → `nxrNotLoaded` error (reloads in cleanup). |
@@ -38,9 +38,10 @@ Create `dev/tests/test_connection_laplacian_smoke.m`:
 
 ```matlab
 function test_connection_laplacian_smoke
-% Smoke test for tess_connection_laplacian on the real TutorialAnatomy cortex
-% (cortex_20484V): the complex-Hermitian vertex connection Laplacian, its lumped
-% mass, and the Info struct. Pure (V,F) operator — no storage, no readout.
+% Smoke test for tess_connection_laplacian on a real 20484-vertex Brainstorm
+% cortex (e.g. TutorialAuditory Subject01 tess_cortex_*_low): the complex-
+% Hermitian vertex connection Laplacian, its lumped mass, and the Info struct.
+% Pure (V,F) operator — no storage, no readout.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
 addpath(repoRoot);
@@ -56,7 +57,7 @@ bst_plugin('Load', 'nxr-compute');
 % --- Resolve the real cortex_20484V from the current protocol ---
 SurfaceFile = find_cortex_20484V();
 if isempty(SurfaceFile)
-    fprintf('SKIP: cortex_20484V not found in the current protocol (load TutorialAnatomy).\n');
+    fprintf('SKIP: no 20484-vertex cortex in the current protocol (e.g. load TutorialAuditory / Subject01).\n');
     return;
 end
 fprintf('Source cortex: %s\n', SurfaceFile);
@@ -92,20 +93,42 @@ end
 
 
 function SurfaceFile = find_cortex_20484V()
-% Return the FileName of a cortex surface whose name contains 'cortex_20484V'
-% in the current protocol, or '' if none (e.g. wrong protocol loaded).
+% Return the FileName of a Cortex surface with exactly 20484 vertices ("20484V")
+% in the current protocol, preferring one with a FreeSurfer registration sphere;
+% '' if none (e.g. no suitable protocol loaded).
 SurfaceFile = '';
 sSubjects = bst_get('ProtocolSubjects');
+if isempty(sSubjects)
+    return;
+end
 allSubj = [sSubjects.Subject];
+fallback = '';
 for iS = 1:numel(allSubj)
     surf = allSubj(iS).Surface;
     for iF = 1:numel(surf)
-        if strcmpi(surf(iF).SurfaceType, 'Cortex') && ...
-           ~isempty(strfind(lower(surf(iF).FileName), 'cortex_20484v'))
-            SurfaceFile = surf(iF).FileName;
+        if ~strcmpi(surf(iF).SurfaceType, 'Cortex')
+            continue;
+        end
+        try
+            T = load(file_fullpath(surf(iF).FileName), 'Vertices', 'Reg');
+        catch
+            continue;
+        end
+        if size(T.Vertices, 1) ~= 20484   % "20484V" = vertex count, not a filename
+            continue;
+        end
+        hasReg = isfield(T,'Reg') && isstruct(T.Reg) && isfield(T.Reg,'Sphere') ...
+                 && isfield(T.Reg.Sphere,'Vertices') && ~isempty(T.Reg.Sphere.Vertices);
+        if hasReg
+            SurfaceFile = surf(iF).FileName;   % prefer a registered cortex
             return;
+        elseif isempty(fallback)
+            fallback = surf(iF).FileName;
         end
     end
+end
+if isempty(SurfaceFile)
+    SurfaceFile = fallback;
 end
 end
 ```
@@ -280,7 +303,7 @@ end
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run (MATLAB MCP `run_matlab_file`): `dev/tests/test_connection_laplacian_smoke.m`
-Expected: PASS — prints `ALL TESTS PASSED: test_connection_laplacian_smoke` (or `SKIP:` if the cortex isn't in the loaded protocol — in that case load TutorialAnatomy and re-run).
+Expected: PASS — prints `ALL TESTS PASSED: test_connection_laplacian_smoke` (or `SKIP:` if no 20484-vertex cortex is in the loaded protocol — in that case load TutorialAuditory / Subject01 and re-run).
 
 - [ ] **Step 5: Commit**
 
@@ -320,7 +343,7 @@ bst_plugin('Load', 'nxr-compute');
 
 SurfaceFile = find_cortex_20484V();
 if isempty(SurfaceFile)
-    fprintf('SKIP: cortex_20484V not found in the current protocol (load TutorialAnatomy).\n');
+    fprintf('SKIP: no 20484-vertex cortex in the current protocol (e.g. load TutorialAuditory / Subject01).\n');
     return;
 end
 TessMat = in_tess_bst(SurfaceFile);
@@ -350,16 +373,37 @@ end
 function SurfaceFile = find_cortex_20484V()
 SurfaceFile = '';
 sSubjects = bst_get('ProtocolSubjects');
+if isempty(sSubjects)
+    return;
+end
 allSubj = [sSubjects.Subject];
+fallback = '';
 for iS = 1:numel(allSubj)
     surf = allSubj(iS).Surface;
     for iF = 1:numel(surf)
-        if strcmpi(surf(iF).SurfaceType, 'Cortex') && ...
-           ~isempty(strfind(lower(surf(iF).FileName), 'cortex_20484v'))
-            SurfaceFile = surf(iF).FileName;
+        if ~strcmpi(surf(iF).SurfaceType, 'Cortex')
+            continue;
+        end
+        try
+            T = load(file_fullpath(surf(iF).FileName), 'Vertices', 'Reg');
+        catch
+            continue;
+        end
+        if size(T.Vertices, 1) ~= 20484   % "20484V" = vertex count, not a filename
+            continue;
+        end
+        hasReg = isfield(T,'Reg') && isstruct(T.Reg) && isfield(T.Reg,'Sphere') ...
+                 && isfield(T.Reg.Sphere,'Vertices') && ~isempty(T.Reg.Sphere.Vertices);
+        if hasReg
+            SurfaceFile = surf(iF).FileName;   % prefer a registered cortex
             return;
+        elseif isempty(fallback)
+            fallback = surf(iF).FileName;
         end
     end
+end
+if isempty(SurfaceFile)
+    SurfaceFile = fallback;
 end
 end
 ```
@@ -404,7 +448,7 @@ bst_plugin('Load', 'nxr-compute');
 
 SurfaceFile = find_cortex_20484V();
 if isempty(SurfaceFile)
-    fprintf('SKIP: cortex_20484V not found in the current protocol (load TutorialAnatomy).\n');
+    fprintf('SKIP: no 20484-vertex cortex in the current protocol (e.g. load TutorialAuditory / Subject01).\n');
     return;
 end
 TessMat = in_tess_bst(SurfaceFile);
@@ -427,16 +471,37 @@ end
 function SurfaceFile = find_cortex_20484V()
 SurfaceFile = '';
 sSubjects = bst_get('ProtocolSubjects');
+if isempty(sSubjects)
+    return;
+end
 allSubj = [sSubjects.Subject];
+fallback = '';
 for iS = 1:numel(allSubj)
     surf = allSubj(iS).Surface;
     for iF = 1:numel(surf)
-        if strcmpi(surf(iF).SurfaceType, 'Cortex') && ...
-           ~isempty(strfind(lower(surf(iF).FileName), 'cortex_20484v'))
-            SurfaceFile = surf(iF).FileName;
+        if ~strcmpi(surf(iF).SurfaceType, 'Cortex')
+            continue;
+        end
+        try
+            T = load(file_fullpath(surf(iF).FileName), 'Vertices', 'Reg');
+        catch
+            continue;
+        end
+        if size(T.Vertices, 1) ~= 20484   % "20484V" = vertex count, not a filename
+            continue;
+        end
+        hasReg = isfield(T,'Reg') && isstruct(T.Reg) && isfield(T.Reg,'Sphere') ...
+                 && isfield(T.Reg.Sphere,'Vertices') && ~isempty(T.Reg.Sphere.Vertices);
+        if hasReg
+            SurfaceFile = surf(iF).FileName;   % prefer a registered cortex
             return;
+        elseif isempty(fallback)
+            fallback = surf(iF).FileName;
         end
     end
+end
+if isempty(SurfaceFile)
+    SurfaceFile = fallback;
 end
 end
 ```
@@ -526,6 +591,6 @@ git commit -m "test(connection-laplacian): nxrNotLoaded guard when plugin unload
 
 - **Run tests via the MATLAB MCP** (`run_matlab_file` on the test path), not `runtests` — these are plain function-style scripts, matching the repo idiom (e.g. `dev/tests/test_tess_tangents.m`).
 - **Live MATLAB session:** never use `clear` (it wipes `GlobalData` and hangs the session); edited `.m` files auto-reload. Unloading/reloading a plugin (Task 4) is fine.
-- **Protocol prerequisite:** the cortex tests need the `TutorialAnatomy` protocol loaded with `cortex_20484V`. They `SKIP` cleanly otherwise — load that protocol and re-run if you see a SKIP.
+- **Protocol prerequisite:** the cortex tests need a protocol with a 20484-vertex cortex loaded. On this machine that is **TutorialAuditory / Subject01** (`tess_cortex_pial_low.mat` etc., nV=20484, with Reg.Sphere + Structures atlas). There is no `TutorialAnatomy` protocol here; the resolver matches by vertex count, not filename. Tests `SKIP` cleanly if none is loaded.
 - **`strfind` vs `contains`:** `strfind` is used for broad MATLAB-version compatibility, matching the existing test idiom.
 ```
