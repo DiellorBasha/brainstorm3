@@ -163,8 +163,15 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     else
         K = min(nModesOpt, K_available);
     end
-    Phi     = double(Eigenmodes.Vectors(:, 1:K));
-    lambdas = double(Eigenmodes.Values(1:K));
+    % Canonical selection (whole-brain lowest spatial frequencies, never one hemisphere).
+    if isfield(Eigenmodes,'Order') && ~isempty(Eigenmodes.Order)
+        order = double(Eigenmodes.Order(:));
+    else
+        [~, order] = sort(double(Eigenmodes.Values(:)), 'ascend');
+    end
+    sel     = order(1:K);
+    Phi     = double(Eigenmodes.Vectors(:, sel));
+    lambdas = double(Eigenmodes.Values(sel));
 
     [Kernel, Info] = bst_eigenmodes_transform(Gain(iMEG, :), Phi);   % [K x nCh]
 
