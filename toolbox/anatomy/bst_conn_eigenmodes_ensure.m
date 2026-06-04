@@ -10,8 +10,10 @@ function ConnEig = bst_conn_eigenmodes_ensure(SurfaceFile, nModesPerHemi)
 %     If the surface already carries ConnEigenmodes, they are returned as-is.
 %     Otherwise a default set is computed and stored. When nModesPerHemi is not
 %     given, the per-component count is matched to the surface's scalar Eigenmodes
-%     axis (round(nModes / nComponents)), ensuring that axis exists first via
-%     bst_eigenmodes_ensure. NO repair is attempted: a non-manifold surface raises
+%     axis as round(nModes / nComponents) -- the per-component average, exact for
+%     equal-sized components and within one mode otherwise -- ensuring that axis
+%     exists first via bst_eigenmodes_ensure. NO repair is attempted: a non-manifold
+%     surface raises
 %     an error (repair changes the vertex count and breaks surface<->eigenmode
 %     consistency). Remesh to an icosphere instead.
 %

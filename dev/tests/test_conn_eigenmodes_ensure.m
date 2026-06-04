@@ -29,25 +29,36 @@ F = double(TessMat.Faces);
 sEig = tess_eigenmodes(V, F, 'nModes', 15, 'MassType', 'barycentric', 'RemoveDC', 1);
 out_tess_eigenmodes(tmpFile, sEig, V, F);
 sEigStored = in_tess_eigenmodes(tmpFile);
-expectedPerHemi = max(1, round(sEigStored.nModes / sEigStored.nComponents));
 
 % --- Ensure with no count: derives + computes + stores ---
 ConnEig = bst_conn_eigenmodes_ensure(tmpFile);
 assert(ConnEig.nComponents == sEigStored.nComponents, 'Component count should match the mesh.');
+% Independent match-scalar check: the connection axis must carry the same
+% per-component mode count as the scalar axis it was matched to (compared against
+% the scalar axis's ACTUAL per-component counts, not the production formula). The
+% production count is the rounded per-mesh average, so allow a 1-mode rounding gap.
 for c = 1:ConnEig.nComponents
-    nc = sum(ConnEig.Component == c);
-    assert(nc == expectedPerHemi, ...
-        'Component %d: expected %d connection modes (match scalar), got %d.', c, expectedPerHemi, nc);
+    nConn   = sum(ConnEig.Component == c);
+    nScalar = sum(sEigStored.Component == c);
+    assert(abs(nConn - nScalar) <= 1, ...
+        'Component %d: connection modes (%d) must match scalar modes (%d) within rounding.', ...
+        c, nConn, nScalar);
 end
-fprintf('PASSED: match-scalar count = %d modes/component.\n', expectedPerHemi);
+fprintf('PASSED: match-scalar per-component count (component 1: %d conn vs %d scalar).\n', ...
+    sum(ConnEig.Component == 1), sum(sEigStored.Component == 1));
 
-% --- Second call reuses (idempotent, fast: load not recompute) ---
-tReuse = tic;
+% --- The scalar Eigenmodes axis must be untouched by the connection ensure ---
+sEigAfter = in_tess_eigenmodes(tmpFile);
+assert(sEigAfter.nModes == sEigStored.nModes && sEigAfter.nComponents == sEigStored.nComponents, ...
+    'Scalar Eigenmodes axis must remain intact after the connection ensure.');
+fprintf('PASSED: scalar Eigenmodes axis intact (%d modes).\n', sEigAfter.nModes);
+
+% --- Second call reuses (idempotent: returns the stored struct, not a recompute) ---
 ConnEig2 = bst_conn_eigenmodes_ensure(tmpFile);
-elapsed = toc(tReuse);
 assert(ConnEig2.nModes == ConnEig.nModes, 'Reuse must return the same nModes.');
-assert(elapsed < 5, 'Reuse should be fast (no recompute); took %.1fs.', elapsed);
-fprintf('PASSED: reuse is idempotent (%.2fs, %d modes).\n', elapsed, ConnEig2.nModes);
+assert(ConnEig2.ComputeTime == ConnEig.ComputeTime, ...
+    'Reuse must return the stored struct (identical ComputeTime), not recompute.');
+fprintf('PASSED: reuse is idempotent (%d modes, ComputeTime preserved).\n', ConnEig2.nModes);
 
 fprintf('ALL TESTS PASSED: test_conn_eigenmodes_ensure\n');
 end
