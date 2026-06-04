@@ -85,6 +85,24 @@ end
 Faces = double(Faces);
 nV    = size(Vertices, 1);
 
+%% ===== VALIDATE MESH (NEVER AUTO-REPAIR) =====
+% Mirror tess_eigenmodes: validate the 2-manifold via the shared tess_manifold
+% module and fail fast with a clean error. This gates BEFORE the (nxr-backed)
+% operator assembly, which would otherwise throw a low-level geometry-central
+% assertion on a non-manifold mesh. Repair is never attempted: it changes the
+% vertex count and desyncs head models / lead fields / atlases.
+[~, ~, isManifold, report] = tess_manifold(Vertices, Faces, 'Repair', 0, 'Verbose', Verbose);
+if ~isManifold
+    if isfield(report, 'summary') && ~isempty(report.summary)
+        defects = strjoin(report.summary, '; ');
+    else
+        defects = 'non-manifold mesh';
+    end
+    error('tess_conn_eigenmodes:NonManifold', ...
+        ['Surface is not a clean 2-manifold (%s). Connection eigenmodes require a ' ...
+         '2-manifold mesh; re-mesh with icosphere downsampling.'], defects);
+end
+
 %% ===== WHOLE-MESH OPERATOR + MASS (complex Hermitian) =====
 [K, M] = tess_connection_laplacian(Vertices, Faces, 'nSym', nSym, 'Regularization', Regularization);
 

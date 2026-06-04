@@ -46,14 +46,9 @@ if isComputed && ~isempty(Eig)
     return;
 end
 
-% Compute a default set. Guard manifoldness first -- no silent repair.
+% Compute a default set. tess_eigenmodes validates the 2-manifold itself
+% (no silent repair), erroring on a non-manifold mesh.
 Surf = in_tess_bst(SurfaceFile, 0);
-mani = tess_manifold(Surf.Vertices, Surf.Faces);
-if isstruct(mani) && isfield(mani, 'isManifold') && ~mani.isManifold
-    error('bst_eigenmodes_ensure:NonManifold', ...
-        ['Surface %s is non-manifold; eigenmodes require a 2-manifold mesh. ' ...
-         'Remesh to an icosphere (or repair manually) and retry.'], SurfaceFile);
-end
 
 Eig = tess_eigenmodes(Surf.Vertices, Surf.Faces, 'nModes', nModesPerHemi, ...
     'MassType', 'barycentric', 'RemoveDC', 1);

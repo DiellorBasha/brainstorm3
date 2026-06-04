@@ -53,14 +53,9 @@ if nargin < 2 || isempty(nModesPerHemi)
     nModesPerHemi = max(1, round(sEig.nModes / max(1, sEig.nComponents)));
 end
 
-% Compute a default set. Guard manifoldness first -- no silent repair.
+% Compute a default set. tess_conn_eigenmodes validates the 2-manifold itself
+% (no silent repair), raising tess_conn_eigenmodes:NonManifold on a bad mesh.
 Surf = in_tess_bst(SurfaceFile, 0);
-mani = tess_manifold(Surf.Vertices, Surf.Faces);
-if isstruct(mani) && isfield(mani, 'isManifold') && ~mani.isManifold
-    error('bst_conn_eigenmodes_ensure:NonManifold', ...
-        ['Surface %s is non-manifold; connection eigenmodes require a 2-manifold mesh. ' ...
-         'Remesh to an icosphere (or repair manually) and retry.'], SurfaceFile);
-end
 
 ConnEig = tess_conn_eigenmodes(Surf.Vertices, Surf.Faces, 'nModes', nModesPerHemi);
 out_tess_conn_eigenmodes(SurfaceFile, ConnEig, Surf.Vertices, Surf.Faces);
