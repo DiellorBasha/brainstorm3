@@ -33,6 +33,10 @@ function R = bst_conn_phase(ConnEig, vFrame, varargin)
 %     R.Magnitude    : [nV x 1] |z|; 0 off-support.
 %     R.Phase        : [nV x 1] FS-gauge phase in [-pi, pi]; NaN off-support / no FsFrame.
 %     R.Singularities: [k x 1] vertex indices (the nSing smallest-|z| per component).
+%                      MARKER HEURISTIC ONLY: these may be spatially adjacent (a
+%                      single magnitude dip spread over neighbouring vertices) and
+%                      are not guaranteed to be the distinct topological
+%                      singularities; robust index-based detection is future work.
 %     R.Rank         : the rank used.
 %
 % SEE ALSO: in_tess_conn_eigenmodes, bst_tangent_face2vertex, nxr.manifold.measure.vertexFrame
