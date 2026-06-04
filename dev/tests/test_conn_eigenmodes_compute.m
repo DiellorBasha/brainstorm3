@@ -41,20 +41,21 @@ assert(isequal(size(K), [nV nV]) && ~isreal(K), 'Returned K must be nV x nV comp
 % --- Canonical order sorts Values ascending ---
 assert(issorted(ConnEig.Values(ConnEig.Order)), 'Order must sort Values ascending.');
 
-% --- Per-component checks (first component) ---
+% --- Per-component checks (all components) ---
 compId = conncomp(graph(tess_vertconn(V, F)));
 assert(ConnEig.nComponents == max(compId), 'nComponents mismatch.');
-c    = 1;
-idx  = find(compId == c);
-cols = find(ConnEig.Component == c);
-Uc   = ConnEig.Vectors(idx, cols);
-Mc   = M(idx, idx);
-% Block structure: a component's modes vanish off that component.
-other = setdiff((1:nV)', idx);
-assert(max(max(abs(ConnEig.Vectors(other, cols)))) < 1e-10, 'Component modes must vanish off-component.');
-% M-orthonormality (Hermitian inner product; '' is conjugate transpose).
-G = Uc' * Mc * Uc;
-assert(max(max(abs(G - eye(size(G))))) < 1e-6, 'Per-component modes must be M-orthonormal.');
+for c = 1:ConnEig.nComponents
+    idx  = find(compId == c);
+    cols = find(ConnEig.Component == c);
+    Uc   = ConnEig.Vectors(idx, cols);
+    Mc   = M(idx, idx);
+    % Block structure: a component's modes vanish off that component.
+    other = setdiff((1:nV)', idx);
+    assert(max(max(abs(ConnEig.Vectors(other, cols)))) < 1e-10, 'Component %d modes must vanish off-component.', c);
+    % M-orthonormality (Hermitian inner product; '' is conjugate transpose).
+    G = Uc' * Mc * Uc;
+    assert(max(max(abs(G - eye(size(G))))) < 1e-6, 'Component %d modes must be M-orthonormal.', c);
+end
 
 fprintf('PASSED: %d-mode connection eigenbasis (nV=%d, %d components): complex, real>0 eigenvalues, block-structured, M-orthonormal.\n', ...
     ConnEig.nModes, nV, ConnEig.nComponents);

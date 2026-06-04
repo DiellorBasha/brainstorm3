@@ -108,24 +108,33 @@ for c = 1:nComp
     vIdx = find(compId == c);
     nvc  = numel(vIdx);
     kC   = min(nModes, nvc - 2);            % leave an eigs margin
+    if kC < 1
+        if Verbose
+            fprintf('BST> tess_conn_eigenmodes: skipping component %d (%d vertices, too small).\n', c, nvc);
+        end
+        continue;
+    end
     Kc   = K(vIdx, vIdx);
     Mc   = M(vIdx, vIdx);
     [Uc, Dc] = eigs(Kc, Mc, kC, 'smallestabs', eigsOpts);
     lam = real(diag(Dc));
     [lam, ord] = sort(lam, 'ascend');
     Uc  = Uc(:, ord);
+    % eigs may return fewer than kC modes if not all converge; derive the count
+    % from the actual result so the metadata vectors stay in sync.
+    nGot = numel(lam);
     % Guarantee M-orthonormal magnitude (eigs returns B-normalized; this guards it).
     nrm = sqrt(real(sum(conj(Uc) .* (Mc * Uc), 1)));
     Uc  = Uc ./ nrm;
-    Ufull = complex(zeros(nV, kC));
+    Ufull = complex(zeros(nV, nGot));
     Ufull(vIdx, :) = Uc;
     VectorsAll = [VectorsAll, Ufull];                       %#ok<AGROW>
     ValuesAll  = [ValuesAll;  lam(:)];                      %#ok<AGROW>
-    Component  = [Component;  c * ones(kC, 1)];             %#ok<AGROW>
-    CompRank   = [CompRank;   (1:kC)'];                     %#ok<AGROW>
+    Component  = [Component;  c * ones(nGot, 1)];           %#ok<AGROW>
+    CompRank   = [CompRank;   (1:nGot)'];                   %#ok<AGROW>
     if Verbose
         fprintf('BST> tess_conn_eigenmodes: component %d: %d modes, range [%.3g, %.3g].\n', ...
-            c, kC, lam(1), lam(end));
+            c, nGot, lam(1), lam(end));
     end
 end
 
