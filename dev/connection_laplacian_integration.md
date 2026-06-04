@@ -52,8 +52,11 @@ These were settled before design and constrain the implementation:
    Hermitian operator with different metadata, has no MATLAB fallback, and shares
    no computational body. A single function with output meaning toggled by a flag
    would have an opaque contract. `tess_tangents` (also nxr-only,
-   trivial-connection-based) is the sibling precedent. The only real duplication —
-   the nxr-loaded guard — is factored into a shared helper.
+   trivial-connection-based) is the sibling precedent. The new function carries
+   its **own local `nxr_is_loaded` subfunction** (a copy of `tess_laplacian`'s);
+   `tess_laplacian` is **not** refactored. Small standalone guard copies like this
+   are a normal Brainstorm idiom, and leaving the hot-loop operator untouched
+   avoids any regression risk.
 
 5. **Complex format.** Per user preference, the operator is returned as a native
    MATLAB complex sparse matrix (MATLAB has first-class complex support); the
@@ -111,9 +114,9 @@ These were settled before design and constrain the implementation:
 nxr-only, mirroring `tess_tangents` (no MATLAB fallback — the operator requires
 geometry-central's Levi-Civita transport vectors).
 
-- The nxr-loaded check is factored out of `tess_laplacian` into a shared helper
-  (e.g. `nxr_is_loaded`) that both functions call. This is the only
-  `tess_laplacian` change — a behaviour-preserving refactor.
+- The function carries its own local `nxr_is_loaded` subfunction (a copy of the
+  one in `tess_laplacian`). `tess_laplacian` is left untouched — no shared-helper
+  refactor (normal Brainstorm idiom; avoids touching the hot-loop operator).
 - If nxr is not loaded: raise a clear error pointing to
   `bst_plugin('Install','nxr-compute')` (no silent degradation).
 - If `CheckManifold` is true: run `tess_manifold(..., 'Repair', 0)` first and
@@ -131,28 +134,39 @@ geometry-central's Levi-Civita transport vectors).
 ## 7. Tests
 
 Function-style scripts under `dev/tests/` (repo idiom; run via the MATLAB MCP,
-not `runtests`). On `tess_sphere(642)` unless noted:
+not `runtests`). Tests load the **real Brainstorm cortex** from the current
+`TutorialAnatomy` protocol — `cortex_20484V` — so they exercise the true tess
+file pattern (genuine cortical geometry, two hemisphere components, the
+`TessMat` struct we expect downstream) rather than a synthetic sphere. Resolve
+the surface via the DB (e.g. `bst_get('ProtocolInfo')` →
+`bst_get('SurfaceFileByType', ..., 'Cortex')` / a `cortex_20484V` match) and
+`in_tess_bst` to obtain `Vertices`/`Faces`.
 
-1. **Smoke** (`test_connection_laplacian_smoke.m`): assemble `K`; assert
-   `N x N`, complex, sparse, Hermitian; `M` diagonal and positive; `Info` fields
-   correct (including string `Domain`/`Format`).
+1. **Smoke** (`test_connection_laplacian_smoke.m`): on `cortex_20484V`, assemble
+   `K`; assert `N x N` (`N = nV`), complex, sparse, Hermitian; `M` diagonal and
+   positive; `Info` fields correct (including string `Domain`/`Format`).
 2. **Spectral sanity** (`test_connection_laplacian_spectrum.m`): solve the
    smallest `k` modes via `nxr_compute('solve', K, M, k)`; assert eigenvalues
    real and ≥ 0; the lowest non-trivial mode is a smooth field (qualitative —
-   full spectral validation belongs to the eigenmode milestone).
+   full spectral validation belongs to the eigenmode milestone). Note the
+   whole-mesh operator is block-diagonal across the two hemispheres.
 3. **nSym variants** (`test_connection_laplacian_nsym.m`): `nSym = 1, 2, 4` each
-   assemble and remain Hermitian.
+   assemble and remain Hermitian on `cortex_20484V`.
 4. **Backend guard** (`test_connection_laplacian_guard.m`): with nxr unloaded,
    an informative error is raised.
+
+The tests assume the `TutorialAnatomy` protocol is loaded with `cortex_20484V`
+present; they skip with a clear message if the surface cannot be resolved (so
+they degrade gracefully on a machine without that protocol).
 
 ## 8. Files
 
 | Path | Change |
 |---|---|
-| `toolbox/anatomy/tess_connection_laplacian.m` | New: the operator function. |
-| `toolbox/anatomy/tess_laplacian.m` | Refactor: extract the nxr-loaded guard into the shared helper. |
-| (shared helper) | New small function for the nxr-loaded check, called by both. |
-| `dev/tests/test_connection_laplacian_*.m` | New: the four tests above. |
+| `toolbox/anatomy/tess_connection_laplacian.m` | New: the operator function, with its own local `nxr_is_loaded` subfunction. |
+| `dev/tests/test_connection_laplacian_*.m` | New: the four tests above (load `cortex_20484V` from `TutorialAnatomy`). |
+
+`tess_laplacian.m` is **not** modified.
 
 ## 9. Out of scope (later milestones)
 
