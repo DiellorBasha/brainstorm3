@@ -3010,16 +3010,28 @@ function ParseProcessFolder(isForced) %#ok<DEFNU>
         try
             desc = Function('GetDescription');
         catch
-            if ismember(bstFunc{iFile}, usrFunc)
-                processType = 'User';
-            elseif ismember(bstFunc{iFile}, {bstList.name})
-                processType = 'Brainstorm';
-            elseif ismember(bstFunc{iFile}, plugFunc)
-                processType = 'Plug-in';
+            % A process_*.m that defines NO GetDescription subfunction is a shared
+            % engine / support function (driven by sibling menu processes, e.g.
+            % process_eigenmodes_freq), not a registrable menu process: skip it
+            % silently. Only a file whose GetDescription EXISTS but errors is a
+            % broken menu process worth reporting.
+            if ~isempty(fPath)
+                procFile = bst_fullfile(fPath, [fName, fExt]);
             else
-                processType = char(8); % backspace
+                procFile = which(fName);
             end
-            disp(['BST> Invalid ' processType ' function: "' bstFunc{iFile} '"']);
+            if ~IsProcessEngineFile(procFile)
+                if ismember(bstFunc{iFile}, usrFunc)
+                    processType = 'User';
+                elseif ismember(bstFunc{iFile}, {bstList.name})
+                    processType = 'Brainstorm';
+                elseif ismember(bstFunc{iFile}, plugFunc)
+                    processType = 'Plug-in';
+                else
+                    processType = char(8); % backspace
+                end
+                disp(['BST> Invalid ' processType ' function: "' bstFunc{iFile} '"']);
+            end
             continue;
         end
         % Copy fields to returned structure
@@ -3047,6 +3059,29 @@ function ParseProcessFolder(isForced) %#ok<DEFNU>
     GlobalData.Processes.All = sProcesses;
     % Clear menu cache
     GlobalData.Program.ProcessMenuCache = struct();
+end
+
+
+%% ===== IS PROCESS ENGINE FILE =====
+% True if ProcessFile is a process_*.m that defines NO GetDescription
+% subfunction -- i.e. a shared engine / support function (driven by sibling
+% menu processes), not a registrable menu process. ParseProcessFolder skips
+% such files silently instead of reporting them as "Invalid". A file whose
+% GetDescription EXISTS but errors returns false (a broken menu process, still
+% reported). The check scans the source for the subfunction definition (matches
+% "function <out> = GetDescription"), so a docstring mention of GetDescription
+% does not count.
+function tf = IsProcessEngineFile(ProcessFile)
+    tf = false;
+    if isempty(ProcessFile) || ~file_exist(ProcessFile)
+        return;
+    end
+    try
+        src = fileread(ProcessFile);
+    catch
+        return;
+    end
+    tf = isempty(regexp(src, '(^|\n)\s*function\s+\w+\s*=\s*GetDescription\>', 'once'));
 end
 
 
