@@ -30,11 +30,21 @@ nV = size(V, 1);
 % --- Assemble (defaults: vertex domain, nSym=1, complex) ---
 [K, M, Info] = tess_connection_laplacian(V, F);
 
+% --- The raw nxr operator must ALREADY be Hermitian, independent of the
+%     function's own (K+K')/2 symmetrization (which would otherwise mask a
+%     non-Hermitian assembly). Assemble it directly and check. ---
+mctx_raw = nxr.manifold.context(V, F);
+CLraw = nxr.manifold.operator.connectionLaplacian(mctx_raw, ...
+    struct('domain', 'vertex', 'nSym', 1, 'regularization', 1e-8, 'format', 'complex'));
+Kraw  = CLraw.K_real + 1i * CLraw.K_imag;
+assert(max(max(abs(Kraw - Kraw'))) < 1e-9, ...
+    'Raw nxr connection Laplacian must already be Hermitian (before symmetrization).');
+
 % --- Operator shape / type / symmetry ---
 assert(isequal(size(K), [nV nV]), 'K must be nV x nV.');
 assert(issparse(K), 'K must be sparse.');
 assert(~isreal(K), 'K must be complex (nonzero imaginary part on a curved cortex).');
-assert(max(max(abs(K - K'))) < 1e-9, 'K must be Hermitian (conjugate-symmetric).');
+assert(max(max(abs(K - K'))) < 1e-9, 'K must be Hermitian (conjugate-symmetric).');  % documented post-symmetrization invariant
 
 % --- Mass ---
 assert(isequal(size(M), [nV nV]), 'M must be nV x nV.');

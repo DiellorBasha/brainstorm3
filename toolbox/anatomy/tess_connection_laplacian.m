@@ -83,6 +83,9 @@ end
 if (size(Vertices, 2) ~= 3) || (size(Faces, 2) ~= 3)
     error('Vertices and Faces must have 3 columns.');
 end
+% nxr.manifold.context validates {'double'}; Brainstorm vertices are often single.
+Vertices = double(Vertices);
+Faces    = double(Faces);
 if ~ismember(Domain, {'vertex', 'face', 'edge'})
     error('tess_connection_laplacian:badDomain', ...
         'Domain must be ''vertex'', ''face'', or ''edge'' (got ''%s'').', Domain);
