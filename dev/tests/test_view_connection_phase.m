@@ -1,7 +1,8 @@
 function test_view_connection_phase
 % Smoke test: view_connection_phase opens a cortex figure carrying the connection
 % phase as surface data plus a field-glyph layer, singularity markers, and a
-% working keyboard mode-step. Works on a temp COPY (the viewer caches ConnEigenmodes).
+% working keyboard mode-step. Runs on the REAL DB cortex surface; the viewer
+% caches a ConnEigenmodes axis on it (the intended canonical behavior).
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
 addpath(repoRoot);
@@ -12,17 +13,15 @@ end
 assert(isOk, 'nxr-compute plugin required: %s', errMsg);
 bst_plugin('Load', 'nxr-compute');
 
-srcFile = find_cortex_20484V();
-if isempty(srcFile)
+SurfaceFile = find_cortex_20484V();
+if isempty(SurfaceFile)
     fprintf('SKIP: no 20484-vertex cortex in the current protocol.\n');
     return;
 end
-tmpFile = fullfile(tempdir, 'tess_cortex_connphaseview.mat');
-copyfile(file_fullpath(srcFile), tmpFile);
-cleanup = onCleanup(@() cleanupFig(tmpFile));
+cleanup = onCleanup(@cleanupFig);
 
 % Small mode count for a fast open.
-hFig = view_connection_phase(tmpFile, 'nModes', 12, 'MaxArrows', 400);
+hFig = view_connection_phase(SurfaceFile, 'nModes', 12, 'MaxArrows', 400);
 assert(ishandle(hFig), 'view_connection_phase did not return a valid figure handle.');
 
 hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
@@ -43,12 +42,11 @@ fprintf('ALL TESTS PASSED: test_view_connection_phase\n');
 end
 
 
-function cleanupFig(tmpFile)
+function cleanupFig()
     hs = findobj(0, 'Type', 'figure');
     for h = hs(:)'
         if ~isempty(getappdata(h, 'ConnPhase')), close(h); end
     end
-    if exist(tmpFile, 'file'), delete(tmpFile); end
 end
 
 

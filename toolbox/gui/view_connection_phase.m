@@ -47,20 +47,18 @@ end
 
 bst_progress('start', 'Connection phase viewer', 'Preparing eigenmodes and frames...');
 
+try
+
 %% ===== DATA PIPELINE =====
 [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
 if ~isOk
-    bst_progress('stop');
     error('view_connection_phase:nxr', 'nxr-compute required: %s', errMsg);
 end
 bst_plugin('Load', 'nxr-compute');
 
-% Resolve a DB-registered working surface (view_surface_data requires the
-% surface to live in the protocol's anatomy folder). If SurfaceFile is an
-% absolute path outside the database (e.g. a temp copy), import a working copy
-% into a subject's anatomy folder and clean it up when the figure closes.
-[SurfaceFile, WorkSurfaceImported] = ResolveWorkingSurface(SurfaceFile);
-
+% SurfaceFile must be a DB-registered surface (view_surface_data requires the
+% surface to live in the protocol's anatomy folder). This matches the
+% view_eigenmodes contract.
 ConnEig = bst_conn_eigenmodes_ensure(SurfaceFile, nModes);
 TessMat = in_tess_bst(SurfaceFile);
 Vtx = TessMat.Vertices;
@@ -82,7 +80,6 @@ phase = R.Phase;
 phase(~isfinite(phase)) = 0;
 [sStudy, iStudy] = GetHostStudy(SurfaceFile);
 if isempty(iStudy) || isempty(sStudy)
-    bst_progress('stop');
     error('view_connection_phase:study', 'Could not find a study to host the transient phase result.');
 end
 ResMat = db_template('resultsmat');
@@ -113,7 +110,6 @@ if isempty(hFig)
     catch
         % Non-fatal
     end
-    bst_progress('stop');
     error('view_connection_phase:figure', 'Could not open the surface figure.');
 end
 hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D'); %#ok<NASGU>
@@ -121,14 +117,21 @@ panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0);
 panel_surface('SetSurfaceEdges',  hFig, 1, 1);
 set(hFig, 'Name', ['Connection phase: ' SurfaceFile]);
 
-% Auto-remove the transient result (and any imported working surface) on close
-set(hFig, 'DeleteFcn', @(h,e) CleanupResult(OutputFile, iStudy, WorkSurfaceImported, SurfaceFile));
+% Auto-remove the transient result on close
+set(hFig, 'DeleteFcn', @(h,e) CleanupResult(OutputFile, iStudy));
 
 %% ===== STORE STATE =====
+% Trim the eigenmode operators out of the cached state: the complex sparse
+% ConnLaplacian + MassMatrix bloat figure memory and no consumer needs them
+% (bst_conn_phase Recompute uses only Vectors/Component/CompRank).
+ConnEigLite = ConnEig;
+for f = {'ConnLaplacian','MassMatrix'}
+    if isfield(ConnEigLite, f{1}), ConnEigLite = rmfield(ConnEigLite, f{1}); end
+end
 st = struct();
 st.SurfaceFile = SurfaceFile;
 st.ResultsFile = file_short(OutputFile);
-st.ConnEig     = ConnEig;
+st.ConnEig     = ConnEigLite;
 st.vFrame      = vFrame;
 st.FsFrame     = FsFrame;
 st.R           = R;
@@ -142,6 +145,11 @@ st.showSing    = true;
 setappdata(hFig, 'ConnPhase', st);
 
 bst_progress('stop');
+
+catch ME
+    bst_progress('stop');
+    rethrow(ME);
+end
 end
 
 
@@ -189,56 +197,12 @@ function [sStudy, iStudy] = GetHostStudy(SurfaceFile)
 end
 
 
-%% ===== RESOLVE A DB-REGISTERED WORKING SURFACE =====
-% view_surface_data needs the surface to be registered in the protocol database.
-% If SurfaceFile is already in the DB, return it untouched. If it is an absolute
-% path outside the database, import a working copy into a subject's anatomy folder
-% (as an 'Other' surface so it does not override the default cortex) and flag it
-% for removal on figure close.
-function [SurfaceFile, WorkSurfaceImported] = ResolveWorkingSurface(SurfaceFile)
-    WorkSurfaceImported = false;
-    % Already a DB surface?
-    [~, iSubject] = bst_get('SurfaceFile', SurfaceFile);
-    if ~isempty(iSubject)
-        return;
-    end
-    % Not in DB: must be an absolute path on disk.
-    if ~exist(SurfaceFile, 'file')
-        error('view_connection_phase:surface', 'Surface file not found: %s', SurfaceFile);
-    end
-    % Host it in the current subject's anatomy folder.
-    [sSubject, iSubject] = bst_get('Subject');
-    if isempty(iSubject)
-        error('view_connection_phase:subject', 'No subject available to host the working surface.');
-    end
-    SubjDir = bst_fileparts(file_fullpath(sSubject.FileName));
-    [~, baseName] = bst_fileparts(SurfaceFile);
-    WorkName = sprintf('tess_connphasework_%s_%d.mat', baseName, round(rem(double(tic),1e8)));
-    WorkFull = bst_fullfile(SubjDir, WorkName);
-    copyfile(SurfaceFile, WorkFull);
-    db_add_surface(iSubject, WorkFull, 'Connection phase (working)', 'Other');
-    SurfaceFile = file_short(WorkFull);
-    WorkSurfaceImported = true;
-end
-
-
-%% ===== DELETE THE TRANSIENT RESULT (AND WORKING SURFACE) ON FIGURE CLOSE =====
-function CleanupResult(OutputFile, iStudy, WorkSurfaceImported, SurfaceFile)
+%% ===== DELETE THE TRANSIENT RESULT ON FIGURE CLOSE =====
+function CleanupResult(OutputFile, iStudy)
     try
         file_delete(file_fullpath(OutputFile), 1);
         db_reload_studies(iStudy);
     catch
         % Non-fatal: leave the node if cleanup fails (user can delete it)
-    end
-    if WorkSurfaceImported
-        try
-            [~, iSubject] = bst_get('SurfaceFile', SurfaceFile);
-            file_delete(file_fullpath(SurfaceFile), 1);
-            if ~isempty(iSubject)
-                db_reload_subjects(iSubject);
-            end
-        catch
-            % Non-fatal
-        end
     end
 end
