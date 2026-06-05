@@ -112,7 +112,7 @@ if isempty(hFig)
     end
     error('view_connection_phase:figure', 'Could not open the surface figure.');
 end
-hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D'); %#ok<NASGU>
+hAxes = GetAxes3D(hFig);
 panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0);
 panel_surface('SetSurfaceEdges',  hFig, 1, 1);
 panel_surface('SetDataThreshold', hFig, 1, 0);   % phase is angular: show all vertices (no amplitude threshold)
@@ -144,6 +144,8 @@ st.Fcs         = Fcs;
 st.showGlyphs  = true;
 st.showSing    = true;
 setappdata(hFig, 'ConnPhase', st);
+
+DrawOverlays(hFig, hAxes, st);
 
 bst_progress('stop');
 
@@ -178,6 +180,80 @@ function EnsureCyclicColormap()
     sColormap.MinValue         = -pi;
     sColormap.MaxValue         = pi;
     bst_colormaps('SetColormap', 'connphase', sColormap);
+end
+
+
+%% ===== DRAW OVERLAYS (field glyphs + singularity markers) =====
+function DrawOverlays(hFig, hAxes, st)
+    if isempty(hAxes)
+        hAxes = GetAxes3D(hFig);
+    end
+    delete(findobj(hAxes, '-depth', 1, '-regexp', 'Tag', '^connPhase(Field|Sing)'));
+    Vtx = st.Vtx;  Fcs = st.Fcs;  R = st.R;
+
+    % Hold the axes so successive plot calls (quiver3, plot3) do not replace
+    % each other (Brainstorm surface axes default to NextPlot='replace').
+    prevHold = get(hAxes, 'NextPlot');
+    hold(hAxes, 'on');
+
+    % --- Field glyphs (per-vertex, subsampled to MaxArrows on the support) ---
+    if st.showGlyphs
+        supp = find(any(R.Field ~= 0, 2));
+        if ~isempty(supp)
+            step = max(1, ceil(numel(supp) / st.MaxArrows));
+            idx  = supp(1:step:end);
+            meanEdge = MeanEdgeLength(Vtx, Fcs);
+            len  = 0.8 * meanEdge;
+            n    = st.vFrame.normals(idx, :);
+            unitN = n ./ max(sqrt(sum(n.^2,2)), eps);
+            w    = R.Field(idx, :);
+            dirw = w ./ max(sqrt(sum(w.^2, 2)), eps);
+            B    = Vtx(idx, :) + (0.1 * meanEdge) .* unitN;   % lift off the surface
+            Vec  = dirw .* len;
+            quiver3(B(:,1), B(:,2), B(:,3), Vec(:,1), Vec(:,2), Vec(:,3), 0, ...
+                'Parent', hAxes, 'Color', [0.95 0.85 0.1], 'LineWidth', 1.0, ...
+                'ShowArrowHead', 'off', 'Tag', 'connPhaseField');
+        end
+    end
+
+    % --- Singularity markers ---
+    if st.showSing && ~isempty(R.Singularities)
+        P = Vtx(R.Singularities, :);
+        plot3(P(:,1), P(:,2), P(:,3), 'o', 'Parent', hAxes, ...
+            'MarkerFaceColor', [0.9 0.1 0.1], 'MarkerEdgeColor', [.2 .2 .2], ...
+            'MarkerSize', 10, 'LineStyle', 'none', 'Tag', 'connPhaseSing');
+    end
+
+    % Restore original hold state
+    set(hAxes, 'NextPlot', prevHold);
+end
+
+
+%% ===== MEAN EDGE LENGTH =====
+function L = MeanEdgeLength(Vtx, Fcs)
+    e1 = Vtx(Fcs(:,2),:) - Vtx(Fcs(:,1),:);
+    e2 = Vtx(Fcs(:,3),:) - Vtx(Fcs(:,2),:);
+    e3 = Vtx(Fcs(:,1),:) - Vtx(Fcs(:,3),:);
+    L = mean([sqrt(sum(e1.^2,2)); sqrt(sum(e2.^2,2)); sqrt(sum(e3.^2,2))]);
+end
+
+
+%% ===== GET 3D AXES =====
+% Returns the main 3D axes of a Brainstorm surface figure.
+% Prefers the 'Axes3D'-tagged axes (present when the figure was created via
+% figure_3d in a GUI session); falls back to the first non-Colorbar axes so
+% that the viewer also works correctly in nogui / headless MATLAB sessions.
+function hAxes = GetAxes3D(hFig)
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    if isempty(hAxes)
+        allAx = findobj(hFig, 'Type', 'axes');
+        for ia = 1:numel(allAx)
+            if ~strcmpi(get(allAx(ia), 'Tag'), 'Colorbar')
+                hAxes = allAx(ia);
+                return;
+            end
+        end
+    end
 end
 
 

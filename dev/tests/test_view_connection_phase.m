@@ -24,8 +24,19 @@ cleanup = onCleanup(@cleanupFig);
 hFig = view_connection_phase(SurfaceFile, 'nModes', 12, 'MaxArrows', 400);
 assert(ishandle(hFig), 'view_connection_phase did not return a valid figure handle.');
 
+% Prefer the Brainstorm-canonical 'Axes3D' tag; fall back to the first
+% non-Colorbar axes so the test also runs in nogui/headless sessions.
 hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
-assert(~isempty(hAxes), 'No Axes3D in the figure.');
+if isempty(hAxes)
+    allAx = findobj(hFig, 'Type', 'axes');
+    for ia = 1:numel(allAx)
+        if ~strcmpi(get(allAx(ia), 'Tag'), 'Colorbar')
+            hAxes = allAx(ia);
+            break;
+        end
+    end
+end
+assert(~isempty(hAxes), 'No 3D axes in the figure.');
 
 % Surface data is registered (the phase colormap drives the patch).
 TessInfo = getappdata(hFig, 'Surface');
@@ -37,6 +48,17 @@ assert(TessInfo(1).DataThreshold == 0, 'Phase display must use DataThreshold 0 (
 st = getappdata(hFig, 'ConnPhase');
 assert(~isempty(st) && isfield(st, 'Rank') && st.Rank == 1, 'ConnPhase state must start at Rank 1.');
 assert(isfield(st, 'nModes') && st.nModes >= 2, 'ConnPhase state must record the mode count.');
+
+% Field-glyph layer present, count capped by MaxArrows.
+hG = findobj(hAxes, 'Tag', 'connPhaseField');
+assert(~isempty(hG), 'Missing connPhaseField glyph layer.');
+nG = numel(hG.UData);
+assert(nG <= 400, 'Glyph count (%d) must respect MaxArrows (400).', nG);
+assert(strcmpi(hG.ShowArrowHead, 'off'), 'Field glyphs should be headless.');
+% Singularity markers present (2 per component).
+hS = findobj(hAxes, 'Tag', 'connPhaseSing');
+assert(~isempty(hS), 'Missing connPhaseSing markers.');
+assert(numel(hS.XData) == numel(st.R.Singularities), 'Singularity marker count mismatch.');
 
 fprintf('PASSED: view_connection_phase opens with phase surface data (Rank %d of %d modes).\n', st.Rank, st.nModes);
 fprintf('ALL TESTS PASSED: test_view_connection_phase\n');
