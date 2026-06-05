@@ -22,8 +22,11 @@ if ~isempty(S)
     title(sprintf('Folding coupling (sing. energy frac = %.2f)', S.singEnergyFrac));
     subplot(1,2,2);
     edges = linspace(0, pi, 30);
-    histogram(S.df(S.defined & S.edgeSulcal), edges, 'Normalization','probability'); hold on;
-    histogram(S.df(S.defined & ~S.edgeSulcal), edges, 'Normalization','probability');
+    d1 = S.df(S.defined & S.edgeSulcal);
+    d2 = S.df(S.defined & ~S.edgeSulcal);
+    if ~isempty(d1), histogram(d1, edges, 'Normalization','probability'); end
+    hold on;
+    if ~isempty(d2), histogram(d2, edges, 'Normalization','probability'); end
     legend({'sulcal','crown'}); xlabel('\delta f (rad)'); ylabel('prob');
     title('Fiedler covariant variation by partition');
     f1 = fullfile(outDir, 'c1_smoothness.png');
