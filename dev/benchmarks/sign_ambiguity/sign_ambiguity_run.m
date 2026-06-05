@@ -17,7 +17,10 @@ if nargin < 2, ResultsFile = local_find_kernel(SurfaceFile); end
 
 thisDir = fileparts(mfilename('fullpath'));
 outDir  = fullfile(thisDir, 'sign_ambiguity_run');
-if ~exist(outDir, 'dir'), mkdir(outDir); end
+if ~exist(outDir, 'dir')
+    [ok, msg] = mkdir(outDir);
+    if ~ok, error('sign_ambiguity_run:mkdir', 'Cannot create output dir: %s', msg); end
+end
 
 % Shared frames + SulciMap.
 F = sa_frames(SurfaceFile);
@@ -98,6 +101,7 @@ end
 
 function local_write_stats(statsFile, SurfaceFile, ResultsFile, C1, C2)
 fid = fopen(statsFile, 'w');
+if fid < 0, error('sign_ambiguity_run:io', 'Cannot write: %s', statsFile); end
 c = onCleanup(@() fclose(fid));
 fprintf(fid, '# Sign-ambiguity continuity test\n\n');
 fprintf(fid, '- Surface: `%s`\n', SurfaceFile);
@@ -122,6 +126,7 @@ end
 
 function local_write_csv(csvFile, C1, C2)
 fid = fopen(csvFile, 'w');
+if fid < 0, error('sign_ambiguity_run:io', 'Cannot write: %s', csvFile); end
 c = onCleanup(@() fclose(fid));
 fprintf(fid, 'component,metric,value\n');
 fprintf(fid, 'C1,dn_sulci_median,%.6f\n', C1.dn_sulci_median);
