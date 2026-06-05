@@ -24,7 +24,7 @@
 
 **Branch:** `feature/sign-ambiguity-continuity` (already created; spec already committed).
 
-**Toolbox constraint (verified):** this MATLAB (R2023b) has **no Statistics & Machine Learning Toolbox** — do NOT use `rangesearch`/`knnsearch`/`pdist2`. Proximity search is done with base-MATLAB chunked squared-distance (see Task 2). `graph`/`shortestpath` (Task 5) are base MATLAB and are fine.
+**Toolbox:** Statistics and Machine Learning Toolbox is available — `rangesearch`/`knnsearch` may be used freely.
 
 **Output directory produced at runtime:** `dev/benchmarks/sign_ambiguity/sign_ambiguity_run/` (figures + stats). Do not create it by hand; the driver creates it.
 
@@ -307,37 +307,27 @@ if ~isfield(opts,'Nring'),     opts.Nring     = 3;     end
 iSulci = find(SulciMap > 0);
 if isempty(iSulci), pairs = zeros(0,2); return; end
 Vs = Vtx(iSulci, :);
-nS = numel(iSulci);
+
+% (2) Range search among sulcal vertices (3D proximity).
+nb = rangesearch(Vs, Vs, opts.MaxDist);
 
 % N-ring adjacency (global indices) for criterion (4).
 A = double(VertConn > 0);
-Aring = A; Pw = A;
+Aring = A; P = A;
 for r = 2:opts.Nring
-    Pw = double((Pw * A) > 0);
-    Aring = double((Aring + Pw) > 0);
+    P = double((P * A) > 0);
+    Aring = double((Aring + P) > 0);
 end
 
-% (2) Chunked squared-Euclidean proximity among sulcal vertices (toolbox-free:
-% no Statistics Toolbox). For each block of source vertices, compute distances
-% to all sulcal vertices via |a|^2 - 2 a.b + |b|^2, then apply criteria (2)-(4).
-sumSq = sum(Vs.^2, 2);                  % [nS x 1]
-maxD2 = opts.MaxDist^2;
-chunk = 500;
 I = []; J = [];
-for a0 = 1:chunk:nS
-    a1  = min(a0 + chunk - 1, nS);
-    blk = (a0:a1)';
-    D2  = sumSq(blk) - 2 * (Vs(blk,:) * Vs.') + sumSq.';   % [nBlk x nS]
-    for r = 1:numel(blk)
-        a = blk(r);
-        cand = find(D2(r,:).' <= maxD2);
-        cand = cand(cand > a);          % unordered (local idx j>i), drop self
-        if isempty(cand), continue; end
-        gi = iSulci(a); gj = iSulci(cand);
-        nd  = sum(Nv(gj,:) .* Nv(gi,:), 2) < opts.NormalDot;                  % (3)
-        far = full(Aring(sub2ind(size(Aring), repmat(gi,numel(gj),1), gj))) == 0; % (4)
-        gj  = gj(nd & far);
-        I = [I; repmat(gi, numel(gj), 1)]; J = [J; gj]; %#ok<AGROW>
+for a = 1:numel(iSulci)
+    gi = iSulci(a);
+    for b = nb{a}(:)'
+        gj = iSulci(b);
+        if gj <= gi, continue; end                 % unordered, i<j, drop self
+        if sum(Nv(gi,:) .* Nv(gj,:), 2) >= opts.NormalDot, continue; end   % (3)
+        if Aring(gi, gj) ~= 0, continue; end        % (4) within N-ring
+        I(end+1,1) = gi; J(end+1,1) = gj; %#ok<AGROW>
     end
 end
 pairs = sortrows([I J]);
