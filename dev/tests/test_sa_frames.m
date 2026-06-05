@@ -30,6 +30,9 @@ for name = {'fiedler','tang','xyz'}
     assert(all(dt < 1e-3), 'Frame %s e1/e2 not orthogonal.', name{1});
 end
 assert(isequal(size(F.R.Field), [nV 3]), 'Fiedler field must be [nV x 3].');
+assert(isequal(size(F.R.Magnitude), [nV 1]), 'R.Magnitude must be [nV x 1].');
+assert(numel(F.R.Phase) == nV, 'R.Phase must have nV elements.');
+assert(isstruct(F.R) && isfield(F.R, 'Singularities'), 'R must have Singularities field.');
 assert(~isempty(F.ConnEig.ConnLaplacian), 'sa_frames must expose ConnLaplacian K.');
 fprintf('PASSED: test_sa_frames (%d vertices).\n', nV);
 end
