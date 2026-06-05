@@ -391,68 +391,59 @@ c2 = dot(g_hat, e2_hat);
 g_tang = c1*e1_hat + c2*e2_hat;
 g_n    = cn * n_hat;
 
-sc = 15;   % arrow length in mm
+% Use a vertex near median gain magnitude with balanced Cartesian components.
+mag_all   = sqrt(sum(reshape(Gain_meg(iSensor,:),3,nV)'.^2, 2));
+med_mag   = median(mag_all);
+inBand    = find(abs(mag_all - med_mag)/med_mag < 0.20);
+gBandN    = reshape(Gain_meg(iSensor,:),3,nV)';
+gBandN    = gBandN(inBand,:) ./ sqrt(sum(gBandN(inBand,:).^2,2));
+[~,iBest] = min(max(abs(gBandN),[],2));
+iSrc      = inBand(iBest);
 
-% Tangent plane — square centred at vertex, spanned by ê₁ and ê₂.
-tp = [pos + sc*(e1_hat + e2_hat); pos + sc*(e1_hat - e2_hat); ...
-      pos + sc*(-e1_hat - e2_hat); pos + sc*(-e1_hat + e2_hat)];
+pos_src = Vtx_mm(iSrc,:);
+g_src   = reshape(Gain_meg(iSensor,:),3,nV)'; g_src = g_src(iSrc,:);
+g_hat_s = g_src / norm(g_src);
 
-figure('Name','Gain vector and tangent frame','Color','k','Position',[100 100 780 640])
+sc = 12;   % arrow length mm
+
+figure('Name','Gain vector — Cartesian components','Color','k', ...
+       'Position',[100 100 640 560])
 ax5 = axes('Color','k'); hold(ax5,'on')
 
-% Tangent plane patch.
-fill3(tp([1 2 3 4 1],1),tp([1 2 3 4 1],2),tp([1 2 3 4 1],3), ...
-    [0.2 0.3 0.5],'FaceAlpha',0.20,'EdgeColor',[0.4 0.5 0.7], ...
-    'LineWidth',0.8,'Parent',ax5)
+% Source marker at the vertex position
+plot3(pos_src(1),pos_src(2),pos_src(3), 'o','MarkerSize',9, ...
+    'MarkerFaceColor',[1 1 1],'MarkerEdgeColor','w','Parent',ax5)
 
-% Cartesian frame (dashed) — X̂ Ŷ Ẑ align with the grid.
-% The headmodel stores Gain in this basis: one column per Cartesian direction.
-cart_vecs = {[1 0 0],[0 1 0],[0 0 1]};
-cart_labs = {'X̂','Ŷ','Ẑ'};
-cart_clr  = [0.95 0.95 0.60];
-for k = 1:3
-    v = cart_vecs{k};
-    quiver3(pos(1),pos(2),pos(3), v(1)*sc,v(2)*sc,v(3)*sc, 0, ...
-        'Color',cart_clr,'LineWidth',1.5,'MaxHeadSize',0.2, ...
-        'LineStyle','--','Parent',ax5)
-    text(pos(1)+v(1)*sc*1.15, pos(2)+v(2)*sc*1.15, pos(3)+v(3)*sc*1.15, ...
-        cart_labs{k},'Color',cart_clr,'FontSize',11,'Parent',ax5)
-end
+% Three Cartesian component arrows: X (red), Y (green), Z (blue)
+quiver3(pos_src(1),pos_src(2),pos_src(3), g_hat_s(1)*sc,0,0, 0, ...
+    'Color',[1 0.3 0.3],'LineWidth',2,'MaxHeadSize',0.5,'Parent',ax5)
+quiver3(pos_src(1),pos_src(2),pos_src(3), 0,g_hat_s(2)*sc,0, 0, ...
+    'Color',[0.3 1 0.3],'LineWidth',2,'MaxHeadSize',0.5,'Parent',ax5)
+quiver3(pos_src(1),pos_src(2),pos_src(3), 0,0,g_hat_s(3)*sc, 0, ...
+    'Color',[0.4 0.6 1],'LineWidth',2,'MaxHeadSize',0.5,'Parent',ax5)
 
-% Tangent frame (solid) — n̂ ê₁ ê₂ come from the surface geometry.
-% They do NOT align with the grid because the cortex is curved.
-tang_vecs = {n_hat, e1_hat, e2_hat};
-tang_labs = {'n̂','ê_1','ê_2'};
-tang_clr  = [0.70 0.70 0.70];
-for k = 1:3
-    v = tang_vecs{k};
-    quiver3(pos(1),pos(2),pos(3), v(1)*sc,v(2)*sc,v(3)*sc, 0, ...
-        'Color',tang_clr,'LineWidth',2.0,'MaxHeadSize',0.2,'Parent',ax5)
-    text(pos(1)+v(1)*sc*1.18, pos(2)+v(2)*sc*1.18, pos(3)+v(3)*sc*1.18, ...
-        tang_labs{k},'Color',tang_clr,'FontSize',11,'FontWeight','bold','Parent',ax5)
-end
+% Resultant gain vector (yellow)
+quiver3(pos_src(1),pos_src(2),pos_src(3), ...
+    g_hat_s(1)*sc,g_hat_s(2)*sc,g_hat_s(3)*sc, 0, ...
+    'Color',[1 0.85 0.15],'LineWidth',2.5,'MaxHeadSize',0.25,'Parent',ax5)
 
-% Gain vector ĝ (yellow) — lives in Cartesian space, almost along Ẑ here.
-quiver3(pos(1),pos(2),pos(3), g_hat(1)*sc,g_hat(2)*sc,g_hat(3)*sc, 0, ...
-    'Color',[1 0.85 0.15],'LineWidth',3.0,'MaxHeadSize',0.2,'Parent',ax5)
-text(pos(1)+g_hat(1)*sc*1.18, pos(2)+g_hat(2)*sc*1.18, pos(3)+g_hat(3)*sc*1.18, ...
+% Component labels
+text(pos_src(1)+g_hat_s(1)*sc*1.25, pos_src(2), pos_src(3), ...
+    sprintf('G_x = %.3f',g_hat_s(1)),'Color',[1 0.3 0.3],'FontSize',10,'Parent',ax5)
+text(pos_src(1), pos_src(2)+g_hat_s(2)*sc*1.25, pos_src(3), ...
+    sprintf('G_y = %.3f',g_hat_s(2)),'Color',[0.3 1 0.3],'FontSize',10,'Parent',ax5)
+text(pos_src(1), pos_src(2), pos_src(3)+g_hat_s(3)*sc*1.2, ...
+    sprintf('G_z = %.3f',g_hat_s(3)),'Color',[0.4 0.6 1],'FontSize',10,'Parent',ax5)
+text(pos_src(1)+g_hat_s(1)*sc*1.12, pos_src(2)+g_hat_s(2)*sc*1.12, ...
+    pos_src(3)+g_hat_s(3)*sc*1.12, ...
     'ĝ','Color',[1 0.85 0.15],'FontSize',13,'FontWeight','bold','Parent',ax5)
-
-plot3(pos(1),pos(2),pos(3),'w.','MarkerSize',14,'Parent',ax5)
-
-text(pos(1)-22, pos(2), pos(3)+20, ...
-    {'-- X̂ Ŷ Ẑ  : Cartesian (headmodel storage)', ...
-     '—  n̂ ê₁ ê₂ : Tangent frame (surface geometry)', ...
-     '—  ĝ        : Gain vector direction'}, ...
-    'Color','w','FontSize',8,'Parent',ax5, ...
-    'BackgroundColor',[0.08 0.08 0.08],'EdgeColor',[0.4 0.4 0.4])
 
 axis(ax5,'equal'); grid(ax5,'on')
 set(ax5,'XColor','w','YColor','w','ZColor','w', ...
         'GridColor',[0.25 0.25 0.25],'GridAlpha',0.5)
 xlabel(ax5,'x (mm)');  ylabel(ax5,'y (mm)');  zlabel(ax5,'z (mm)')
 view(ax5,-40,25)
-tg2 = title(ax5,'Gain vector: Cartesian storage (dashed) vs tangent frame decomposition (solid)');
+tg2 = title(ax5, sprintf('Gain vector at vertex %d — Cartesian components', iSrc));
 tg2.Color = 'w';
 
 %% Section 4 — Build the tangent-frame leadfield (L1, L2)
