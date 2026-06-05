@@ -553,23 +553,33 @@ legend({'Total \sigma_k^2','','R/I ratio','R = I'},'TextColor','w', ...
 % That choice is a PARAMETERIZATION — it affects the inverse, not the
 % forward model.
 %
-% Choice 1 — Cartesian: unknowns are (q_x, q_y, q_z)_i along global X Y Z.
-%   3 unknowns/vertex. No cortical geometry in the parameterization.
+% Choice 1 — Cartesian (unconstrained MNE in Brainstorm/MNE-Python):
+%   unknowns are (q_x, q_y, q_z)_i along global X Y Z axes. Equal Cartesian
+%   penalty. The parameterization carries no cortical geometry — all three
+%   axes are treated identically. 3 unknowns/vertex.
 %
-% Choice 2 — Local cortical frame: unknowns are (q_1, q_2, q_n)_i along
-%   e1(i), e2(i), n̂(i). Still 3 unknowns/vertex. SAME physics as Choice 1 —
-%   just a rotation of the unknown vector. Geometry has entered the
-%   parameterization but not the physics.
+% Choice 2 — Local frame + loose prior (existing MNE-Python loose):
+%   unknowns are (q_n, q_1, q_2)_i along {n̂(i), e_1(i), e_2(i)}. Normal
+%   component is dominant (smaller penalty α_n); tangential components are
+%   penalised more: α_t = loose · α_n, default loose=0.2 → 5× more penalty.
+%   This is physiologically motivated — cortical pyramidal neurons are
+%   oriented along the column normal. The tangent frame {e_1, e_2} is
+%   defined arbitrarily (e.g. first-halfedge), so q_1(i) at vertex i bears
+%   no consistent relationship to q_1(j) at vertex j. 3 unknowns/vertex.
 %
-% Choice 3 — Normal only (standard constrained inverse): set q_1=q_2=0,
-%   keep only q_n. The source model asserts all current is normal to the
-%   cortex. 1 unknown/vertex. Tangential degrees of freedom discarded.
+% Choice 3 — Normal only (standard constrained inverse):
+%   set q_1=q_2=0, keep only q_n. 1 unknown/vertex. The tangential degrees
+%   of freedom are discarded entirely.
 %
-% Choice 4 — Tangential only (our approach): set q_n=0, keep q_1 and q_2.
-%   The source model asserts all current lies in the cortical tangent plane.
-%   2 unknowns/vertex. Normal degree of freedom discarded.
-%   The two leadfield columns are l_i^(1) = G(r_i)*e1(i) and
-%   l_i^(2) = G(r_i)*e2(i) — exactly the L1 and L2 we built in Section 4.
+% Choice 4 — Connection-Laplacian frame + loose prior (our approach):
+%   Same penalty structure as Choice 2. The key difference: the tangent frame
+%   {e_1(i), e_2(i)} is defined by the Levi-Civita connection (nxr) rather
+%   than an arbitrary local convention. This establishes a GLOBALLY
+%   CONSISTENT relationship: e_1(j) is the parallel transport of e_1(i)
+%   along any path from i to j. The tangential components q_1(i) and q_1(j)
+%   are now in the same gauge — they can be meaningfully compared,
+%   subtracted, or decomposed in the connection-Laplacian eigenmode basis.
+%   3 unknowns/vertex.
 
 n_src  = TessMat.VertNormals(iSrc,:);
 e1_src = e1_nxr(iSrc,:);
@@ -581,70 +591,96 @@ tp5 = [pos_src + tp_sc5*( e1_src + e2_src); ...
        pos_src + tp_sc5*(-e1_src - e2_src); ...
        pos_src + tp_sc5*(-e1_src + e2_src)];
 
+% Arrow lengths encode regularisation weight:
+%   normal component — dominant (short penalty) → full length
+%   tangential components — penalised ~5x more (loose=0.2) → shorter
+sc_n  = sc * 1.0;
+sc_t  = sc * 0.55;
+
 panels5 = { ...
-    'Choice 1: Cartesian',           '3 unknowns / vertex  (q_x, q_y, q_z)'; ...
-    'Choice 2: Local cortical frame', '3 unknowns / vertex  (q_n, q_1, q_2) — same physics'; ...
-    'Choice 3: Normal only',          '1 unknown / vertex   (q_n)'; ...
-    'Choice 4: Tangential only',      '2 unknowns / vertex  (q_1, q_2)'};
+    'Choice 1: Cartesian  (unconstrained MNE)', ...
+    '3 unknowns/vertex  |  equal Cartesian penalty  |  no geometry'; ...
+    'Choice 2: Local frame + loose prior  (existing MNE)', ...
+    '3 unknowns/vertex  |  \alpha_n : \alpha_t = 1 : 0.2  |  arbitrary tangent frame'; ...
+    'Choice 3: Normal only  (constrained MNE)', ...
+    '1 unknown/vertex  |  q_1 = q_2 = 0'; ...
+    'Choice 4: Connection-Laplacian frame + loose prior  (our approach)', ...
+    '3 unknowns/vertex  |  same penalty  |  gauge-consistent tangent frame'};
 
-clr_active    = [1 0.75 0.20];
-clr_normal_v  = [0.90 0.90 0.90];
-clr_dim5      = [0.30 0.30 0.30];
-clr_plane_hi  = [0.55 0.65 0.80];
-clr_plane_dim = [0.40 0.40 0.40];
+clr_n       = [0.92 0.92 0.92];   % normal — bright white
+clr_tang    = [0.85 0.65 0.20];   % tangential — existing loose (arbitrary, orange)
+clr_tang_cl = [0.35 0.80 0.55];   % tangential — connection-Laplacian (green)
+clr_dim5    = [0.28 0.28 0.28];   % discarded
+clr_cart    = [0.85 0.65 0.20];   % Cartesian (equal weight)
 
-figure('Name','Parameterization choices','Color','k','Position',[50 50 1100 900])
+figure('Name','Parameterization choices','Color','k','Position',[50 50 1200 940])
 
 for p = 1:4
     ax = subplot(2,2,p);
-    set(ax,'Color','k');  hold(ax,'on')
+    set(ax,'Color','k'); hold(ax,'on')
 
-    % Tangent plane — highlighted only for Choice 4
+    % Tangent plane
     if p == 4
-        fc = clr_plane_hi; fa = 0.30; ec = clr_plane_hi;
+        fc=[0.25 0.45 0.60]; fa=0.30; ec=[0.35 0.55 0.75];
+    elseif p == 3
+        fc=[0.30 0.30 0.30]; fa=0.08; ec=[0.30 0.30 0.30];
     else
-        fc = clr_plane_dim; fa = 0.15; ec = clr_plane_dim;
+        fc=[0.30 0.30 0.30]; fa=0.18; ec=[0.30 0.30 0.30];
     end
     fill3(tp5([1 2 3 4 1],1),tp5([1 2 3 4 1],2),tp5([1 2 3 4 1],3), ...
         fc,'FaceAlpha',fa,'EdgeColor',ec,'LineWidth',0.8,'Parent',ax)
 
-    % Arrows and labels per choice
-    if p == 1      % Cartesian: X Y Z
+    if p == 1      % Cartesian: X Y Z, all equal
         vecs5 = {[1 0 0],[0 1 0],[0 0 1]};
         labs5 = {'X̂','Ŷ','Ẑ'};
-        clrs5 = {clr_active, clr_active, clr_active};
-    elseif p == 2  % Local frame: n̂ e1 e2 — all active
+        clrs5 = {clr_cart, clr_cart, clr_cart};
+        scs5  = [sc sc sc];
+    elseif p == 2  % Existing loose MNE: n̂ dominant, ê₁ ê₂ penalised, arbitrary frame
         vecs5 = {n_src, e1_src, e2_src};
         labs5 = {'n̂','ê_1','ê_2'};
-        clrs5 = {clr_normal_v, clr_active, clr_active};
-    elseif p == 3  % Normal only: n̂ bright, e1 e2 dim
+        clrs5 = {clr_n, clr_tang, clr_tang};
+        scs5  = [sc_n sc_t sc_t];
+    elseif p == 3  % Constrained: only n̂
         vecs5 = {n_src, e1_src, e2_src};
         labs5 = {'n̂','ê_1','ê_2'};
-        clrs5 = {clr_normal_v, clr_dim5, clr_dim5};
-    else           % Tangential only: e1 e2 bright, n̂ dim
+        clrs5 = {clr_n, clr_dim5, clr_dim5};
+        scs5  = [sc_n sc_t sc_t];
+    else           % Our approach: n̂ dominant, ê₁ ê₂ gauge-consistent (green)
         vecs5 = {n_src, e1_src, e2_src};
         labs5 = {'n̂','ê_1','ê_2'};
-        clrs5 = {clr_dim5, clr_active, clr_active};
+        clrs5 = {clr_n, clr_tang_cl, clr_tang_cl};
+        scs5  = [sc_n sc_t sc_t];
     end
 
     for k = 1:3
-        v = vecs5{k}; c = clrs5{k};
-        quiver3(pos_src(1),pos_src(2),pos_src(3), v(1)*sc,v(2)*sc,v(3)*sc, 0, ...
-            'Color',c,'LineWidth',1.8,'MaxHeadSize',0.3,'Parent',ax)
-        text(pos_src(1)+v(1)*sc*1.20, pos_src(2)+v(2)*sc*1.20, pos_src(3)+v(3)*sc*1.20, ...
+        v = vecs5{k}; c = clrs5{k}; s = scs5(k);
+        quiver3(pos_src(1),pos_src(2),pos_src(3), v(1)*s,v(2)*s,v(3)*s, 0, ...
+            'Color',c,'LineWidth',1.8,'MaxHeadSize',0.4,'Parent',ax)
+        text(pos_src(1)+v(1)*s*1.20, pos_src(2)+v(2)*s*1.20, pos_src(3)+v(3)*s*1.20, ...
             labs5{k},'Color',c,'FontSize',10,'FontWeight','bold','Parent',ax)
+    end
+
+    % Distinguishing annotation for panels 2 and 4
+    if p == 2
+        text(pos_src(1),pos_src(2)-tp_sc5*1.1,pos_src(3)+tp_sc5*0.4, ...
+            'arbitrary frame','Color',[0.60 0.60 0.60],'FontSize',8, ...
+            'HorizontalAlignment','center','FontAngle','italic','Parent',ax)
+    elseif p == 4
+        text(pos_src(1),pos_src(2)-tp_sc5*1.1,pos_src(3)+tp_sc5*0.4, ...
+            'parallel transport','Color',clr_tang_cl,'FontSize',8, ...
+            'HorizontalAlignment','center','FontAngle','italic','Parent',ax)
     end
 
     plot3(pos_src(1),pos_src(2),pos_src(3),'o','MarkerSize',8, ...
         'MarkerFaceColor','w','MarkerEdgeColor','w','Parent',ax)
-
-    view(ax,-55,28);  axis(ax,'equal','off')
+    view(ax,-55,28); axis(ax,'equal','off')
     tt = title(ax, sprintf('%s\n%s', panels5{p,1}, panels5{p,2}));
-    tt.Color = 'w';  tt.FontSize = 8;
+    tt.Color = 'w'; tt.FontSize = 7.5;
 end
 
-sgtitle('Parameterization choices for the dipole at each cortex vertex', ...
-    'Color','w','FontSize',11)
+sgtitle({'Source parameterization choices at each cortex vertex', ...
+         'Arrow length encodes regularisation weight  (short = more penalised)'}, ...
+    'Color','w','FontSize',10)
 
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
