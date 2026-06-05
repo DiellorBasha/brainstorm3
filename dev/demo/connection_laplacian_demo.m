@@ -404,18 +404,37 @@ pos_src = Vtx_mm(iSrc,:);
 g_src   = reshape(Gain_meg(iSensor,:),3,nV)'; g_src = g_src(iSrc,:);
 g_hat_s = g_src / norm(g_src);
 
-sc = 12;   % arrow length mm
+sc       = 12;    % arrow length mm
+comp_clr = [0.70 0.70 0.70];
+sLoc     = ChannelMat.Channel(iMEG(iSensor)).Loc(:,1)' * 1000;
+
+% Tangent frame at this vertex (nxr gauge).
+e1_src = e1_nxr(iSrc,:);
+e2_src = e2_nxr(iSrc,:);
+
+% Axis limits: large enough to show both source and sensor comfortably.
+pad_src = 22;  pad_sns = 15;
+xl = [min(pos_src(1)-pad_src, sLoc(1)-pad_sns), max(pos_src(1)+pad_src, sLoc(1)+pad_sns)];
+yl = [min(pos_src(2)-pad_src, sLoc(2)-pad_sns), max(pos_src(2)+pad_src, sLoc(2)+pad_sns)];
+zl = [min(pos_src(3)-pad_src, sLoc(3)-pad_sns), max(pos_src(3)+pad_src, sLoc(3)+pad_sns)];
+
+% Tangent plane at source — square spanned by e1 and e2.
+tp_sc = 18;
+tp = [pos_src + tp_sc*( e1_src + e2_src); ...
+      pos_src + tp_sc*( e1_src - e2_src); ...
+      pos_src + tp_sc*(-e1_src - e2_src); ...
+      pos_src + tp_sc*(-e1_src + e2_src)];
 
 figure('Name','Gain vector — Cartesian components','Color','k', ...
-       'Position',[100 100 640 560])
+       'Position',[100 100 680 580])
 ax5 = axes('Color','k'); hold(ax5,'on')
 
-% Source marker at the vertex position
-plot3(pos_src(1),pos_src(2),pos_src(3), 'o','MarkerSize',9, ...
-    'MarkerFaceColor',[1 1 1],'MarkerEdgeColor','w','Parent',ax5)
+% Cortical tangent plane (grey, semi-transparent)
+fill3(tp([1 2 3 4 1],1),tp([1 2 3 4 1],2),tp([1 2 3 4 1],3), ...
+    [0.5 0.5 0.5],'FaceAlpha',0.20,'EdgeColor',[0.6 0.6 0.6], ...
+    'LineWidth',0.8,'Parent',ax5)
 
-% Three Cartesian component arrows — same colour
-comp_clr = [0.70 0.70 0.70];
+% Three Cartesian component arrows — same colour, no text labels
 quiver3(pos_src(1),pos_src(2),pos_src(3), g_hat_s(1)*sc,0,0, 0, ...
     'Color',comp_clr,'LineWidth',2,'MaxHeadSize',0.5,'Parent',ax5)
 quiver3(pos_src(1),pos_src(2),pos_src(3), 0,g_hat_s(2)*sc,0, 0, ...
@@ -423,39 +442,27 @@ quiver3(pos_src(1),pos_src(2),pos_src(3), 0,g_hat_s(2)*sc,0, 0, ...
 quiver3(pos_src(1),pos_src(2),pos_src(3), 0,0,g_hat_s(3)*sc, 0, ...
     'Color',comp_clr,'LineWidth',2,'MaxHeadSize',0.5,'Parent',ax5)
 
-% Resultant gain vector (yellow)
+% Gain vector (yellow)
 quiver3(pos_src(1),pos_src(2),pos_src(3), ...
     g_hat_s(1)*sc,g_hat_s(2)*sc,g_hat_s(3)*sc, 0, ...
     'Color',[1 0.85 0.15],'LineWidth',2.5,'MaxHeadSize',0.25,'Parent',ax5)
-
-% Component labels
-text(pos_src(1)+g_hat_s(1)*sc*1.25, pos_src(2), pos_src(3), ...
-    sprintf('G_x = %.3f',g_hat_s(1)),'Color',comp_clr,'FontSize',10,'Parent',ax5)
-text(pos_src(1), pos_src(2)+g_hat_s(2)*sc*1.25, pos_src(3), ...
-    sprintf('G_y = %.3f',g_hat_s(2)),'Color',comp_clr,'FontSize',10,'Parent',ax5)
-text(pos_src(1), pos_src(2), pos_src(3)+g_hat_s(3)*sc*1.2, ...
-    sprintf('G_z = %.3f',g_hat_s(3)),'Color',comp_clr,'FontSize',10,'Parent',ax5)
 text(pos_src(1)+g_hat_s(1)*sc*1.12, pos_src(2)+g_hat_s(2)*sc*1.12, ...
     pos_src(3)+g_hat_s(3)*sc*1.12, ...
     'ĝ','Color',[1 0.85 0.15],'FontSize',13,'FontWeight','bold','Parent',ax5)
 
-% Zoom around the source vertex; clamp the sensor marker to the axis
-% boundary so it stays visible as a reference without shrinking the arrows.
-pad = 22;
-xl = [pos_src(1)-pad, pos_src(1)+pad];
-yl = [pos_src(2)-pad, pos_src(2)+pad];
-zl = [pos_src(3)-pad, pos_src(3)+pad];
-xlim(ax5,xl);  ylim(ax5,yl);  zlim(ax5,zl)
+% Source marker
+plot3(pos_src(1),pos_src(2),pos_src(3), 'o','MarkerSize',9, ...
+    'MarkerFaceColor',[1 1 1],'MarkerEdgeColor','w','Parent',ax5)
+text(pos_src(1)+1,pos_src(2)+1,pos_src(3)+2, ...
+    'Source','Color','w','FontSize',10,'Parent',ax5)
 
-sLoc = ChannelMat.Channel(iMEG(iSensor)).Loc(:,1)' * 1000;   % mm
-sLoc_c = [max(xl(1),min(xl(2),sLoc(1))), ...
-          max(yl(1),min(yl(2),sLoc(2))), ...
-          max(zl(1),min(zl(2),sLoc(3)))];
-plot3(sLoc_c(1),sLoc_c(2),sLoc_c(3), 'o','MarkerSize',10, ...
+% Sensor marker
+plot3(sLoc(1),sLoc(2),sLoc(3), 'o','MarkerSize',10, ...
     'MarkerFaceColor',[0.3 0.8 1],'MarkerEdgeColor','w','LineWidth',1.2,'Parent',ax5)
-text(sLoc_c(1)+1,sLoc_c(2),sLoc_c(3), sprintf('sensor %d →',iSensor), ...
+text(sLoc(1)+1,sLoc(2),sLoc(3), sprintf('Sensor %d',iSensor), ...
     'Color','w','FontSize',9,'Parent',ax5)
 
+xlim(ax5,xl);  ylim(ax5,yl);  zlim(ax5,zl)
 grid(ax5,'on')
 set(ax5,'XColor','w','YColor','w','ZColor','w', ...
         'GridColor',[0.25 0.25 0.25],'GridAlpha',0.5)
