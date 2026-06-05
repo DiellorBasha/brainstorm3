@@ -236,6 +236,123 @@ t2 = title(ax2, 'Analytic \theta on S^2');  t2.Color = 'w';
 sgtitle('Analytic sphere: vertices as exact sampling points on S^2', ...
     'Color', 'w', 'FontSize', 11)
 
+%% Section 4 — Eigenmode leadfield
+% We now build the sensor-space representation of each connection-Laplacian
+% eigenmode. The goal is a real matrix Lmu [nCh x 2K] where each pair of
+% columns (L~_k^R, L~_k^I) is the MEG sensor pattern produced by eigenmode k
+% with unit real and unit imaginary coefficient respectively.
+%
+% The construction has four steps:
+%
+% (A) Project the free-orientation leadfield into the nxr tangent frame.
+%     Gain [nCh x 3V] carries three Cartesian columns per vertex.
+%     Projecting onto {e1(i), e2(i)} gives two tangent columns per vertex:
+%       L1(:,i) = Gain(:, 3i-2:3i) * e1(i,:)'
+%       L2(:,i) = Gain(:, 3i-2:3i) * e2(i,:)'
+%     These are the sensor patterns of unit dipoles along the nxr frame axes
+%     — the exact gauge that the complex eigenvectors are stored in.
+%
+% (B) Mass-weight the eigenmode components.
+%     A_re(i,k) = Area(i) * Re(Psi_k(i))
+%     A_im(i,k) = Area(i) * Im(Psi_k(i))
+%
+% (C) Combine into eigenmode leadfield columns.
+%     Lmu_R = L1 * A_re + L2 * A_im   [nCh x K]   (driven by c_k^R)
+%     Lmu_I = -L1 * A_im + L2 * A_re  [nCh x K]   (driven by c_k^I)
+%
+% (D) Interleave into Lmu [nCh x 2K]:
+%     columns 1,3,5,... = Lmu_R;   columns 2,4,6,... = Lmu_I
+
+%% Section 4 — Load headmodel and select MEG channels
+% The Brainstorm headmodel Gain contains all 340 channels — including EEG,
+% EOG, reference channels, etc. — as NaN rows. We select only the 274 MEG
+% gradiometers/magnetometers.
+
+HMFile = ['/Users/diellorbasha/workspace/library/datasets/brainstorm_db/' ...
+          'tmp_aggregate/TutorialAuditory/data/Subject01/' ...
+          'S01_AEF_20131218_01_notch/headmodel_surf_os_meg.mat'];
+hm   = load(HMFile, 'Gain');
+Gain = double(hm.Gain);       % [340 x 3*nV]
+
+% Identify MEG channels from the channel file.
+ChannelMat = load(file_fullpath( ...
+    'Subject01/S01_AEF_20131218_01_notch/channel_ctf_acc1.mat'), 'Channel');
+iMEG = find(strcmp({ChannelMat.Channel.Type}, 'MEG'));
+Gain_meg = Gain(iMEG, :);     % [274 x 3*nV]  — no NaNs
+[nCh, ~] = size(Gain_meg);
+fprintf('MEG channels: %d  |  Gain NaN: %d\n', nCh, any(isnan(Gain_meg(:))))
+
+%% Section 4 — Build the tangent-frame leadfield (L1, L2)
+% Project Gain from global Cartesian into the nxr per-vertex tangent frame.
+% Vectorised: reshape Gain to [nCh x 3 x nV], broadcast dot with e1 and e2.
+
+% nxr tangent frame — same gauge as the stored eigenmodes.
+mctx   = nxr.manifold.context(Vtx, Fcs);
+vFrame = nxr.manifold.measure.vertexFrame(mctx);
+e1_nxr = vFrame.e1;   % [nV x 3]
+e2_nxr = vFrame.e2;   % [nV x 3]
+
+G3 = reshape(Gain_meg, nCh, 3, nV);   % [nCh x 3 x nV]  — no data copy
+L1 = squeeze(sum(G3 .* reshape(e1_nxr', 1, 3, nV), 2));   % [nCh x nV]
+L2 = squeeze(sum(G3 .* reshape(e2_nxr', 1, 3, nV), 2));   % [nCh x nV]
+fprintf('L1, L2: %s each\n', mat2str(size(L1)))
+
+%% Section 4 — Build the eigenmode leadfield Lmu
+% Psi [nV x K] complex — eigenmodes in nxr gauge (complex single → double).
+% Areas [nV x 1]       — vertex areas from the mass matrix diagonal.
+
+Psi_d   = double(TessMat.ConnEigenmodes.Vectors);   % [nV x K] complex
+Areas   = full(diag(TessMat.ConnEigenmodes.MassMatrix));
+eigVals = TessMat.ConnEigenmodes.Values;
+K       = size(Psi_d, 2);
+
+Are = real(Psi_d) .* Areas;   % [nV x K]
+Aim = imag(Psi_d) .* Areas;   % [nV x K]
+
+Lmu_R = L1 * Are + L2 * Aim;     % [nCh x K]
+Lmu_I = -L1 * Aim + L2 * Are;    % [nCh x K]
+
+% Interleave real and imaginary columns.
+Lmu = zeros(nCh, 2*K);
+Lmu(:, 1:2:end) = Lmu_R;
+Lmu(:, 2:2:end) = Lmu_I;
+fprintf('Eigenmode leadfield Lmu: %s\n', mat2str(size(Lmu)))
+
+%% Section 4 — Observability plot
+% sigma_k = ||L~_k^R||^2 + ||L~_k^I||^2 is the total power a unit-amplitude
+% eigenmode k injects into the sensors. It should decay with eigenvalue
+% (higher spatial-frequency modes produce weaker — less observable — signals).
+% The R/I ratio tests whether the two tangent components have equal sensor
+% visibility; values near 1 indicate the frame is well-conditioned.
+
+sigma_R = sum(Lmu_R.^2, 1);    % [1 x K]
+sigma_I = sum(Lmu_I.^2, 1);    % [1 x K]
+sigma   = sigma_R + sigma_I;
+
+figure('Name','Eigenmode observability','Color','k','Position',[100 100 720 400])
+
+yyaxis left
+scatter(eigVals, sigma, 60, 'filled', ...
+    'MarkerFaceColor',[0.30 0.70 1.0],'MarkerEdgeColor','none'); hold on
+plot(eigVals, sigma, '-', 'Color',[0.30 0.70 1.0 0.35],'LineWidth',1.2)
+ylabel('\sigma_k^2  (total observability)','Color','w')
+set(gca,'YColor','w')
+
+yyaxis right
+scatter(eigVals, sigma_R ./ max(sigma_I, eps), 35, 'filled', ...
+    'MarkerFaceColor',[1.0 0.70 0.25],'MarkerEdgeColor','none')
+yline(1,'--','Color',[1.0 0.70 0.25 0.55],'LineWidth',1)
+ylabel('\sigma_k^R / \sigma_k^I  (R/I symmetry)','Color',[1.0 0.70 0.25])
+set(gca,'YColor',[1.0 0.70 0.25])
+
+set(gca,'Color','k','XColor','w','GridColor',[0.3 0.3 0.3],'GridAlpha',0.3)
+grid on
+xlabel('Connection Laplacian eigenvalue \mu_k','Color','w')
+t4 = title('Eigenmode observability (connection Laplacian tangent basis)');
+t4.Color = 'w';
+legend({'Total \sigma_k^2','','R/I ratio','R = I'},'TextColor','w', ...
+    'Color',[0.10 0.10 0.10],'Location','northeast')
+
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
 % Return the first cortex surface with exactly nVert vertices.
