@@ -364,6 +364,109 @@ view(ax_g,-70,20)
 tg = title(ax_g,sprintf('Leadfield column — sensor %d  (one 3D gain vector per vertex)',iSensor));
 tg.Color = 'w';
 
+%% Section 4 — Gain vector decomposition at the most sensitive vertex
+% Take the single largest gain vector from the column and decompose it into
+% the three orthogonal directions of the nxr tangent frame {ê₁, ê₂, n̂}.
+%
+%   ĝ = (ĝ·n̂) n̂  +  (ĝ·ê₁) ê₁  +  (ĝ·ê₂) ê₂
+%       \_______/    \____________________/
+%       normal part       tangential part
+%
+% The tangential part is what L1(:,i) and L2(:,i) capture; the normal part
+% is discarded when we project onto the tangent frame.
+
+% Vertex with the largest gain magnitude for sensor iSensor.
+g_all    = reshape(Gain_meg(iSensor,:), 3, nV)';
+[~,iMax] = max(sqrt(sum(g_all.^2,2)));
+
+pos    = Vtx_mm(iMax,:);
+g_hat  = g_all(iMax,:) / norm(g_all(iMax,:));
+n_hat  = TessMat.VertNormals(iMax,:);
+e1_hat = e1_nxr(iMax,:);
+e2_hat = e2_nxr(iMax,:);
+
+cn = dot(g_hat, n_hat);
+c1 = dot(g_hat, e1_hat);
+c2 = dot(g_hat, e2_hat);
+g_tang = c1*e1_hat + c2*e2_hat;
+g_n    = cn * n_hat;
+
+sc = 15;   % arrow length in mm
+
+% Tangent plane — square centred at vertex, spanned by ê₁ and ê₂.
+tp = [pos + sc*(e1_hat + e2_hat); pos + sc*(e1_hat - e2_hat); ...
+      pos + sc*(-e1_hat - e2_hat); pos + sc*(-e1_hat + e2_hat)];
+
+figure('Name','Gain vector decomposition','Color','k','Position',[100 100 760 640])
+ax5 = axes('Color','k'); hold(ax5,'on')
+
+% Tangent plane patch
+fill3(tp([1 2 3 4 1],1),tp([1 2 3 4 1],2),tp([1 2 3 4 1],3), ...
+    [0.2 0.3 0.5],'FaceAlpha',0.25,'EdgeColor',[0.4 0.5 0.7], ...
+    'LineWidth',0.8,'Parent',ax5)
+
+% Frame vectors: n̂ (white), ê₁ (red), ê₂ (blue)
+fvecs = {n_hat, e1_hat, e2_hat};
+fclrs = {[1 1 1], [1 0.3 0.3], [0.4 0.6 1]};
+flabs = {'n̂  (normal)', 'ê_1', 'ê_2'};
+for k = 1:3
+    v = fvecs{k}; c = fclrs{k};
+    quiver3(pos(1),pos(2),pos(3), v(1)*sc,v(2)*sc,v(3)*sc, 0, ...
+        'Color',c,'LineWidth',2.0,'MaxHeadSize',0.2,'Parent',ax5)
+    text(pos(1)+v(1)*sc*1.15, pos(2)+v(2)*sc*1.15, pos(3)+v(3)*sc*1.15, ...
+        flabs{k},'Color',c,'FontSize',11,'FontWeight','bold','Parent',ax5)
+end
+
+% Gain vector ĝ (yellow)
+quiver3(pos(1),pos(2),pos(3), g_hat(1)*sc,g_hat(2)*sc,g_hat(3)*sc, 0, ...
+    'Color',[1 0.9 0.2],'LineWidth',2.5,'MaxHeadSize',0.2,'Parent',ax5)
+text(pos(1)+g_hat(1)*sc*1.15, pos(2)+g_hat(2)*sc*1.15, pos(3)+g_hat(3)*sc*1.15, ...
+    'ĝ  (gain)','Color',[1 0.9 0.2],'FontSize',11,'FontWeight','bold','Parent',ax5)
+
+% Tangential component ĝ⊥ (green, lies in the tangent plane)
+quiver3(pos(1),pos(2),pos(3), g_tang(1)*sc,g_tang(2)*sc,g_tang(3)*sc, 0, ...
+    'Color',[0.3 1 0.5],'LineWidth',2.0,'MaxHeadSize',0.2,'Parent',ax5)
+text(pos(1)+g_tang(1)*sc*1.15, pos(2)+g_tang(2)*sc*1.15, pos(3)+g_tang(3)*sc*1.15, ...
+    sprintf('ĝ_{\\perp}  (%.2f)',sqrt(c1^2+c2^2)), ...
+    'Color',[0.3 1 0.5],'FontSize',10,'Parent',ax5)
+
+% Normal component ĝₙ (dim grey)
+quiver3(pos(1),pos(2),pos(3), g_n(1)*sc,g_n(2)*sc,g_n(3)*sc, 0, ...
+    'Color',[0.7 0.7 0.7],'LineWidth',1.5,'MaxHeadSize',0.3,'Parent',ax5)
+text(pos(1)+g_n(1)*sc*1.5, pos(2)+g_n(2)*sc*1.5, pos(3)+g_n(3)*sc*1.5, ...
+    sprintf('ĝ_n  (%.2f)',abs(cn)), ...
+    'Color',[0.7 0.7 0.7],'FontSize',10,'Parent',ax5)
+
+% Dashed connector: ĝ tip → ĝ⊥ tip (shows the normal lift)
+tip_g = pos + g_hat*sc;  tip_t = pos + g_tang*sc;
+plot3([tip_g(1) tip_t(1)],[tip_g(2) tip_t(2)],[tip_g(3) tip_t(3)], ...
+    '--','Color',[0.5 0.5 0.5],'LineWidth',1,'Parent',ax5)
+
+plot3(pos(1),pos(2),pos(3),'w.','MarkerSize',16,'Parent',ax5)
+
+% Sensor marker
+plot3(sLoc(1),sLoc(2),sLoc(3),'o','MarkerSize',10, ...
+    'MarkerFaceColor',[0.3 0.8 1],'MarkerEdgeColor','w','Parent',ax5)
+text(sLoc(1)+3,sLoc(2),sLoc(3),sprintf('sensor %d',iSensor), ...
+    'Color','w','FontSize',9,'Parent',ax5)
+
+annotation(gcf,'textbox',[0.02 0.02 0.35 0.14], ...
+    'String',{sprintf('ĝ·n̂  = %+.3f  (normal)',cn), ...
+              sprintf('ĝ·ê₁ = %+.3f',c1), ...
+              sprintf('ĝ·ê₂ = %+.3f',c2), ...
+              sprintf('|ĝ_{tang}| = %.3f  (%.0f%% tangential)', ...
+                      sqrt(c1^2+c2^2), sqrt(c1^2+c2^2)*100)}, ...
+    'Color','w','BackgroundColor',[0.08 0.08 0.08], ...
+    'EdgeColor',[0.4 0.4 0.4],'FontSize',9,'FitBoxToText','on')
+
+axis(ax5,'equal'); grid(ax5,'on')
+set(ax5,'XColor','w','YColor','w','ZColor','w', ...
+        'GridColor',[0.2 0.2 0.2],'GridAlpha',0.4)
+xlabel(ax5,'x (mm)');  ylabel(ax5,'y (mm)');  zlabel(ax5,'z (mm)')
+view(ax5,-40,25)
+tg2 = title(ax5, sprintf('Gain vector decomposition — vertex %d  (largest |g|)', iMax));
+tg2.Color = 'w';
+
 %% Section 4 — Build the tangent-frame leadfield (L1, L2)
 % Project Gain from global Cartesian into the nxr per-vertex tangent frame.
 % Vectorised: reshape Gain to [nCh x 3 x nV], broadcast dot with e1 and e2.
