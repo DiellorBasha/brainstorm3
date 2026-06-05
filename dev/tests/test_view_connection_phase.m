@@ -61,6 +61,17 @@ assert(~isempty(hS), 'Missing connPhaseSing markers.');
 assert(numel(hS.XData) == numel(st.R.Singularities), 'Singularity marker count mismatch.');
 
 fprintf('PASSED: view_connection_phase opens with phase surface data (Rank %d of %d modes).\n', st.Rank, st.nModes);
+
+% Keyboard: Shift+m advances the mode rank and recomputes the phase/field.
+kp = get(hFig, 'KeyPressFcn');
+assert(~isempty(kp), 'Viewer must install a KeyPressFcn.');
+kp(hFig, struct('Key','m','Character','M','Modifier',{{'shift'}}));   % next mode
+st2 = getappdata(hFig, 'ConnPhase');
+assert(st2.Rank == 2, 'Shift+m should advance to Rank 2 (got %d).', st2.Rank);
+% Toggle glyphs off.
+kp(hFig, struct('Key','g','Character','g','Modifier',{{}}));
+assert(isempty(findobj(hAxes, 'Tag', 'connPhaseField')), 'g should toggle glyphs off.');
+
 fprintf('ALL TESTS PASSED: test_view_connection_phase\n');
 end
 

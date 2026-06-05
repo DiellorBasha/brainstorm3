@@ -143,9 +143,15 @@ st.Vtx         = Vtx;
 st.Fcs         = Fcs;
 st.showGlyphs  = true;
 st.showSing    = true;
+% Capture Brainstorm's key handler so ours can chain unhandled keys to it
+% (preserving the figure_3d view shortcuts / rotation controls).
+st.KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
+% Cache the dataset/result indices for live phase updates on mode change.
+[st.iDS, st.iResult] = bst_memory('GetDataSetResult', file_short(OutputFile));
 setappdata(hFig, 'ConnPhase', st);
 
 DrawOverlays(hFig, hAxes, st);
+set(hFig, 'KeyPressFcn', @(h,ev) KeyPress_Callback(h, ev));
 
 bst_progress('stop');
 
@@ -226,6 +232,56 @@ function DrawOverlays(hFig, hAxes, st)
 
     % Restore original hold state
     set(hAxes, 'NextPlot', prevHold);
+end
+
+
+%% ===== KEYBOARD =====
+% m / Shift+m : previous / next mode rank (recomputes phase + field)
+% g           : toggle field glyphs
+% p           : toggle singularity markers
+% Left/Right  : fewer / more glyphs
+% Any other key chains to Brainstorm's figure_3d handler (view shortcuts, etc.).
+function KeyPress_Callback(hFig, ev)
+    st = getappdata(hFig, 'ConnPhase');
+    if isempty(st)
+        return;
+    end
+    switch ev.Key
+        case 'm'
+            if ismember('shift', ev.Modifier)
+                st.Rank = min(st.nModes, st.Rank + 1);
+            else
+                st.Rank = max(1, st.Rank - 1);
+            end
+            st = Recompute(hFig, st);
+        case 'g'
+            st.showGlyphs = ~st.showGlyphs;
+        case 'p'
+            st.showSing = ~st.showSing;
+        case 'rightarrow'
+            st.MaxArrows = ceil(st.MaxArrows * 1.5);
+        case 'leftarrow'
+            st.MaxArrows = max(50, floor(st.MaxArrows / 1.5));
+        otherwise
+            % Chain unhandled keys to Brainstorm's handler (preserves view shortcuts).
+            if isfield(st, 'KeyPressFcn_bak') && ~isempty(st.KeyPressFcn_bak)
+                st.KeyPressFcn_bak(hFig, ev);
+            end
+            return;
+    end
+    setappdata(hFig, 'ConnPhase', st);
+    DrawOverlays(hFig, GetAxes3D(hFig), st);
+end
+
+
+%% ===== RECOMPUTE PHASE/FIELD FOR A NEW MODE RANK =====
+function st = Recompute(hFig, st)
+    global GlobalData;
+    st.R = bst_conn_phase(st.ConnEig, st.vFrame, 'Rank', st.Rank, 'FsFrame', st.FsFrame, 'nSing', 2);
+    phase = st.R.Phase;
+    phase(~isfinite(phase)) = 0;
+    GlobalData.DataSet(st.iDS).Results(st.iResult).ImageGridAmp = [phase, phase];
+    panel_surface('UpdateSurfaceData', hFig);
 end
 
 
