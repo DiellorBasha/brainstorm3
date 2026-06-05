@@ -59,9 +59,9 @@ if ~isempty(C)
     h2 = figure('Visible','off','Color','w','Position',[100 100 900 380]);
     subplot(1,2,1);
     edges = linspace(0, pi, 30);
-    histogram(C.df, edges, 'Normalization','probability'); hold on;
-    histogram(C.dt, edges, 'Normalization','probability');
-    histogram(C.dx, edges, 'Normalization','probability');
+    histogram(C.df(~isnan(C.df)), edges, 'Normalization','probability'); hold on;
+    histogram(C.dt(~isnan(C.dt)), edges, 'Normalization','probability');
+    histogram(C.dx(~isnan(C.dx)), edges, 'Normalization','probability');
     legend({'Fiedler','tess\_tangents','global-xyz'});
     xlabel('phase discontinuity across wall (rad)'); ylabel('prob');
     title(sprintf('Phase continuity, %d pairs, t=%.0f ms', C.nPairs, 1000*C.tPeak));

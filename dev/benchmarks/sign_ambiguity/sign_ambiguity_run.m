@@ -76,6 +76,9 @@ for iS = 1:numel(allSubj)
         if size(T.Vertices,1) == 20484, SurfaceFile = surf(iF).FileName; return; end
     end
 end
+if isempty(SurfaceFile)
+    fprintf('sign_ambiguity_run: no 20484-vertex cortex found in current protocol -- skipping.\n');
+end
 end
 
 function ResultsFile = local_find_kernel(SurfaceFile)
