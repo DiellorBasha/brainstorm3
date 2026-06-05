@@ -160,6 +160,80 @@ end
 sgtitle('Registration sphere — trivial-connection singularities', ...
     'Color','w','FontSize',11)
 
+%% Section 3 — Analytic sphere: vertices as sampling points on S²
+% Because every ico vertex lies on S² (to machine precision), each vertex
+% maps to exact spherical coordinates (theta, phi).  Any analytic function
+% defined on S² can therefore be evaluated at these vertex positions without
+% approximation — we are just sampling an analytic function at known points.
+%
+% This establishes the bridge between the discrete ico mesh and the analytic
+% sphere: the connection Laplacian eigenmodes we compute on the cortex are
+% a discrete approximation to analytic objects on S². Later sections compare
+% the discrete Fiedler vector against its analytic counterpart.
+%
+% Coordinates:
+%   theta in [0, pi]    — colatitude  (0 = north pole, pi = south pole)
+%   phi   in [-pi, pi]  — longitude   (atan2(y, x))
+
+r   = 0.1;
+th  = acos( max(min(Sphere(:,3)/r, 1), -1) );  % colatitude [0, pi]
+phi = atan2( Sphere(:,2), Sphere(:,1) );         % longitude  [-pi, pi]
+
+% Work with the left hemisphere only for a clean hemisphere view.
+vH  = lH(:);
+inH = false(size(Sphere,1),1);  inH(vH) = true;
+fH  = all(inH(Fcs), 2);
+
+figure('Name','Analytic sphere','Color','k','Position',[100 100 820 480])
+
+% --- Left panel: longitude phi (cyclic, HSV colormap) ---
+% phi completes one full cycle around the sphere — this is the analytic
+% "location coordinate" that the Fiedler vector's phase approximates on
+% the folded cortex.
+phi_norm = (phi(vH) + pi) / (2*pi);
+cidx     = max(1, min(256, round(phi_norm * 255) + 1));
+cAll     = repmat([0.18 0.18 0.18], size(Sphere,1), 1);
+cAll(vH,:) = hsv(256)(cidx, :);
+
+ax1 = subplot(1,2,1);
+patch('Faces', Fcs(fH,:), 'Vertices', Sphere, ...
+    'FaceVertexCData', cAll, 'FaceColor', 'interp', ...
+    'EdgeColor', 'none', 'FaceLighting', 'phong', 'Parent', ax1)
+camlight(ax1,  70,  45);  camlight(ax1, -70,  45);
+camlight(ax1,  70, -45);  camlight(ax1, -70, -45);
+material([0.72 0.38 0.03 8])
+colormap(ax1, hsv(256));  clim([-pi pi])
+cb1 = colorbar(ax1, 'Color', 'w', ...
+    'Ticks', [-pi -pi/2 0 pi/2 pi], ...
+    'TickLabels', {'-\pi','-\pi/2','0','\pi/2','\pi'});
+cb1.Label.String = '\phi  (longitude)';  cb1.Label.Color = 'w';
+view(ax1, 0, 0);  axis(ax1, 'equal', 'off')
+t1 = title(ax1, 'Analytic \phi on S^2');  t1.Color = 'w';
+
+% --- Right panel: colatitude theta (parula colormap) ---
+th_norm = th(vH) / pi;
+cidx2   = max(1, min(256, round(th_norm * 255) + 1));
+cAll2   = repmat([0.18 0.18 0.18], size(Sphere,1), 1);
+cAll2(vH,:) = parula(256)(cidx2, :);
+
+ax2 = subplot(1,2,2);
+patch('Faces', Fcs(fH,:), 'Vertices', Sphere, ...
+    'FaceVertexCData', cAll2, 'FaceColor', 'interp', ...
+    'EdgeColor', 'none', 'FaceLighting', 'phong', 'Parent', ax2)
+camlight(ax2,  70,  45);  camlight(ax2, -70,  45);
+camlight(ax2,  70, -45);  camlight(ax2, -70, -45);
+material([0.72 0.38 0.03 8])
+colormap(ax2, parula(256));  clim([0 pi])
+cb2 = colorbar(ax2, 'Color', 'w', ...
+    'Ticks', [0 pi/4 pi/2 3*pi/4 pi], ...
+    'TickLabels', {'0','\pi/4','\pi/2','3\pi/4','\pi'});
+cb2.Label.String = '\theta  (colatitude)';  cb2.Label.Color = 'w';
+view(ax2, 0, 0);  axis(ax2, 'equal', 'off')
+t2 = title(ax2, 'Analytic \theta on S^2');  t2.Color = 'w';
+
+sgtitle('Analytic sphere: vertices as exact sampling points on S^2', ...
+    'Color', 'w', 'FontSize', 11)
+
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
 % Return the first cortex surface with exactly nVert vertices.
