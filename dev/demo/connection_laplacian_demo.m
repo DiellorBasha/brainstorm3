@@ -439,7 +439,24 @@ text(pos_src(1)+g_hat_s(1)*sc*1.12, pos_src(2)+g_hat_s(2)*sc*1.12, ...
     pos_src(3)+g_hat_s(3)*sc*1.12, ...
     'ĝ','Color',[1 0.85 0.15],'FontSize',13,'FontWeight','bold','Parent',ax5)
 
-axis(ax5,'equal'); grid(ax5,'on')
+% Zoom around the source vertex; clamp the sensor marker to the axis
+% boundary so it stays visible as a reference without shrinking the arrows.
+pad = 22;
+xl = [pos_src(1)-pad, pos_src(1)+pad];
+yl = [pos_src(2)-pad, pos_src(2)+pad];
+zl = [pos_src(3)-pad, pos_src(3)+pad];
+xlim(ax5,xl);  ylim(ax5,yl);  zlim(ax5,zl)
+
+sLoc = ChannelMat.Channel(iMEG(iSensor)).Loc(:,1)' * 1000;   % mm
+sLoc_c = [max(xl(1),min(xl(2),sLoc(1))), ...
+          max(yl(1),min(yl(2),sLoc(2))), ...
+          max(zl(1),min(zl(2),sLoc(3)))];
+plot3(sLoc_c(1),sLoc_c(2),sLoc_c(3), 'o','MarkerSize',10, ...
+    'MarkerFaceColor',[0.3 0.8 1],'MarkerEdgeColor','w','LineWidth',1.2,'Parent',ax5)
+text(sLoc_c(1)+1,sLoc_c(2),sLoc_c(3), sprintf('sensor %d →',iSensor), ...
+    'Color','w','FontSize',9,'Parent',ax5)
+
+grid(ax5,'on')
 set(ax5,'XColor','w','YColor','w','ZColor','w', ...
         'GridColor',[0.25 0.25 0.25],'GridAlpha',0.5)
 xlabel(ax5,'x (mm)');  ylabel(ax5,'y (mm)');  zlabel(ax5,'z (mm)')
