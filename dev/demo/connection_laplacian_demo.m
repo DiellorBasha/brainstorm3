@@ -45,7 +45,7 @@ fprintf('Loaded: %d vertices, %d triangles\n', size(Vtx,1), size(Fcs,1))
 
 Vtx_mm = Vtx * 1000;   % metres -> millimetres for display
 
-figure('Name','Cortical surface','Color','w')
+figure('Name','Cortical surface','Color','k')
 
 % patch gives explicit color control — trisurf maps Z to the colormap by
 % default. We supply per-vertex normals so Phong shading looks smooth.
@@ -69,7 +69,8 @@ material([0.72 0.38 0.03 8])  % [ambient diffuse specular shininess]
 % Orient to a standard left-lateral view.
 view(-90, 10)
 axis equal off
-title('tess\_cortex\_pial\_low  (20484 vertices)')
+t = title('tess\_cortex\_pial\_low  (20484 vertices)');
+t.Color = 'w';
 
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
