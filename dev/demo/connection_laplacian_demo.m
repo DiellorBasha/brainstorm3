@@ -193,7 +193,8 @@ figure('Name','Analytic sphere','Color','k','Position',[100 100 820 480])
 phi_norm = (phi(vH) + pi) / (2*pi);
 cidx     = max(1, min(256, round(phi_norm * 255) + 1));
 cAll     = repmat([0.18 0.18 0.18], size(Sphere,1), 1);
-cAll(vH,:) = hsv(256)(cidx, :);
+cmap_hsv   = hsv(256);
+cAll(vH,:) = cmap_hsv(cidx, :);
 
 ax1 = subplot(1,2,1);
 patch('Faces', Fcs(fH,:), 'Vertices', Sphere, ...
@@ -214,7 +215,8 @@ t1 = title(ax1, 'Analytic \phi on S^2');  t1.Color = 'w';
 th_norm = th(vH) / pi;
 cidx2   = max(1, min(256, round(th_norm * 255) + 1));
 cAll2   = repmat([0.18 0.18 0.18], size(Sphere,1), 1);
-cAll2(vH,:) = parula(256)(cidx2, :);
+cmap_par    = parula(256);
+cAll2(vH,:) = cmap_par(cidx2, :);
 
 ax2 = subplot(1,2,2);
 patch('Faces', Fcs(fH,:), 'Vertices', Sphere, ...
