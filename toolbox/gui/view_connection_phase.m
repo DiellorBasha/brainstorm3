@@ -5,10 +5,17 @@ function hFig = view_connection_phase(SurfaceFile, varargin)
 %         hFig = view_connection_phase(SurfaceFile, 'nModes', 50, 'MaxArrows', 2000)
 %
 % DESCRIPTION:
-%     Opens an opaque cortex figure showing a connection-Laplacian eigenmode's
-%     FreeSurfer-gauge phase as a cyclic surface colormap (the between-subject
-%     location coordinate). Field glyphs and singularity markers are added by
-%     later tasks. Data pipeline: bst_conn_eigenmodes_ensure -> nxr vertexFrame ->
+%     Opens an opaque cortex figure showing a connection-Laplacian eigenmode:
+%       - the FreeSurfer-gauge phase as a cyclic surface colormap (the between-
+%         subject location coordinate);
+%       - the gauge-independent 3D tangent field as headless glyphs (the
+%         reference-free intrinsic winding);
+%       - the field singularities as markers.
+%     Keyboard: m / Shift+m  previous / next mode rank (live recompute);
+%               g  toggle glyphs;  p  toggle singularities;
+%               Left / Right  fewer / more glyphs;  other keys drive the
+%               standard Brainstorm view controls.
+%     Data pipeline: bst_conn_eigenmodes_ensure -> nxr vertexFrame ->
 %     bst_tangent_face2vertex (FS frame) -> bst_conn_phase.
 %
 %     Requires the nxr-compute plugin and a FreeSurfer-registered cortex.
