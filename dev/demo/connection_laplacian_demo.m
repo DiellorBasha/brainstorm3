@@ -267,15 +267,35 @@ sgtitle('Analytic sphere: vertices as exact sampling points on S^2', ...
 % Before building the eigenmode leadfield it helps to see what a single
 % leadfield column looks like geometrically.
 %
-% Gain(s, :) is one row of the full leadfield — the row for sensor s.
-% Reshaped to [nV x 3], it gives one 3D vector per cortex vertex: the
-% direction and strength of the dipole current at that vertex that maximally
-% drives sensor s.  This is the "gain vector" at each vertex for sensor s.
+% The forward model for one sensor s is:
 %
-% We plot these vectors as a quiver3 field in 3D space (no cortex surface)
-% and mark the sensor location.  The vectors should fan outward from the
-% cortex toward the sensor, brightest (largest magnitude) at the closest
-% vertices.
+%   b_s = sum_i  g(i) . J(i)
+%
+% where J(i) in R^3 is the current dipole moment at vertex i and
+% g(i) = Gain(s, 3i-2 : 3i) in R^3 is the LEAD VECTOR (sensitivity vector)
+% at vertex i for sensor s.  The contribution of vertex i to sensor s is the
+% dot product g(i) . J(i), so:
+%
+%   - Direction of g(i): the direction a dipole at vertex i must point to
+%     drive sensor s most strongly.  A dipole aligned with g(i) produces a
+%     response of |g(i)|; a dipole perpendicular to g(i) contributes zero.
+%
+%   - Magnitude |g(i)|: how sensitive sensor s is to vertex i at all.
+%     Large near the sensor (high sensitivity), small far away.
+%
+% The lead vector is therefore NOT the dipole moment field — it is the
+% sensor's sensitivity field.  At each vertex independently, g(i) points in
+% the direction of the locally optimal dipole.  The globally optimal current
+% distribution for driving sensor s (a rank-1 problem over all vertices) is
+% a different object (related to the beamformer spatial filter).
+%
+% MEG physics note: g(i) is approximately tangential to the cortical surface
+% near the sensor — radial currents cancel in the spherical conductor model
+% and contribute near-zero to MEG.  This is why the plot forms a blade shape:
+% the high-magnitude arrows are roughly perpendicular to the radial direction
+% from each vertex to the sensor, which is the direction of zero sensitivity.
+% This tangential sensitivity is exactly why projecting the leadfield onto the
+% nxr tangent frame {e1, e2} captures almost all of the measurable signal.
 
 %% Section 4 — Load headmodel and select MEG channels
 % The Brainstorm headmodel Gain contains all 340 channels — including EEG,
