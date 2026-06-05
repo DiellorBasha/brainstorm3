@@ -55,13 +55,16 @@ patch('Faces', Fcs, 'Vertices', Vtx_mm, ...
     'FaceNormals', TessMat.VertNormals, ...
     'FaceLighting','phong')
 
-% Two symmetric camera-relative lights (camlight positions are always
+% Four camera-relative lights in a ring (camlight positions are always
 % relative to the camera, so they follow the view on rotation).
-camlight( 40, 20)   % upper-right of camera
-camlight(-40, 20)   % upper-left  of camera
+% This covers all faces regardless of orientation with no dark sides.
+camlight( 70,  45)   % upper-right
+camlight(-70,  45)   % upper-left
+camlight( 70, -45)   % lower-right
+camlight(-70, -45)   % lower-left
 
-% High ambient fills shadows; low specular keeps the look matte.
-material([0.65 0.45 0.05 8])  % [ambient diffuse specular shininess]
+% Moderate ambient prevents fully-dark faces; low specular stays matte.
+material([0.72 0.38 0.03 8])  % [ambient diffuse specular shininess]
 
 % Orient to a standard left-lateral view.
 view(-90, 10)
