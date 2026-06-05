@@ -542,6 +542,110 @@ t4.Color = 'w';
 legend({'Total \sigma_k^2','','R/I ratio','R = I'},'TextColor','w', ...
     'Color',[0.10 0.10 0.10],'Location','northeast')
 
+%% Section 5 — Parameterization choices for the dipole at each vertex
+% The forward model doesn't know a cortical surface exists. At vertex i the
+% Green's function G(r_i) [nCh x 3] maps any 3D dipole q in R^3 to sensor
+% data b = G(r_i)*q. The dipole can point in any direction. Three degrees of
+% freedom per vertex.
+%
+% The inverse must recover the unknown dipole moments q_i(t) from sensors.
+% It needs to choose a basis for the 3D space of possible dipole directions.
+% That choice is a PARAMETERIZATION — it affects the inverse, not the
+% forward model.
+%
+% Choice 1 — Cartesian: unknowns are (q_x, q_y, q_z)_i along global X Y Z.
+%   3 unknowns/vertex. No cortical geometry in the parameterization.
+%
+% Choice 2 — Local cortical frame: unknowns are (q_1, q_2, q_n)_i along
+%   e1(i), e2(i), n̂(i). Still 3 unknowns/vertex. SAME physics as Choice 1 —
+%   just a rotation of the unknown vector. Geometry has entered the
+%   parameterization but not the physics.
+%
+% Choice 3 — Normal only (standard constrained inverse): set q_1=q_2=0,
+%   keep only q_n. The source model asserts all current is normal to the
+%   cortex. 1 unknown/vertex. Tangential degrees of freedom discarded.
+%
+% Choice 4 — Tangential only (our approach): set q_n=0, keep q_1 and q_2.
+%   The source model asserts all current lies in the cortical tangent plane.
+%   2 unknowns/vertex. Normal degree of freedom discarded.
+%   The two leadfield columns are l_i^(1) = G(r_i)*e1(i) and
+%   l_i^(2) = G(r_i)*e2(i) — exactly the L1 and L2 we built in Section 4.
+
+n_src  = TessMat.VertNormals(iSrc,:);
+e1_src = e1_nxr(iSrc,:);
+e2_src = e2_nxr(iSrc,:);
+
+tp_sc5 = 14;
+tp5 = [pos_src + tp_sc5*( e1_src + e2_src); ...
+       pos_src + tp_sc5*( e1_src - e2_src); ...
+       pos_src + tp_sc5*(-e1_src - e2_src); ...
+       pos_src + tp_sc5*(-e1_src + e2_src)];
+
+panels5 = { ...
+    'Choice 1: Cartesian',           '3 unknowns / vertex  (q_x, q_y, q_z)'; ...
+    'Choice 2: Local cortical frame', '3 unknowns / vertex  (q_n, q_1, q_2) — same physics'; ...
+    'Choice 3: Normal only',          '1 unknown / vertex   (q_n)'; ...
+    'Choice 4: Tangential only',      '2 unknowns / vertex  (q_1, q_2)'};
+
+clr_active    = [1 0.75 0.20];
+clr_normal_v  = [0.90 0.90 0.90];
+clr_dim5      = [0.30 0.30 0.30];
+clr_plane_hi  = [0.55 0.65 0.80];
+clr_plane_dim = [0.40 0.40 0.40];
+
+figure('Name','Parameterization choices','Color','k','Position',[50 50 1100 900])
+
+for p = 1:4
+    ax = subplot(2,2,p);
+    set(ax,'Color','k');  hold(ax,'on')
+
+    % Tangent plane — highlighted only for Choice 4
+    if p == 4
+        fc = clr_plane_hi; fa = 0.30; ec = clr_plane_hi;
+    else
+        fc = clr_plane_dim; fa = 0.15; ec = clr_plane_dim;
+    end
+    fill3(tp5([1 2 3 4 1],1),tp5([1 2 3 4 1],2),tp5([1 2 3 4 1],3), ...
+        fc,'FaceAlpha',fa,'EdgeColor',ec,'LineWidth',0.8,'Parent',ax)
+
+    % Arrows and labels per choice
+    if p == 1      % Cartesian: X Y Z
+        vecs5 = {[1 0 0],[0 1 0],[0 0 1]};
+        labs5 = {'X̂','Ŷ','Ẑ'};
+        clrs5 = {clr_active, clr_active, clr_active};
+    elseif p == 2  % Local frame: n̂ e1 e2 — all active
+        vecs5 = {n_src, e1_src, e2_src};
+        labs5 = {'n̂','ê_1','ê_2'};
+        clrs5 = {clr_normal_v, clr_active, clr_active};
+    elseif p == 3  % Normal only: n̂ bright, e1 e2 dim
+        vecs5 = {n_src, e1_src, e2_src};
+        labs5 = {'n̂','ê_1','ê_2'};
+        clrs5 = {clr_normal_v, clr_dim5, clr_dim5};
+    else           % Tangential only: e1 e2 bright, n̂ dim
+        vecs5 = {n_src, e1_src, e2_src};
+        labs5 = {'n̂','ê_1','ê_2'};
+        clrs5 = {clr_dim5, clr_active, clr_active};
+    end
+
+    for k = 1:3
+        v = vecs5{k}; c = clrs5{k};
+        quiver3(pos_src(1),pos_src(2),pos_src(3), v(1)*sc,v(2)*sc,v(3)*sc, 0, ...
+            'Color',c,'LineWidth',1.8,'MaxHeadSize',0.3,'Parent',ax)
+        text(pos_src(1)+v(1)*sc*1.20, pos_src(2)+v(2)*sc*1.20, pos_src(3)+v(3)*sc*1.20, ...
+            labs5{k},'Color',c,'FontSize',10,'FontWeight','bold','Parent',ax)
+    end
+
+    plot3(pos_src(1),pos_src(2),pos_src(3),'o','MarkerSize',8, ...
+        'MarkerFaceColor','w','MarkerEdgeColor','w','Parent',ax)
+
+    view(ax,-55,28);  axis(ax,'equal','off')
+    tt = title(ax, sprintf('%s\n%s', panels5{p,1}, panels5{p,2}));
+    tt.Color = 'w';  tt.FontSize = 8;
+end
+
+sgtitle('Parameterization choices for the dipole at each cortex vertex', ...
+    'Color','w','FontSize',11)
+
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
 % Return the first cortex surface with exactly nVert vertices.
