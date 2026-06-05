@@ -263,6 +263,20 @@ sgtitle('Analytic sphere: vertices as exact sampling points on S^2', ...
 % (D) Interleave into Lmu [nCh x 2K]:
 %     columns 1,3,5,... = Lmu_R;   columns 2,4,6,... = Lmu_I
 
+%% Section 4 — What is a leadfield column?
+% Before building the eigenmode leadfield it helps to see what a single
+% leadfield column looks like geometrically.
+%
+% Gain(s, :) is one row of the full leadfield — the row for sensor s.
+% Reshaped to [nV x 3], it gives one 3D vector per cortex vertex: the
+% direction and strength of the dipole current at that vertex that maximally
+% drives sensor s.  This is the "gain vector" at each vertex for sensor s.
+%
+% We plot these vectors as a quiver3 field in 3D space (no cortex surface)
+% and mark the sensor location.  The vectors should fan outward from the
+% cortex toward the sensor, brightest (largest magnitude) at the closest
+% vertices.
+
 %% Section 4 — Load headmodel and select MEG channels
 % The Brainstorm headmodel Gain contains all 340 channels — including EEG,
 % EOG, reference channels, etc. — as NaN rows. We select only the 274 MEG
@@ -281,6 +295,54 @@ iMEG = find(strcmp({ChannelMat.Channel.Type}, 'MEG'));
 Gain_meg = Gain(iMEG, :);     % [274 x 3*nV]  — no NaNs
 [nCh, ~] = size(Gain_meg);
 fprintf('MEG channels: %d  |  Gain NaN: %d\n', nCh, any(isnan(Gain_meg(:))))
+
+%% Section 4 — Visualise one leadfield column (gain vector field)
+% Pick the most sensitive MEG sensor and plot its gain vectors.
+
+nV     = size(Vtx, 1);
+Vtx_mm = Vtx * 1000;   % metres -> mm
+
+rms_per_sensor = sqrt(mean(Gain_meg.^2, 2));
+[~, iSensor] = max(rms_per_sensor);
+
+g      = reshape(Gain_meg(iSensor,:), 3, nV)';   % [nV x 3]  T/Am
+sLoc   = ChannelMat.Channel(iMEG(iSensor)).Loc(:,1)' * 1000;  % mm
+
+iSub   = 1:6:nV;
+P      = Vtx_mm(iSub,:);
+G      = g(iSub,:);
+mag    = sqrt(sum(G.^2,2));
+sc     = 6.0 / max(mag);                         % max arrow = 6 mm
+
+mag_n  = (mag - min(mag)) / max(max(mag)-min(mag), eps);
+cmap_h = hot(256);
+cidx_h = max(1,min(256,round(mag_n*255)+1));
+clrs_h = cmap_h(cidx_h,:);
+
+figure('Name','Leadfield column','Color','k','Position',[100 100 760 580])
+ax_g = axes('Color','k');  hold(ax_g,'on')
+
+for k = 1:size(P,1)
+    quiver3(P(k,1),P(k,2),P(k,3), G(k,1)*sc,G(k,2)*sc,G(k,3)*sc, 0, ...
+        'Color',clrs_h(k,:),'LineWidth',0.6,'MaxHeadSize',0.3,'Parent',ax_g)
+end
+
+plot3(sLoc(1),sLoc(2),sLoc(3), 'o','MarkerSize',14, ...
+    'MarkerFaceColor',[0.3 0.8 1],'MarkerEdgeColor','w','LineWidth',1.5,'Parent',ax_g)
+text(sLoc(1),sLoc(2),sLoc(3)+10,sprintf('sensor %d',iSensor), ...
+    'Color','w','FontSize',10,'HorizontalAlignment','center','Parent',ax_g)
+
+colormap(ax_g,hot(256));  clim([min(mag) max(mag)])
+cb_g = colorbar(ax_g,'Color','w');
+cb_g.Label.String = 'Gain magnitude  (T/Am)';  cb_g.Label.Color = 'w';
+
+axis(ax_g,'equal');  grid(ax_g,'on')
+set(ax_g,'XColor','w','YColor','w','ZColor','w', ...
+         'GridColor',[0.25 0.25 0.25],'GridAlpha',0.4)
+xlabel(ax_g,'x (mm)');  ylabel(ax_g,'y (mm)');  zlabel(ax_g,'z (mm)')
+view(ax_g,-70,20)
+tg = title(ax_g,sprintf('Leadfield column — sensor %d  (one 3D gain vector per vertex)',iSensor));
+tg.Color = 'w';
 
 %% Section 4 — Build the tangent-frame leadfield (L1, L2)
 % Project Gain from global Cartesian into the nxr per-vertex tangent frame.
