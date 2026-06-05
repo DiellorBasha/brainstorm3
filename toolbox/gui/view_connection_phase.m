@@ -115,6 +115,7 @@ end
 hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D'); %#ok<NASGU>
 panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0);
 panel_surface('SetSurfaceEdges',  hFig, 1, 1);
+panel_surface('SetDataThreshold', hFig, 1, 0);   % phase is angular: show all vertices (no amplitude threshold)
 set(hFig, 'Name', ['Connection phase: ' SurfaceFile]);
 
 % Auto-remove the transient result on close

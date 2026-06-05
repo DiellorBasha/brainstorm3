@@ -31,6 +31,7 @@ assert(~isempty(hAxes), 'No Axes3D in the figure.');
 TessInfo = getappdata(hFig, 'Surface');
 assert(~isempty(TessInfo) && ~isempty(TessInfo(1).DataSource.FileName), ...
     'Figure should carry surface data (the phase result).');
+assert(TessInfo(1).DataThreshold == 0, 'Phase display must use DataThreshold 0 (angular, not amplitude-thresholded).');
 
 % State object present.
 st = getappdata(hFig, 'ConnPhase');
