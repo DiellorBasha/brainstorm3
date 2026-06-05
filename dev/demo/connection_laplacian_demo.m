@@ -72,6 +72,88 @@ axis equal off
 t = title('tess\_cortex\_pial\_low  (20484 vertices)');
 t.Color = 'w';
 
+%% Section 2 — FreeSurfer registration sphere and trivial-connection poles
+% Every cortex vertex has a counterpart on the FreeSurfer registration sphere
+% (TessMat.Reg.Sphere.Vertices).  The sphere is the shared coordinate system
+% used for inter-subject alignment — it is what makes anatomically homologous
+% vertices correspond across subjects.
+%
+% To compute a *trivial connection* (a globally consistent tangent frame) on
+% each hemisphere we need to place exactly two +1 singularities whose indices
+% sum to the Euler characteristic chi = 2 (Poincaré–Hopf theorem for a
+% topological sphere).  Brainstorm places them at the geographic north and
+% south poles of each hemisphere's registration sphere — the vertices with the
+% maximum and minimum Z coordinate in sphere space.
+%
+% Both hemispheres share the same sphere atlas, so L and R pole positions
+% coincide at the same sphere coordinates.  Each hemisphere is solved
+% independently and gets its own pair of singularities.
+
+Sphere = TessMat.Reg.Sphere.Vertices;   % [nV x 3] unit sphere
+
+% Split vertices into left and right hemispheres using the Structures atlas
+% (same split used by tess_tangents — never re-split geometrically).
+[rH, lH] = tess_hemisplit(TessMat);
+
+hemis = {lH(:), rH(:)};
+tags  = {'Left hemisphere', 'Right hemisphere'};
+clrs  = {[0.35 0.55 0.75], [0.75 0.55 0.35]};   % blue / orange
+
+r       = 0.1;     % sphere radius (Brainstorm convention)
+pushOut = 1.18;    % offset pole markers beyond surface to avoid z-fighting
+
+figure('Name','Registration sphere — trivial-connection poles','Color','k', ...
+       'Position',[200 200 900 480])
+
+for h = 1:2
+    vH  = hemis{h};
+    sph = Sphere(vH,:);
+
+    % North and south poles: max / min sphere Z.
+    [~, iN] = max(sph(:,3));  pN = vH(iN);
+    [~, iS] = min(sph(:,3));  pS = vH(iS);
+
+    % Push marker positions outward so they sit above the sphere surface.
+    mN = Sphere(pN,:) / norm(Sphere(pN,:)) * r * pushOut;
+    mS = Sphere(pS,:) / norm(Sphere(pS,:)) * r * pushOut;
+
+    % Per-vertex colour: this hemisphere's colour, other hemisphere dimmed.
+    cAll = repmat([0.22 0.22 0.22], size(Sphere,1), 1);
+    cAll(vH,:) = repmat(clrs{h}, numel(vH), 1);
+
+    % Only faces entirely inside this hemisphere.
+    inH = false(size(Sphere,1),1);  inH(vH) = true;
+    fH  = all(inH(Fcs), 2);
+
+    ax = subplot(1,2,h);
+    patch('Faces', Fcs(fH,:), 'Vertices', Sphere, ...
+        'FaceVertexCData', cAll, 'FaceColor', 'interp', ...
+        'EdgeColor', 'none', 'FaceLighting', 'phong', 'Parent', ax)
+    camlight(ax,  70,  45);  camlight(ax, -70,  45);
+    camlight(ax,  70, -45);  camlight(ax, -70, -45);
+    material([0.72 0.38 0.03 8])
+
+    hold(ax,'on')
+    scatter3(mN(1), mN(2), mN(3), 220, 'p', ...
+        'MarkerFaceColor', [1 0.85 0], 'MarkerEdgeColor', 'k', ...
+        'LineWidth', 0.8, 'Parent', ax)
+    scatter3(mS(1), mS(2), mS(3), 220, 'p', ...
+        'MarkerFaceColor', [1 0.85 0], 'MarkerEdgeColor', 'k', ...
+        'LineWidth', 0.8, 'Parent', ax)
+
+    text(0, 0,  r*1.30, 'north pole', 'Color','w','FontSize',9, ...
+        'HorizontalAlignment','center','Parent',ax)
+    text(0, 0, -r*1.30, 'south pole', 'Color','w','FontSize',9, ...
+        'HorizontalAlignment','center','Parent',ax)
+
+    % Side view (elevation 0) — both poles visible at top and bottom.
+    view(ax, 0, 0);  axis(ax,'equal','off')
+    tt = title(ax, tags{h});  tt.Color = 'w';  tt.FontWeight = 'bold';
+end
+
+sgtitle('Registration sphere — trivial-connection singularities', ...
+    'Color','w','FontSize',11)
+
 %% --- helper (keep at bottom) ---
 function SurfaceFile = local_find_cortex(nVert)
 % Return the first cortex surface with exactly nVert vertices.
