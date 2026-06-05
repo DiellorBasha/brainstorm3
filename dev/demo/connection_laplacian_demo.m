@@ -682,7 +682,209 @@ sgtitle({'Source parameterization choices at each cortex vertex', ...
          'Arrow length encodes regularisation weight  (short = more penalised)'}, ...
     'Color','w','FontSize',10)
 
-%% --- helper (keep at bottom) ---
+%% Section 6 — Why gauge consistency matters: norm vs phase
+% Brainstorm's default readout for an unconstrained source map is the vector
+% norm |q_i(t)| = sqrt(qx^2+qy^2+qz^2).  The norm is gauge-invariant — it
+% gives the same value in any frame — so it has no sign ambiguity.  But it
+% is also information-destroying: it collapses a 3D vector to a non-negative
+% scalar, erasing ALL directional structure.
+%
+% To see why this matters, consider three current configurations at two
+% adjacent vertices i and j, each with unit amplitude:
+%
+%   A — coherent flow:  both dipoles point in the same direction
+%   B — diverging:      dipoles point in opposite directions
+%   C — rotating:       dipoles point at 90° to each other
+%
+% The norm |z_i| = |z_j| = 1 for all three.  A norm-based source map is
+% IDENTICAL for scenarios A, B, and C — it cannot distinguish coherent flow
+% from divergence from rotation.
+%
+% The complex tangential field z_i = q·e1(i) + i·q·e2(i) in a globally
+% consistent gauge DOES distinguish them:
+%   A: phase difference = 0        (same direction → coherent flow)
+%   B: phase difference = π        (opposite directions → divergence)
+%   C: phase difference = π/2      (90° offset → rotation)
+%
+% The consistent gauge is the prerequisite.  In an arbitrary local frame
+% the phase at vertex i and the phase at vertex j are measured against
+% unrelated axes, so the phase difference is uninformative noise.
+%
+% This enables analyses that are impossible with the norm:
+%   1. Spatial flow structure: gradient of arg(z) reveals current direction
+%   2. Divergence and curl: distinguish source/sink from rotational patterns
+%   3. Traveling wave detection: a propagating wave shows a smoothly varying
+%      phase that advances in time; invisible in the norm (rectified to 2ω)
+%   4. Cross-vertex phase coherence: meaningful connectivity metric
+%   5. Spectral decomposition in the connection-eigenmode basis
+
+%% Section 6 — Part A: three-scenario demonstration at two adjacent vertices
+
+% Two adjacent mesh vertices with their nxr tangent frames.
+nbrs6  = find(TessMat.VertConn(iSrc,:) > 0);
+iNbr6  = nbrs6(1);
+pos_i6 = Vtx_mm(iSrc,:);   pos_j6 = Vtx_mm(iNbr6,:);
+e1_i6  = e1_nxr(iSrc,:);   e2_i6  = e2_nxr(iSrc,:);
+e1_j6  = e1_nxr(iNbr6,:);  e2_j6  = e2_nxr(iNbr6,:);
+
+% Define scenarios as complex values (guarantees |z|=1 and exact phase diffs).
+%   z_i = 1+0i for all scenarios (current along e1 at vertex i).
+%   z_j encodes the different flow patterns.
+zA6_i=1+0i; zA6_j= 1+0i;    % coherent   — phase diff = 0
+zB6_i=1+0i; zB6_j=-1+0i;    % diverging  — phase diff = pi
+zC6_i=1+0i; zC6_j= 0+1i;    % rotating   — phase diff = pi/2
+
+decode6 = @(z,e1,e2) real(z)*e1 + imag(z)*e2;
+
+scArr6 = 8;
+tp6_i = [pos_i6+4*(e1_i6+e2_i6); pos_i6+4*(e1_i6-e2_i6); ...
+         pos_i6+4*(-e1_i6-e2_i6); pos_i6+4*(-e1_i6+e2_i6)];
+tp6_j = [pos_j6+4*(e1_j6+e2_j6); pos_j6+4*(e1_j6-e2_j6); ...
+         pos_j6+4*(-e1_j6-e2_j6); pos_j6+4*(-e1_j6+e2_j6)];
+
+scenarios6 = {'A — coherent flow','B — diverging','C — rotating'};
+zis6 = {zA6_i, zB6_i, zC6_i};
+zjs6 = {zA6_j, zB6_j, zC6_j};
+clrArr6 = [0.95 0.80 0.25];
+
+figure('Name','Norm vs phase: three scenarios','Color','k','Position',[50 50 1200 820])
+
+for s = 1:3
+    zi6 = zis6{s};  zj6 = zjs6{s};
+    qi6 = decode6(zi6,e1_i6,e2_i6);
+    qj6 = decode6(zj6,e1_j6,e2_j6);
+
+    % 3D arrows
+    ax = subplot(3,4,(s-1)*4+1);
+    set(ax,'Color','k'); hold(ax,'on')
+    fill3(tp6_i([1 2 3 4 1],1),tp6_i([1 2 3 4 1],2),tp6_i([1 2 3 4 1],3), ...
+        [0.3 0.3 0.3],'FaceAlpha',0.25,'EdgeColor',[0.5 0.5 0.5],'Parent',ax)
+    fill3(tp6_j([1 2 3 4 1],1),tp6_j([1 2 3 4 1],2),tp6_j([1 2 3 4 1],3), ...
+        [0.3 0.3 0.3],'FaceAlpha',0.25,'EdgeColor',[0.5 0.5 0.5],'Parent',ax)
+    quiver3(pos_i6(1),pos_i6(2),pos_i6(3), qi6(1)*scArr6,qi6(2)*scArr6,qi6(3)*scArr6, 0, ...
+        'Color',clrArr6,'LineWidth',2.5,'MaxHeadSize',0.4,'Parent',ax)
+    quiver3(pos_j6(1),pos_j6(2),pos_j6(3), qj6(1)*scArr6,qj6(2)*scArr6,qj6(3)*scArr6, 0, ...
+        'Color',clrArr6,'LineWidth',2.5,'MaxHeadSize',0.4,'Parent',ax)
+    plot3([pos_i6(1) pos_j6(1)],[pos_i6(2) pos_j6(2)],[pos_i6(3) pos_j6(3)], ...
+        '--','Color',[0.5 0.5 0.5],'LineWidth',0.8,'Parent',ax)
+    plot3([pos_i6(1) pos_j6(1)],[pos_i6(2) pos_j6(2)],[pos_i6(3) pos_j6(3)], ...
+        '.','Color','w','MarkerSize',10,'Parent',ax)
+    view(ax,-55,30); axis(ax,'equal','off')
+    tt=title(ax,scenarios6{s}); tt.Color='w'; tt.FontSize=8;
+
+    % Norm
+    ax2 = subplot(3,4,(s-1)*4+2);
+    set(ax2,'Color','k'); hold(ax2,'on')
+    bar(ax2,[abs(zi6) abs(zj6)],'FaceColor',[0.55 0.55 0.55],'EdgeColor','none')
+    yline(ax2,1,'--','Color',[0.7 0.7 0.7],'LineWidth',1)
+    set(ax2,'XTickLabel',{'i','j'},'XColor','w','YColor','w','Color','k', ...
+        'YLim',[0 1.5],'FontSize',8)
+    ylabel(ax2,'|z|','Color','w','FontSize',9)
+    if s==1, title(ax2,'Norm  |z|','Color','w','FontSize',9); end
+
+    % Phase
+    ax3 = subplot(3,4,(s-1)*4+3);
+    set(ax3,'Color','k'); hold(ax3,'on')
+    bar(ax3,[angle(zi6) angle(zj6)],'FaceColor',[0.35 0.75 0.55],'EdgeColor','none')
+    yline(ax3,0,'--','Color',[0.7 0.7 0.7],'LineWidth',0.8)
+    set(ax3,'XTickLabel',{'i','j'},'XColor','w','YColor','w','Color','k', ...
+        'YLim',[-pi-0.3 pi+0.3],'FontSize',8)
+    ylabel(ax3,'arg(z)  (rad)','Color','w','FontSize',9)
+    if s==1, title(ax3,'Phase  arg(z)','Color','w','FontSize',9); end
+
+    % Phase difference
+    ax4 = subplot(3,4,(s-1)*4+4);
+    set(ax4,'Color','k'); hold(ax4,'on')
+    dph = abs(angle(zj6/zi6));
+    bar(ax4,s,dph,'FaceColor',[0.85 0.45 0.20],'EdgeColor','none','BarWidth',0.5)
+    yline(ax4,0,'--','Color',[0.5 0.5 0.5]);
+    yline(ax4,pi/2,'--','Color',[0.5 0.5 0.5]);
+    yline(ax4,pi,'--','Color',[0.5 0.5 0.5])
+    text(s,dph+0.15,sprintf('%.2f rad',dph),'Color','w','FontSize',9, ...
+        'HorizontalAlignment','center','Parent',ax4)
+    set(ax4,'XTickLabel',scenarios6{s},'XColor','w','YColor','w','Color','k', ...
+        'YLim',[0 pi+0.4],'XTick',s,'FontSize',7)
+    yticks(ax4,[0 pi/2 pi]); yticklabels(ax4,{'0','\pi/2','\pi'})
+    ylabel(ax4,'|\Delta arg(z)|','Color','w','FontSize',9)
+    if s==1, title(ax4,'Phase diff  |\Delta arg|','Color','w','FontSize',9); end
+end
+
+sgtitle({'Three current configurations — same norm, different phase', ...
+    '|z| is identical in all cases  |  arg(z) distinguishes coherent / diverging / rotating'}, ...
+    'Color','w','FontSize',10)
+
+%% Section 6 — Part B: Fiedler eigenmode — norm vs phase on the cortex
+% The Fiedler eigenmode's norm |Ψ₁| is nearly uniform across the hemisphere.
+% Its phase arg(Ψ₁) — read out in the trivial-connection (FS) gauge —
+% winds once around the hemisphere, encoding cortical location.
+% This is the ground truth for what a consistent phase field looks like
+% on a folded cortical surface: the norm tells you nothing about structure;
+% the phase reveals the entire spatial organisation.
+
+ConnEig6 = bst_conn_eigenmodes_ensure(SurfaceFile);
+mctx6    = nxr.manifold.context(Vtx, double(TessMat.Faces));
+vFr6     = nxr.manifold.measure.vertexFrame(mctx6);
+[Uf6,~]  = tess_tangents(SurfaceFile,'NoSave',1);
+[Uv6,Vv6]= bst_tangent_face2vertex(double(TessMat.Faces), Uf6, TessMat.VertNormals);
+FsF6     = struct('e1',Uv6,'e2',Vv6);
+R6       = bst_conn_phase(ConnEig6, vFr6, 'Rank',1, 'FsFrame',FsF6, 'nSing',2);
+
+[rH6,lH6] = tess_hemisplit(TessMat);
+inH6 = false(size(Vtx_mm,1),1); inH6(lH6)=true;
+fHl6 = all(inH6(double(TessMat.Faces)),2);
+
+psi6 = double(ConnEig6.Vectors(:,1));
+psi6_mag = abs(psi6);
+ph6_fs   = R6.Phase;
+
+cmap_par6 = parula(256);
+cmap_hsv6 = hsv(256);
+mag6_n  = (psi6_mag - min(psi6_mag(lH6))) / max(psi6_mag(lH6)-min(psi6_mag(lH6)),eps);
+cMag6   = repmat([0.15 0.15 0.15],size(Vtx_mm,1),1);
+cidx6m  = max(1,min(256,round(mag6_n*255)+1));
+cMag6(lH6,:) = cmap_par6(cidx6m(lH6),:);
+
+ph6_n  = (ph6_fs + pi)/(2*pi);
+cPh6   = repmat([0.15 0.15 0.15],size(Vtx_mm,1),1);
+cidx6p = max(1,min(256,round(ph6_n*255)+1));
+cPh6(lH6,:) = cmap_hsv6(cidx6p(lH6),:);
+
+figure('Name','Fiedler norm vs phase','Color','k','Position',[50 50 1100 480])
+
+for p = 1:2
+    ax = subplot(1,2,p);
+    set(ax,'Color','k')
+    cAll6 = iff(p==1, cMag6, cPh6);
+    patch('Faces',TessMat.Faces(fHl6,:),'Vertices',Vtx_mm, ...
+        'FaceVertexCData',cAll6,'FaceColor','interp', ...
+        'EdgeColor','none','FaceLighting','phong','Parent',ax)
+    camlight(ax,70,45); camlight(ax,-70,45);
+    camlight(ax,70,-45); camlight(ax,-70,-45);
+    material([0.65 0.45 0.02 8])
+    if p==1
+        colormap(ax,parula(256)); clim([min(psi6_mag(lH6)) max(psi6_mag(lH6))])
+        cb=colorbar(ax,'Color','w'); cb.Label.String='|\Psi_1(i)|'; cb.Label.Color='w';
+        t=title(ax,'Norm  |\Psi_1|  —  amplitude only'); t.Color='w';
+    else
+        colormap(ax,hsv(256)); clim([-pi pi])
+        cb=colorbar(ax,'Color','w','Ticks',[-pi 0 pi],'TickLabels',{'-\pi','0','\pi'});
+        cb.Label.String='arg(\Psi_1)  (FS gauge)'; cb.Label.Color='w';
+        t=title(ax,'Phase  arg(\Psi_1)  —  location coordinate (trivial-connection gauge)');
+        t.Color='w';
+    end
+    view(ax,-90,10); axis(ax,'equal','off')
+end
+
+sgtitle({'Fiedler eigenmode: norm (left) vs phase (right)', ...
+    'Norm: nearly uniform — tells you nothing about spatial structure', ...
+    'Phase: winds once around the hemisphere — encodes cortical location'}, ...
+    'Color','w','FontSize',10)
+
+%% --- helpers (keep at bottom) ---
+function v = iff(cond, a, b)
+if cond, v = a; else, v = b; end
+end
+
 function SurfaceFile = local_find_cortex(nVert)
 % Return the first cortex surface with exactly nVert vertices.
 SurfaceFile = '';
