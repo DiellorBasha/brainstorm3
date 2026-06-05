@@ -6,7 +6,8 @@ function C = sa_continuity(F, SulciMap, ResultsFile, opts)
 % USAGE:  C = sa_continuity(F, SulciMap, ResultsFile, opts)
 %   F           : struct from sa_frames.
 %   SulciMap    : [nV x 1] binary.
-%   ResultsFile : unconstrained (nComponents=3) results/kernel file.
+%   ResultsFile : link file ('link|kernel|data') or full results file with nComponents=3.
+%                 Bare kernel files (no paired data) are not supported (LoadFull=1 required).
 %   opts        : MaxDist, NormalDot, Nring (pair detection); Window [t0 t1] s
 %                 (peak search); MagRatio (continuity conditioning).
 %
@@ -27,6 +28,9 @@ assert(isequal(Results.nComponents, 3), 'sa_continuity requires nComponents=3.')
 IGA  = Results.ImageGridAmp;                % [3nV x nTime]
 Time = Results.Time(:)';
 nV   = size(F.Nv, 1);
+assert(size(IGA,1) == 3*nV, ...
+    'sa_continuity:sizeMismatch', ...
+    'IGA rows (%d) do not match 3*nV (%d); surface/results mismatch.', size(IGA,1), 3*nV);
 inWin = Time >= opts.Window(1) & Time <= opts.Window(2);
 if ~any(inWin), inWin = true(size(Time)); end
 gfp = sqrt(sum(IGA.^2, 1));                 % global field power over sources
@@ -52,6 +56,7 @@ if C.nPairs == 0
     C.signFlipRate = NaN;
     C.phaseDisc = struct('fiedler_median',NaN,'tang_median',NaN,'xyz_median',NaN);
     C.phaseDiscRate = struct('fiedler',NaN,'tang',NaN,'xyz',NaN);
+    C.df = []; C.dt = []; C.dx = [];
     C.J = J; return;
 end
 
@@ -63,14 +68,17 @@ C.signFlipRate = mean(sign(s(i)) ~= sign(s(j)));
 phaseOf = @(fr) atan2(sum(J .* fr.e2, 2), sum(J .* fr.e1, 2));
 circDist = @(a,b) abs(atan2(sin(a-b), cos(a-b)));
 pf = phaseOf(F.fiedler); pt = phaseOf(F.tang); px = phaseOf(F.xyz);
+fOk = sqrt(sum(F.fiedler.e1(i,:).^2,2)) > 1e-9 & ...
+      sqrt(sum(F.fiedler.e1(j,:).^2,2)) > 1e-9;
 df = circDist(pf(i), pf(j));
+df(~fOk) = NaN;   % exclude singularity vertices from Fiedler stats
 dt = circDist(pt(i), pt(j));
 dx = circDist(px(i), px(j));
-C.phaseDisc = struct('fiedler_median', median(df), ...
+C.phaseDisc = struct('fiedler_median', median(df(fOk)), ...
                      'tang_median',    median(dt), ...
                      'xyz_median',     median(dx));
 % A pair is "phase-discontinuous" if the circular distance exceeds pi/2.
-C.phaseDiscRate = struct('fiedler', mean(df > pi/2), ...
+C.phaseDiscRate = struct('fiedler', mean(df(fOk) > pi/2), ...
                          'tang',    mean(dt > pi/2), ...
                          'xyz',     mean(dx > pi/2));
 % Carry per-pair vectors for figures.
