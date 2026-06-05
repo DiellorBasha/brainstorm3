@@ -42,16 +42,15 @@ SurfaceFile = '';
 sSubjects = bst_get('ProtocolSubjects');
 if isempty(sSubjects), return; end
 allSubj = [sSubjects.Subject];
-fallback = '';
 for iS = 1:numel(allSubj)
     surf = allSubj(iS).Surface;
     for iF = 1:numel(surf)
         if ~strcmpi(surf(iF).SurfaceType, 'Cortex'), continue; end
         try, T = load(file_fullpath(surf(iF).FileName), 'Vertices'); catch, continue; end
-        if size(T.Vertices, 1) ~= 20484, continue; end
-        if isempty(fallback), fallback = surf(iF).FileName; end
-        SurfaceFile = surf(iF).FileName; return;
+        if size(T.Vertices, 1) == 20484
+            SurfaceFile = surf(iF).FileName;
+            return;
+        end
     end
 end
-if isempty(SurfaceFile), SurfaceFile = fallback; end
 end

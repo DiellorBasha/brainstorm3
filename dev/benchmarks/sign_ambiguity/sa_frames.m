@@ -59,7 +59,9 @@ xe1 = ref - (sum(ref .* Nv, 2)) .* Nv;       % project to tangent plane
 xn  = sqrt(sum(xe1.^2, 2));
 xok = xn > 1e-9;
 xe1(xok, :) = xe1(xok, :) ./ xn(xok);
+xe1(~xok, :) = 0;
 xe2 = cross(Nv, xe1, 2);
+xe2(~xok, :) = 0;
 xyz = struct('e1', xe1, 'e2', xe2);
 
 F = struct('Vtx', Vtx, 'Fcs', Fcs, 'Nv', Nv, 'VertConn', VertConn, ...
