@@ -55,8 +55,13 @@ patch('Faces', Fcs, 'Vertices', Vtx_mm, ...
     'FaceNormals', TessMat.VertNormals, ...
     'FaceLighting','phong')
 
-camlight('headlight')
-material([0.35 0.65 0.25 12])  % [ambient diffuse specular shininess]
+% Two symmetric camera-relative lights (camlight positions are always
+% relative to the camera, so they follow the view on rotation).
+camlight( 40, 20)   % upper-right of camera
+camlight(-40, 20)   % upper-left  of camera
+
+% High ambient fills shadows; low specular keeps the look matte.
+material([0.65 0.45 0.05 8])  % [ambient diffuse specular shininess]
 
 % Orient to a standard left-lateral view.
 view(-90, 10)
