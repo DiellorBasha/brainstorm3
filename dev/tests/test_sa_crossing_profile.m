@@ -27,6 +27,15 @@ pairs = sa_sulcal_walls(F.Vtx, F.Nv, SulciMap, F.VertConn, opts);
 
 P = sa_crossing_profile(F, pairs, 3);
 assert(~isempty(P), 'Expected at least one crossing profile.');
+
+% Number of profiles is bounded by min(nProfiles, size(pairs,1)).
+assert(numel(P) <= 3, 'Profile count must not exceed nProfiles=3.');
+assert(numel(P) <= size(pairs,1), 'Profile count must not exceed pair count.');
+% Each profile s field is empty when no J was passed.
+for k = 1:numel(P)
+    assert(isempty(P(k).s), 'P(k).s should be [] when J is not passed.');
+end
+
 for k = 1:numel(P)
     assert(numel(P(k).path) >= 3, 'Path too short.');
     assert(isequal(size(P(k).arclen), size(P(k).nAngle)), 'arclen/nAngle size mismatch.');
