@@ -31,6 +31,8 @@ for c = comps
     zc = ConnEig.Vectors(:, col);
     zF(zc ~= 0) = zc(zc ~= 0);
 end
+assert(~isreal(zF), 'sa_smoothness:realEigenvectors', ...
+    'ConnEig.Vectors must be complex (connection-Laplacian eigenvectors are complex-valued).');
 
 % Edge list (upper triangle of the mesh adjacency).
 [ii, jj] = find(triu(VertConn > 0, 1));
@@ -47,7 +49,7 @@ Rij = -Kij ./ max(abs(Kij), eps);            % transport rotation (unit complex)
 inc = angle(zF(ii)) - angle(zF(jj)) - angle(Rij);
 df  = abs(atan2(sin(inc), cos(inc)));        % wrap to [0, pi], magnitude
 % Undefined where either endpoint has no Fiedler support.
-defined = (zF(ii) ~= 0) & (zF(jj) ~= 0);
+defined = (zF(ii) ~= 0) & (zF(jj) ~= 0) & (abs(Kij) > eps);
 
 % Partition edges by SulciMap (sulcal if either endpoint is sulcal).
 edgeSulcal = (SulciMap(ii) > 0) | (SulciMap(jj) > 0);
@@ -57,7 +59,7 @@ S.dn_sulci_median = median(dn(edgeSulcal));
 S.dn_crown_median = median(dn(~edgeSulcal));
 S.df_sulci_median = median(df(defined & edgeSulcal));
 S.df_crown_median = median(df(defined & ~edgeSulcal));
-S.dn_dfRatio_sulci = S.dn_sulci_median / max(S.dn_crown_median, eps);
+S.dn_sulci_crown_ratio = S.dn_sulci_median / max(S.dn_crown_median, eps);
 
 % Singularity-energy concentration: fraction of total df^2 on edges within the
 % 5-ring of any singularity vertex.
