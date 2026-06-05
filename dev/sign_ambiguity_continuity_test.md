@@ -90,8 +90,9 @@ All under `dev/benchmarks/sign_ambiguity/` (mirrors `dev/benchmarks/` script+rep
 | `sa_frames.m` | `[Fiedler, FsFrame, R, vFrame] = sa_frames(SurfaceFile)` — builds the three (Fiedler / tess_tangents / global-xyz handled inline) frames + Fiedler decode; shared by both components. |
 | `sa_sulcal_walls.m` | `pairs = sa_sulcal_walls(Vtx, Nv, SulciMap, VertConn, opts)` — sulcal-restricted facing-wall pair detection (3 mm, anti-normal, N-ring exclusion). |
 | `sa_smoothness.m` | Component 1 metrics: per-edge `δn`, `δf` (gauge-correct covariant), SulciMap partition stats, singularity-energy fraction. |
+| `sa_crossing_profile.m` | Component 1 illustrative profiles: surface shortest path between facing-wall pairs (descends through the fundus); cumulative normal vs. Fiedler-frame turning along arc length, plus the constrained scalar overlay when current is supplied. |
 | `sa_continuity.m` | Component 2 metrics: applies kernel, peak selection, per-frame phase, conditioning, pair metrics. |
-| `sa_figures.m` | Renders: (C1) `δn` vs `δf` by SulciMap partition + sulcal-crossing profiles; (C2) four cortex maps (constrained / xyz / tess_tangents / Fiedler phase) + per-frame phase-discontinuity histogram. |
+| `sa_figures.m` | Renders: (C1) `δn` vs `δf` by SulciMap partition; (C1) sulcal-crossing profiles; (C2) per-frame phase-discontinuity histogram + summary bars. |
 
 **Reused, not reimplemented:** `bst_conn_eigenmodes_ensure`, `bst_conn_phase`, `bst_tangent_face2vertex`, `tess_tangents`, `tess_sulcimap`, `tess_curvature`, `tess_normals`, `in_bst_results`, `in_tess_bst`, `nxr.manifold.context` / `vertexFrame`.
 
