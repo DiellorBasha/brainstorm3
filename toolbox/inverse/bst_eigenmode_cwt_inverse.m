@@ -120,9 +120,17 @@ if Verbose
     fprintf('  |Θ| mean=%.3e  max=%.3e\n', mean(abs(Theta(:))), max(abs(Theta(:))));
 end
 
-%% ── Face-space reconstruction ────────────────────────────────────────────
-FaceAmp    = [];
-FaceIndices = [];
+%% ── Face indices (always available for downstream reconstruction) ────────
+% FaceIndices is independent of FaceSpace — downstream stages reconstruct the
+% face field at a single selected scale themselves to save memory.
+if isfield(HM,'FaceIndices') && ~isempty(HM.FaceIndices)
+    FaceIndices = HM.FaceIndices;
+else
+    FaceIndices = [];
+end
+
+%% ── Face-space reconstruction (optional, all scales — large memory) ──────
+FaceAmp = [];
 if FaceSpace && isfield(HM,'PhiFaces') && ~isempty(HM.PhiFaces)
     Phi_f   = double(HM.PhiFaces);     % [nLHF x K]
     nLHF    = size(Phi_f, 1);
@@ -130,7 +138,6 @@ if FaceSpace && isfield(HM,'PhiFaces') && ~isempty(HM.PhiFaces)
     for si = 1:nScales
         FaceAmp(:, si, :) = Phi_f * squeeze(Theta(:, si, :));
     end
-    FaceIndices = HM.FaceIndices;
     if Verbose
         fprintf('  FaceAmp: [%d faces x %d scales x %d]\n', nLHF, nScales, nTime);
     end
