@@ -56,18 +56,28 @@
 % are valid.  For J·n̂ we use TessMat.VertNormals (Brainstorm outward), not
 % nxr normals.
 %
-% PROPER RESOLUTION — eigenmodes:
-% The scalar (LBO) eigenmodes ψ_j(x) have fixed spatial sign patterns
-% determined by the spectral geometry, not by local normals.  Their nodal
-% lines generally do not coincide with sulcal walls.  The time-varying
-% eigenmode coefficient θ_j(t) absorbs the temporal signal without the
-% sulcal sign artefact.  This is the correct approach for sign-free phase
-% maps and is developed separately using the updated nxr-compute plugin
-% (cotangent Laplacian + trivial-connection Laplacian eigenmodes).
+% EIGENMODE APPROACH — honest assessment:
+% The scalar LBO eigenmodes ψ_j(x) project J_n(x,t) onto spatial basis
+% functions whose sign patterns are determined by spectral geometry.
+% In principle this sidesteps the sulcal sign artefact IF the dominant mode
+% has OPPOSITE signs at opposing sulcal walls (so the sign-flipped J_n
+% contributions add rather than cancel).  In practice, low-frequency smooth
+% modes have the SAME sign at both walls of a sulcus — their nodal lines
+% don't follow anatomical sulci.  The verification (Section 2) shows:
+%   • Dominant mode Ψ₇ has the SAME sign at 100% of opposing sulcal pairs
+%   • Reconstruction retains only ~30% of amplitude at sulcal walls
+%     (sign-flipped contributions destructively interfere in the projection)
+%   • Phase difference at sulcal pairs = 0.000 rad — forced consistent by
+%     construction, not recovered from physics
+% The eigenmode approach gives a spatially SMOOTH phase field because the
+% same-sign mode assigns the same temporal signal to both walls.  This is
+% useful for gradient computation and wavefront visualisation, but the
+% reconstructed signal amplitude and phase at sulcal locations are not
+% physically accurate representations of the wave.
 %
 % This demo illustrates the wave detection CONCEPT and the role of the
 % consistent gauge for gradient interpretation.  Interpret phase maps with
-% awareness that artifacts may appear at sulcal wall boundaries.
+% awareness that sulcal wall sources are suppressed in the reconstruction.
 %
 % DEPENDENCIES
 % ------------
