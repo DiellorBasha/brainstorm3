@@ -86,31 +86,20 @@ nF      = size(Faces, 1);
 ctr_f   = (Vtx(Faces(:,1),:) + Vtx(Faces(:,2),:) + Vtx(Faces(:,3),:)) / 3; % [nF x 3]
 ctr_lh  = ctr_f(FaceIndices, :);     % [nLHF x 3]
 
-%% ── Face tangent frame ────────────────────────────────────────────────────
-% tess_tangents returns [nF x 3] per-face frames directly.
-[Uf, Vf] = tess_tangents(SurfaceFile, 'NoSave', 1);
-e1_lh = Uf(FaceIndices, :);          % [nLHF x 3]
-e2_lh = Vf(FaceIndices, :);
+%% ── Load all operators from TessMat.nxr ─────────────────────────────────
+NxrData = local_load_nxr(SurfaceFile);
 
-%% ── DEC operators via nxr-compute ────────────────────────────────────────
-bst_plugin('Load', 'nxr-compute');
-clear mex
-h_dec = nxr_compute('create', Vtx, Faces);
-dec   = nxr_compute('assembleDECOperators', h_dec);
-nxr_compute('destroy', h_dec);
+e1_lh = NxrData.FaceFrames.U(FaceIndices, :);   % [nLHF × 3]
+e2_lh = NxrData.FaceFrames.V(FaceIndices, :);
 
-% Face dual Laplacian L = d1 * hodge1_inv * d1'  [nF x nF].
-% Clamp hodge1 diagonal (negative for obtuse triangles) to small positive.
-h1safe = max(diag(dec.hodge1), 1e-10 * max(diag(dec.hodge1)));
-nE     = size(dec.d1, 2);
-hodge1_inv = spdiags(1 ./ h1safe, 0, nE, nE);
-L_lh = (dec.d1 * hodge1_inv * dec.d1');
-L_lh = L_lh(FaceIndices, FaceIndices);
+% Face dual Laplacian for Poisson solve (clamped positive ★₁ weights)
+h1d    = abs(full(diag(NxrData.hodge1)));
+nE_dec = size(NxrData.d1, 2);
+h1inv  = spdiags(1./max(h1d, 1e-10*max(h1d)), 0, nE_dec, nE_dec);
+L_lh   = (NxrData.d1 * h1inv * NxrData.d1');
+L_lh   = L_lh(FaceIndices, FaceIndices);
 
-% d1*d1' entry (f1,f2) = ±1 for adjacent faces (signed), 0 for non-adjacent.
-% Use ~=0 not >0 to catch both +1 and -1.
-FA_lh = (abs(dec.d1 * dec.d1') > 0) - speye(nF);
-FA_lh = FA_lh(FaceIndices, FaceIndices);
+FA_lh  = NxrData.FaceAdj(FaceIndices, FaceIndices);
 
 %% ── Amplitude mask ────────────────────────────────────────────────────────
 ampEnv   = abs(s_face);                             % [nLHF x nTime]
@@ -249,15 +238,18 @@ for ei = 1:nE_lh
     F_1form(ei) = dot((g1+g2)/2, d12/dn) * dn;
 end
 
-% Incidence d1_lh [nLHF x nE_lh] and dual-edge-length Hodge1.
+% Poisson solve: (L_conn_lh + reg·I) u = d1_lh · H1inv · F_1form
+% Use face connection Laplacian from TessMat.nxr (more principled than dual scalar Laplacian)
+L_conn_lh = NxrData.ConnLaplacian(FaceIndices, FaceIndices);
+
 d1_lh    = sparse([rowE; colE], repmat((1:nE_lh)',2,1), ...
                   [-ones(nE_lh,1); ones(nE_lh,1)], nLHF, nE_lh);
 h1_lh    = max(sqrt(sum((ctr_lh(colE,:)-ctr_lh(rowE,:)).^2,2)), 1e-10);
 H1inv_lh = spdiags(1./h1_lh, 0, nE_lh, nE_lh);
 
 rhs = d1_lh * (H1inv_lh * F_1form);
-reg = max(opts.PoissonAlpha, 1e-10);
-u   = (L_lh + reg*speye(nLHF)) \ rhs;
+reg = max(real(opts.PoissonAlpha), 1e-10);
+u   = (L_conn_lh + reg*speye(nLHF)) \ rhs;
 
 u_active = u;  u_active(~activeF) = -Inf;
 [~, src_lhf_idx] = max(u_active);
@@ -316,6 +308,16 @@ end
 
 end   % bst_face_wavefront_track
 
+
+%% ── Local helper: load or populate TessMat.nxr geometry ──────────────────
+function NxrData = local_load_nxr(SurfaceFile)
+    TessMat = in_tess_bst(SurfaceFile, 0);
+    if isfield(TessMat,'nxr') && ~isempty(TessMat.nxr)
+        NxrData = TessMat.nxr;
+    else
+        NxrData = tess_nxr_populate(SurfaceFile);
+    end
+end
 
 %% ── Local helper: phase isoline on centroid triangulation ─────────────────
 function segs = local_phase_isoline(Vtx, Faces, ph, isoPhase)

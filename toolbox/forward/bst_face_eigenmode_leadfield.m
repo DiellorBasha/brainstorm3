@@ -24,7 +24,7 @@ function CompHM = bst_face_eigenmode_leadfield(FaceHeadModelFile, varargin)
 %   the smoothness of the eigenmode basis.
 %
 % EIGENMODES:
-%   Vertex LBO eigenmodes from the surface (bst_eigenmodes_ensure) are
+%   Vertex LBO eigenmodes from TessMat.nxr (populated by tess_nxr_populate) are
 %   interpolated to faces by corner averaging and M_f-orthonormalized.
 %   For reconstruction, they are also interpolated back to vertices so
 %   bst_eigenmode_reconstruct can produce a vertex-indexed imaging kernel
@@ -100,34 +100,20 @@ lH_f       = find(all(inL_v(Faces), 2));   % LH face indices
 nLHF       = numel(lH_f);
 
 %% ── Vertex LBO eigenmodes → face eigenmodes ──────────────────────────────
-% 1. Ensure vertex LBO modes are computed on this surface
-Eig = bst_eigenmodes_ensure(SurfaceFile, nModes);
-K   = min(nModes, Eig.nModes);
+% 1. Load scalar LBO eigenmodes from TessMat.nxr (computed by tess_nxr_populate)
+NxrData = local_load_nxr(SurfaceFile);
+EigLH   = NxrData.LBOEigLH;
+K       = min(nModes, EigLH.nModes);
+% EigLH.Vectors [nLHV × nModes] — already LH-local, need global indexing
+lH_v_nxr = EigLH.VertIdx(:);   % global LH vertex indices
+Phi_v_lh  = double(EigLH.Vectors(:, 1:K));   % [nLHV × K]
+lam        = double(EigLH.Values(1:K));        % [K × 1]
 
-% Canonical global order (ascending eigenvalue)
-if isfield(Eig,'Order') && ~isempty(Eig.Order)
-    order = double(Eig.Order(:));
-else
-    [~, order] = sort(double(Eig.Values(:)), 'ascend');
-end
-% When eigenmodes span both hemispheres, RH-only modes have zero LH support
-% and produce zero columns in the face leadfield.  Select the K smallest
-% eigenvalues that have majority energy on the LH.
-[~, lH_v_tmp] = tess_hemisplit(TessMat);
-all_sel = order(1 : min(2*K, numel(order)));  % candidate pool (2K to have enough)
-Phi_cand = double(Eig.Vectors(:, all_sel));
-lh_frac  = sum(Phi_cand(lH_v_tmp,:).^2, 1) ./ max(sum(Phi_cand.^2, 1), eps);
-lh_mask  = lh_frac >= 0.4;                   % ≥40% energy on LH → LH-dominant
-lh_sel   = all_sel(lh_mask);
-lh_sel   = lh_sel(1:min(K, numel(lh_sel)));
-
-sel  = lh_sel;
-K    = numel(sel);
-Phi_v = double(Eig.Vectors(:, sel));   % [nV x K]  LH-dominant vertex eigenmodes
-lam   = double(Eig.Values(sel));        % [K x 1]   eigenvalues
+% ModeIndices: 1:K (nxr modes are already sorted ascending by eigenvalue)
+sel = (1:K)';
 
 % 2. Interpolate vertex modes to LH faces by corner average
-lh_vmap  = zeros(nV,1); lh_vmap(lH_v) = 1:numel(lH_v);
+lh_vmap  = zeros(nV,1); lh_vmap(lH_v_nxr) = 1:numel(lH_v_nxr);
 FacesLH  = Faces(lH_f,:);                   % [nLHF x 3]
 
 % Map: vertex indices in LH-local space
@@ -135,17 +121,12 @@ iv1 = lh_vmap(FacesLH(:,1));
 iv2 = lh_vmap(FacesLH(:,2));
 iv3 = lh_vmap(FacesLH(:,3));
 
-Phi_v_lh   = Phi_v(lH_v, :);               % [nLH x K]
 Phi_f_raw  = (Phi_v_lh(iv1,:) + Phi_v_lh(iv2,:) + Phi_v_lh(iv3,:)) / 3;  % [nLHF x K]
 
 % 3. M_f-orthonormalize under face area matrix
-% Load DEC operators for face areas
-bst_plugin('Load', 'nxr-compute');
-clear mex
-h_dec = nxr_compute('create', TessMat.Vertices, Faces);
-dec   = nxr_compute('assembleDECOperators', h_dec);
-nxr_compute('destroy', h_dec);
-M_f_lh = dec.hodge2(lH_f, lH_f);           % [nLHF x nLHF] diagonal face areas
+% hodge2 = ★₂ = 1/A_f from TessMat.nxr (already computed)
+bst_plugin('Load', 'nxr-compute');  % keep for any downstream uses
+M_f_lh = NxrData.hodge2(lH_f, lH_f);       % [nLHF x nLHF] diagonal face areas
 
 G_gram = Phi_f_raw' * M_f_lh * Phi_f_raw;  % [K x K] Gram matrix
 [R, p] = chol(G_gram);
@@ -171,8 +152,8 @@ fprintf('  L̃ = L_face · Ψ:  [%d x %d]\n', size(L_tilde,1), size(L_tilde,2));
 % This is the "display interpolation" step — the forward model used exact
 % face geometry; reconstruction maps back to vertices for the viewer.
 Phi_V = zeros(nV, K);
-for vi = 1:numel(lH_v)
-    v    = lH_v(vi);
+for vi = 1:numel(lH_v_nxr)
+    v    = lH_v_nxr(vi);
     % Find LH faces that contain this vertex (in local lH_f indexing)
     fmask = (FacesLH(:,1) == v) | (FacesLH(:,2) == v) | (FacesLH(:,3) == v);
     if any(fmask)
@@ -246,4 +227,15 @@ panel_protocols('UpdateNode', 'Study', iStudy);
 fprintf('  Registered as study head model #%d\n', iNew);
 CompHM.FileName = newHM.FileName;
 
+end
+
+
+%% ── Local helper: load or populate TessMat.nxr geometry ──────────────────
+function NxrData = local_load_nxr(SurfaceFile)
+    TessMat = in_tess_bst(SurfaceFile, 0);
+    if isfield(TessMat,'nxr') && ~isempty(TessMat.nxr)
+        NxrData = TessMat.nxr;
+    else
+        NxrData = tess_nxr_populate(SurfaceFile);
+    end
 end
