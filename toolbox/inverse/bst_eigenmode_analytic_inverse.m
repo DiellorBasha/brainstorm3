@@ -139,9 +139,11 @@ end
 
 %% ── Complex analytic signal per channel ──────────────────────────────────
 % d̃(t) = d(t) + i · H[d(t)]   where H is the Hilbert transform along time.
-% The kernel K is the same real-valued matrix as in the standard inverse —
-% linearity means it applies identically to complex inputs.
-d_analytic = d + 1i * imag(hilbert(d')');   % [nCh x nTime]
+% Use explicit regular-transpose (.') throughout: MATLAB's ctranspose (')
+% conjugates complex intermediate results and produces the conjugate analytic
+% signal (negative instantaneous frequency) when applied to the real-but-
+% dimensionally-transposed matrix from hilbert(). See implementation note.
+d_analytic = d + 1i * imag(hilbert(d.')).';   % [nCh x nTime]
 
 %% ── Mode-space kernel (standard Tikhonov) ────────────────────────────────
 % Same computation as bst_inverse_eigenmodes / solve_modespace, exposed here
