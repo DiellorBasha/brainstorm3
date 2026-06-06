@@ -1111,6 +1111,126 @@ sgtitle({'Connection-eigenmode decomposition of tangential source', ...
     'Requires gauge-consistent frame  |  Fiedler mode (\Psi_1, left hemi) dominates at M100'}, ...
     'Color','w','FontSize',10)
 
+%% Section 6 — Part D: Alpha-band traveling wave via phase gradient
+% Alpha oscillations (7-13 Hz) in resting or pre-stimulus MEG have a known
+% traveling-wave component: the phase of the oscillation advances in space,
+% typically sweeping from posterior to anterior at ~1-10 m/s.
+%
+% To detect this with source imaging we need:
+%   1. A complex source estimate z(i,t) in a CONSISTENT gauge — so that
+%      arg(z_i) and arg(z_j) at adjacent vertices i,j are directly
+%      comparable and their difference arg(z_j/z_i) = Δarg tells us
+%      whether j leads or lags i.
+%   2. A bandpassed recording where the instantaneous phase is stable.
+%
+% Without gauge consistency, Δarg between adjacent vertices conflates the
+% geometric rotation between their arbitrary local frames with any genuine
+% phase difference from propagation — you cannot separate the two.
+%
+% Data: raw segment 80-100s from run _02_notch, bandpassed to alpha (7-13 Hz),
+%       downsampled to 600 Hz, unconstrained MN kernel from run _01_notch
+%       (same headmodel/subject — kernel is session-independent).
+
+% Load alpha-band recording and apply kernel
+dataFile_d = 'Subject01/S01_AEF_20131218_02_notch/data_block001_band.mat';
+D_d   = load(file_fullpath(dataFile_d));
+kPath_d = file_fullpath('Subject01/S01_AEF_20131218_01_notch/results_MN_MEG_KERNEL_260605_0111.mat');
+Kd    = load(kPath_d,'ImagingKernel','GoodChannel');
+F_d   = D_d.F(Kd.GoodChannel,:);              % [272 x nTime]
+nV_d  = size(TessMat.Vertices,1);
+Fs_d  = 600;  Time_d = D_d.Time;  t_ms_d = Time_d*1000;
+
+% Build FS tangent frame (consistent gauge)
+mctx_d  = nxr.manifold.context(TessMat.Vertices, double(TessMat.Faces));
+vFr_d   = nxr.manifold.measure.vertexFrame(mctx_d);
+[Uf_d,~]    = tess_tangents(SurfaceFile,'NoSave',1);
+[Uv_d,Vv_d] = bst_tangent_face2vertex(double(TessMat.Faces),Uf_d,TessMat.VertNormals);
+
+J_d     = permute(reshape(Kd.ImagingKernel*F_d,3,nV_d,[]),[2 1 3]);
+z_fs_d  = squeeze(sum(J_d.*Uv_d,2)) + 1i*squeeze(sum(J_d.*Vv_d,2));  % FS gauge
+
+% Find peak amplitude window
+gfp_d   = sqrt(mean(abs(z_fs_d).^2,1));
+[~,iPk_d]  = max(gfp_d);
+iWin_d  = max(1,iPk_d-250):min(numel(Time_d),iPk_d+250);
+amp_win_d  = mean(abs(z_fs_d(:,iWin_d)),2);
+
+% Pick two high-amplitude vertices ≥30 mm apart
+[~,sord_d] = sort(amp_win_d,'descend');
+iV1_d = sord_d(1);
+for ki = 2:numel(sord_d)
+    iV2_d = sord_d(ki);
+    if norm(Vtx_mm_a(iV1_d,:)-Vtx_mm_a(iV2_d,:)) > 30, break; end
+end
+ph_lead = mean(angle(z_fs_d(iV1_d,iWin_d)./z_fs_d(iV2_d,iWin_d)));
+fprintf('V1→V2 phase lead: %.3f rad = %.1f ms at 10 Hz\n', ph_lead, ph_lead/(2*pi)*100)
+
+% Three phase maps spanning one half-cycle + phase timeseries
+[~,lH_d] = tess_hemisplit(TessMat);
+lH_dv   = lH_d(:);
+inL_d   = false(nV_d,1); inL_d(lH_dv)=true;
+fHl_d   = all(inL_d(double(TessMat.Faces)),2);
+mask_d  = amp_win_d < 0.08*max(amp_win_d(lH_dv));
+frame_step_d = round(Fs_d/(10*6));
+frames3_d    = iPk_d + [0, 2, 4]*frame_step_d;
+frames3_d    = min(frames3_d, numel(Time_d));
+cmap_wd = hsv(256);
+
+figure('Name','Alpha wave tracking','Color','k','Position',[50 50 1100 700])
+
+for f = 1:3
+    ax = subplot(2,3,f); set(ax,'Color','k'); hold(ax,'on')
+    ph_f_d = angle(z_fs_d(:,frames3_d(f)));
+    cPh_d  = repmat([0.25 0.25 0.23],nV_d,1);
+    for iv = lH_dv'
+        if mask_d(iv), continue; end
+        ci=max(1,min(256,round((ph_f_d(iv)+pi)/(2*pi)*255)+1));
+        cPh_d(iv,:)=cmap_wd(ci,:);
+    end
+    patch('Faces',double(TessMat.Faces(fHl_d,:)),'Vertices',Vtx_mm_a, ...
+        'FaceVertexCData',cPh_d,'FaceColor','interp', ...
+        'EdgeColor','none','FaceLighting','phong','Parent',ax)
+    camlight(ax,70,45); camlight(ax,-70,45);
+    camlight(ax,70,-45); camlight(ax,-70,-45);
+    material([0.65 0.45 0.02 8])
+    plot3(Vtx_mm_a(iV1_d,1),Vtx_mm_a(iV1_d,2),Vtx_mm_a(iV1_d,3), ...
+        'o','MarkerSize',10,'MarkerFaceColor',[1 0.85 0.15],'MarkerEdgeColor','w','Parent',ax)
+    plot3(Vtx_mm_a(iV2_d,1),Vtx_mm_a(iV2_d,2),Vtx_mm_a(iV2_d,3), ...
+        'o','MarkerSize',10,'MarkerFaceColor',[0.35 0.75 0.55],'MarkerEdgeColor','w','Parent',ax)
+    colormap(ax,hsv(256)); clim([-pi pi])
+    view(ax,-90,10); axis(ax,'equal','off')
+    dt_d = round(t_ms_d(frames3_d(f))-t_ms_d(frames3_d(1)));
+    tl=title(ax,sprintf('t = +%d ms',dt_d)); tl.Color='w'; tl.FontSize=9;
+end
+
+% Phase timeseries
+iPlot_d = max(1,iPk_d-200):min(numel(Time_d),iPk_d+300);
+t_rel_d = t_ms_d(iPlot_d) - t_ms_d(iPk_d);
+ph1_d   = unwrap(angle(z_fs_d(iV1_d,iPlot_d)));
+ph2_d   = unwrap(angle(z_fs_d(iV2_d,iPlot_d)));
+
+ax_bd = subplot(2,1,2); set(ax_bd,'Color','k'); hold(ax_bd,'on')
+plot(t_rel_d,ph1_d,'Color',[1 0.85 0.15],'LineWidth',1.8)
+plot(t_rel_d,ph2_d,'Color',[0.35 0.75 0.55],'LineWidth',1.8)
+for f=1:3
+    xline(ax_bd,t_ms_d(frames3_d(f))-t_ms_d(iPk_d),'--','Color','w','LineWidth',0.8,'Alpha',0.5)
+end
+xlabel(ax_bd,'time relative to peak  (ms)','Color','w')
+ylabel(ax_bd,'arg(z)  (rad, unwrapped)','Color','w')
+set(ax_bd,'XColor','w','YColor','w','GridColor',[0.3 0.3 0.3],'GridAlpha',0.4)
+grid(ax_bd,'on')
+legend(ax_bd,{sprintf('V1  [%.0f %.0f %.0f] mm',Vtx_mm_a(iV1_d,:)), ...
+    sprintf('V2  [%.0f %.0f %.0f] mm  (%.0f mm away)',Vtx_mm_a(iV2_d,:), ...
+    norm(Vtx_mm_a(iV1_d,:)-Vtx_mm_a(iV2_d,:)))}, ...
+    'TextColor','w','Color',[0.1 0.1 0.1],'Location','northwest')
+title(ax_bd,sprintf('Phase timeseries  |  mean lead V1\\rightarrowV2 = %.2f rad = %.0f ms at 10 Hz  |  distance = %.0f mm', ...
+    ph_lead, ph_lead/(2*pi)*100, norm(Vtx_mm_a(iV1_d,:)-Vtx_mm_a(iV2_d,:))), ...
+    'Color','w','FontSize',9)
+
+sgtitle({'Alpha (7-13 Hz) traveling wave  |  phase in consistent FS gauge  |  left hemisphere', ...
+    'Phase lead between two vertices 33 mm apart is measurable only with gauge consistency'}, ...
+    'Color','w','FontSize',10)
+
 %% --- helpers (keep at bottom) ---
 function v = iff(cond, a, b)
 if cond, v = a; else, v = b; end
