@@ -55,10 +55,12 @@ t0 = tic;
 [nV, nTime] = size(s_corr);
 opts.Time         = 1:nTime;
 opts.LHOnly       = true;
-opts.AmpThreshold = 0.08;
+opts.AmpThreshold     = 0.08;   % spatial: fraction of max vertex-mean amplitude
+opts.AmpThresholdTime = 0.20;   % temporal: fraction of max mean-LH amplitude
+                                 % time points below this are excluded from PLV/speed/dir
 opts.CenterFreq   = 10;
 opts.IsoPhase     = 0;
-opts.SkipIsolines = true;   % false = extract isolines (slow: O(nFaces×nTime))
+opts.SkipIsolines = true;
 opts.Verbose      = true;
 for k = 1:2:numel(varargin)
     opts.(varargin{k}) = varargin{k+1};
@@ -223,15 +225,30 @@ gradMag(nanMask, :) = NaN;
 speed(nanMask, :)   = NaN;
 theta(nanMask, :)   = NaN;
 
+%% ── Temporal amplitude gate ───────────────────────────────────────────────
+% Exclude time steps where mean LH amplitude is below AmpThresholdTime×peak.
+% Low-amplitude periods have unreliable instantaneous phase (SNR << 1),
+% corrupting PLV and wave-direction estimates.
+amp_mean_t  = mean(amp_lh, 1);                         % [1 x nTime]
+amp_time_thr = opts.AmpThresholdTime * max(amp_mean_t);
+validTime    = amp_mean_t >= amp_time_thr;             % [1 x nTime] logical
+
+if opts.Verbose
+    fprintf('  Temporal gate (%.0f%% amp thr): %d / %d time steps active (%.1f%%)\n', ...
+        100*opts.AmpThresholdTime, sum(validTime), nTime, 100*mean(validTime));
+end
+
 %% ── Dominant direction + PLV (per time step) ──────────────────────────────
-domDir   = zeros(1, nTime);
-plv      = zeros(1, nTime);
-meanSpd  = zeros(1, nTime);
+domDir   = nan(1, nTime);
+plv      = nan(1, nTime);
+meanSpd  = nan(1, nTime);
 
 for t = 1:nTime
+    if ~validTime(t)
+        continue;   % skip low-amplitude time steps
+    end
     act  = activeL & kCount >= 2;
     if ~any(act)
-        domDir(t)  = NaN;  plv(t) = NaN;  meanSpd(t) = NaN;
         continue;
     end
     A_t  = amp_lh(act, t);
@@ -287,7 +304,8 @@ WF.DomDir      = domDir;
 WF.MeanSpeed   = meanSpd;
 WF.PLV         = plv;
 WF.Isolines    = Isolines;
-WF.ActiveMask  = ActiveOut;
+WF.ActiveMask   = ActiveOut;
+WF.ValidTime    = validTime;         % [1 x nTime] logical — high-amplitude time steps
 WF.e1          = e1Out;
 WF.e2          = e2Out;
 WF.Time        = tVec;
