@@ -43,7 +43,83 @@ the source definition, not applied post-hoc.
 
 ---
 
-## 2. DEC interpretation
+## 2. Physical scale and the cortical column argument
+
+### ico5 face geometry
+
+The 20484-vertex bilateral surface is ico5 resolution — 10242 vertices per hemisphere.
+For a closed genus-0 hemisphere (topological sphere), Euler's formula gives:
+
+```
+F ≈ 2V − 4 ≈ 20480 faces per hemisphere
+```
+
+With one hemisphere ≈ 100,000 mm² total surface area:
+
+```
+A_face = 100,000 mm² / 20,480 ≈ 5 mm²
+edge   = √(4 × 5 / √3) ≈ 3.4 mm    (equilateral triangle)
+```
+
+Each ico5 triangle has area **~5 mm²** and edge length **~3–4 mm**.
+
+### Cortical column sizes
+
+| Unit | Diameter | Cross-sectional area |
+|---|---|---|
+| Minicolumn (anatomical) | 50–80 μm | 0.002–0.005 mm² |
+| Macrocolumn (functional) | 0.5–1 mm | 0.2–0.8 mm² |
+| **ico5 face** | **~2.5 mm** (eff. diam.) | **~5 mm²** |
+
+One ico5 face contains approximately **1000–25000 minicolumns** and **6–25 macrocolumns**.
+
+### What this means physically
+
+**The face source is a mesoscale average, not a single column.**
+The recovered scalar s_n(f,t) is the net normal current flux through a ~5 mm² patch —
+the spatially integrated dipole moment of all cortical columns within that patch, weighted
+by the area integral of the Green's function.  This is a genuine mesoscale quantity.
+
+**The 2-form interpretation is physically honest about this.**
+Current flux through a ~5 mm² patch is exactly the right description of what an ico5
+source element represents.  It makes no pretense of resolving individual columns.
+A point dipole approximation at a vertex implies spatial localization that is not
+justified at this scale — a vertex "represents" all the same tissue as the surrounding
+faces but without acknowledging the area integration that went into it.
+
+### MEG spatial resolution vs ico5 sampling
+
+MEG spatial resolution is empirically **~5–10 mm** — roughly one to three ico5 face
+edge lengths.  The ico5 triangulation is therefore sampled at approximately the **Nyquist
+rate** for MEG spatial resolution:
+
+- Full FreeSurfer surface (~150,000 vertices per hemisphere, edge ~0.6 mm) is **massively
+  oversampled** relative to MEG observability.  The vast majority of those fine-scale
+  degrees of freedom are in the null space of the leadfield — MEG simply cannot see them.
+- ico5 matches the MEG observable scale.  Adding more vertices does not add observable
+  information; it only adds degrees of freedom that are empirically invisible.
+
+### Implication for eigenmode truncation
+
+The observable eigenmodes correspond to spatial wavelengths Λ_k = 2π/√λ_k >> 5 mm.
+The first ~200 observable LBO eigenmodes span spatial scales from the whole cortex down
+to roughly 5–10 mm.  The face-based source model with ~40,000 faces is thus dramatically
+overdetermined — the ~200 observable modes each cover many faces.
+
+**This strengthens the face-based approach:** because each face is a proper
+area-integrated quantity, the eigenmode expansion on face-based sources is a
+*geometrically honest compression* — smooth basis functions that match the actual
+resolution of the measurement.  The point-based approach creates a false impression that
+vertex-level resolution is meaningful, when MEG is seeing only the smooth spatial integrals
+that the eigenmodes represent.
+
+The practical consequence: eigenmode truncation at K ≈ 200 modes is not a lossy
+approximation at ico5 resolution.  It is a lossless description of the MEG-observable
+source space.
+
+---
+
+## 3. DEC interpretation
 
 In Discrete Exterior Calculus the correct type for a current sheet on a surface is a
 **primal 2-form**:
@@ -59,7 +135,7 @@ sources on a 2-manifold — same mathematical type as the volume form.
 
 ---
 
-## 3. BEM consistency
+## 4. BEM consistency
 
 The standard MEG forward model is already face-based for the **head boundaries** (scalp,
 skull, CSF) via BEM.  BEM solves surface integrals over triangular patches; it is
@@ -79,7 +155,7 @@ boundary surfaces including the cortex.
 
 ---
 
-## 4. What changes numerically
+## 5. What changes numerically
 
 **For distant sensors** (sensor-to-source distance >> face size):
 
@@ -101,7 +177,7 @@ biases the singular value spectrum.
 
 ---
 
-## 5. The face Laplacian — null space issue on surfaces with boundary
+## 6. The face Laplacian — null space issue on surfaces with boundary
 
 **Important numerical finding (test_phase_recovery_v4):**  
 The discrete face Laplacian `d₁ · ★₁⁻¹ · d₁ᵀ` is numerically degenerate  
@@ -136,7 +212,7 @@ on the dual mesh, appropriate for representing slowly varying current flux patte
 clamping (set negative weights to zero or to a small positive value) before computing
 `d₁ · clamp(★₁)⁻¹ · d₁ᵀ`. This changes the spectrum but restores positive definiteness.
 
-## 6. The face Laplacian and its eigenmodes
+## 7. The face Laplacian and its eigenmodes
 
 ### Operators (all from `nxr_compute('assembleDECOperators', h)`)
 
@@ -190,7 +266,7 @@ connection face frame directly.
 
 ---
 
-## 6. Implementation recipe
+## 8. Implementation recipe
 
 ### Step A: Face-based constrained leadfield (approximation)
 
@@ -261,7 +337,7 @@ dPhi = hodge1_inv * dec.d1' * dec.hodge2 * Phi_f;   % [nE × nT]  codifferential
 
 ---
 
-## 7. Why this matters for wave detection
+## 9. Why this matters for wave detection
 
 The sign of s_n(f,t) is physically unambiguous:
 - Positive = net outward current flux through face f at time t
@@ -278,7 +354,7 @@ propagating wavefronts of cortical current flux.
 
 ---
 
-## 8. Open questions and future work
+## 10. Open questions and future work
 
 1. **Exact centroid leadfield for os_meg:** Implement the analytic formula at face
    centroids rather than approximating from vertex columns.  The os_meg formula is a
