@@ -1,150 +1,161 @@
-function [L_face, FaceGeom] = bst_face_leadfield(Vertices, Faces, Channel, Param, varargin)
-% BST_FACE_LEADFIELD  Face-based constrained MEG leadfield (os_meg / spherical).
+function [L_face, FaceGeom] = bst_face_leadfield(SurfaceFile, Channel, Param, varargin)
+% BST_FACE_LEADFIELD  Face-based MEG leadfield using the trivial-connection frame.
 %
 % USAGE:
-%   [L_face, FaceGeom] = bst_face_leadfield(Vertices, Faces, Channel, Param)
-%   [L_face, FaceGeom] = bst_face_leadfield(Vertices, Faces, Channel, Param, 'BlockSize', 500)
+%   [L_face, FaceGeom] = bst_face_leadfield(SurfaceFile, Channel, Param)
+%   [L_face, FaceGeom] = bst_face_leadfield(SurfaceFile, Channel, Param, 'BlockSize', 500)
+%   [L_face, FaceGeom] = bst_face_leadfield(SurfaceFile, Channel, Param, 'Mode', 'loose')
 %
 % DESCRIPTION:
-%   Computes the constrained (normal) MEG leadfield for face-based current flux
-%   sources using the overlapping-spheres Sarvas formula.
+%   Face-based constrained (or loose) MEG leadfield.  The tangent frame at each
+%   face comes from the FreeSurfer trivial-connection solve (tess_tangents):
 %
-%   For each triangular face f, the source is a current dipole with:
-%     Position : face centroid  x_f = (v_i + v_j + v_k) / 3
-%     Moment   : q_f = n̂_f * A_f   (exact face normal, scaled by face area)
+%     {U_f, V_f}  — smooth, globally consistent per-face tangent vectors
+%     n̂_f = U_f × V_f  — exact face normal, sign-consistent by winding + orientation
 %
-%   This gives the sensor pattern for unit current flux [A/m²] integrated over
-%   the face — a genuine primal 2-form in the DEC sense, not a point dipole at
-%   a vertex with an averaged vertex normal.
+%   This means all three frame vectors are available for free and are already
+%   in the correct gauge for downstream wave analysis, DEC gradient computation,
+%   and the connection-Laplacian eigenmode framework.  No cross-product of edge
+%   vectors, no vertex-normal averaging, no sign-correction heuristic.
 %
-%   The Sarvas formula is called at face centroid positions with 3 Cartesian
-%   orientations (exactly as in the vertex model), then projected onto the
-%   exact face normal and scaled by the face area.  The result is a single
-%   leadfield column per face — equivalent to evaluating Sarvas directly with
-%   q = n̂_f, but without requiring changes to bst_meg_sph.
+%   Source at face f:
+%     Constrained:  q_f = s_n · n̂_f · A_f          (normal only, 1 unknown)
+%     Loose:        q_f = s_n · n̂_f · A_f
+%                       + s1 · U_f               (+ 2 tangential, 3 unknowns)
+%                       + s2 · V_f
 %
-% PHYSICAL INTERPRETATION:
-%   L_face(:, f) is the sensor pattern produced by uniform current density
-%   1 A/m² flowing normally through the triangular face f.  Units: T / (A/m²).
-%   Equivalently, L_face(:, f) / A_f is the Sarvas Green's function evaluated
-%   at the face centroid along the exact face normal — a point dipole field
-%   at x_f in direction n̂_f.
+%   The Sarvas formula is called at face centroid positions, then projected
+%   onto each frame direction. Equivalent to calling Sarvas with q = n̂_f
+%   (or U_f, V_f) directly — zero approximation in the direction.
+%   O(h²/d²) ≈ 0.1% approximation from using centroid vs integrating over face.
+%
+% MODES:
+%   'constrained' (default) : one leadfield column per face along n̂_f, scaled A_f
+%   'loose'                 : three columns per face [n̂_f*A_f, U_f, V_f]
+%                             Normal column scaled by A_f (flux units);
+%                             tangential columns unit (direction field units).
 %
 % INPUTS:
-%   Vertices   [nV x 3]  vertex positions in metres
-%   Faces      [nF x 3]  triangular face vertex indices (1-based)
-%   Channel    Brainstorm channel structure (MEG channels)
-%   Param      Sphere parameters (one per channel, from bst_headmodeler)
+%   SurfaceFile  Brainstorm surface file (must have Reg.Sphere for tess_tangents)
+%   Channel      Brainstorm channel structure (MEG channels)
+%   Param        Sphere parameters (one per channel, from bst_headmodeler)
 %
 % OPTIONS (name-value):
-%   'BlockSize' : number of faces per forward-model call (default 500)
+%   'BlockSize'  number of faces per Sarvas call (default 500)
+%   'Mode'       'constrained' | 'loose'  (default 'constrained')
 %
 % OUTPUTS:
-%   L_face   [nCh x nF]  face-based constrained leadfield
-%   FaceGeom struct with fields:
+%   L_face   [nCh x nF]    constrained: one column per face
+%            [nCh x 3*nF]  loose: three columns per face (n, U, V interleaved)
+%   FaceGeom struct:
 %     .Centroids  [nF x 3]  face centroid positions [m]
-%     .Normals    [nF x 3]  exact outward unit normals (from mesh winding)
+%     .Normals    [nF x 3]  n̂_f = U_f × V_f  (outward, trivial-connection sign)
 %     .Areas      [nF x 1]  face areas [m²]
+%     .U          [nF x 3]  trivial-connection tangent e1 (smooth, consistent gauge)
+%     .V          [nF x 3]  trivial-connection tangent e2 = n̂_f × U_f
 %
-% COMPARISON WITH VERTEX MODEL:
-%   Vertex constrained:  L_v(:,v) = G_sarvas(r_v)  * n̂_v          (vertex position, averaged normal)
-%   Face constrained:    L_f(:,f) = G_sarvas(x_f)  * n̂_f * A_f    (centroid, exact normal, area-weighted)
+% RELATIONSHIP TO VERTEX MODEL:
+%   Vertex constrained:  L_v(:,v) = G(r_v) · n̂_v
+%     — point at vertex, averaged normal, no area, nxr CW sign
+%   Face constrained:    L_face(:,f) = G(x_f) · n̂_f · A_f
+%     — centroid, exact trivial-connection normal, area-weighted, outward sign
 %
-%   Differences:
-%     1. Source position: vertex r_v vs face centroid x_f
-%        Error O(h²/d²) ≈ 0.1% for h~3mm, d~100mm — negligible for os_meg
-%     2. Normal direction: vertex-averaged n̂_v vs exact face normal n̂_f
-%        Matters near high-curvature regions (sulcal fundi, gyral crowns)
-%     3. Area weighting: none in vertex model vs A_f in face model
-%        Changes physical interpretation: flux through patch vs unit point dipole
-%
-% SEE ALSO: bst_meg_sph, bst_gain_orient, bst_eigenmode_leadfield
+% SEE ALSO: tess_tangents, bst_meg_sph, bst_gain_orient, bst_eigenmode_leadfield
 %           dev/references/face_based_source_model.md
 %
 % Authors: Diellor Basha, 2026
 
 %% ── Parse options ────────────────────────────────────────────────────────
 BlockSize = 500;
+Mode      = 'constrained';
 for k = 1:2:numel(varargin)
     switch lower(varargin{k})
         case 'blocksize', BlockSize = varargin{k+1};
+        case 'mode',      Mode      = lower(varargin{k+1});
     end
 end
+doLoose = strcmpi(Mode, 'loose');
 
-%% ── Face geometry (exact, from mesh winding) ─────────────────────────────
-% Centroid: simple average of three corner positions
-x_f = (Vertices(Faces(:,1),:) + Vertices(Faces(:,2),:) + Vertices(Faces(:,3),:)) / 3;
+%% ── Trivial-connection face frame (the only frame we need) ───────────────
+% tess_tangents returns per-face vectors from the FreeSurfer trivial-connection
+% solve: U_f (e1) and V_f (e2) span the face tangent plane and are smooth +
+% globally consistent across the hemisphere.  The face normal is their cross
+% product — exact, sign-consistent, no averaging.
+[U_f, V_f] = tess_tangents(SurfaceFile, 'NoSave', 1);   % [nF x 3] each
 
-% Exact face normal from cross product of two edge vectors.
-% FreeSurfer meshes are wound clockwise (viewed from outside), so the raw
-% cross product points INWARD — opposite to Brainstorm's VertNormals convention
-% (which are corrected to point outward during import).
-% We detect and correct the sign so that n_hat is consistently outward,
-% matching the convention used by the rest of the Brainstorm pipeline.
-% edge_a, edge_b are TRIANGLE EDGE VECTORS — purely geometric, used only to
-% compute the cross product.  They are NOT the trivial-connection tangent frame
-% vectors {e1, e2} from tess_tangents, which are smooth, globally consistent,
-% and determined by the Poisson solve.  The cross product gives n̂_f regardless
-% of which tangent frame parameterises the face plane.
-edge_a = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);   % [nF x 3]
-edge_b = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);   % [nF x 3]
-Ncross = cross(edge_a, edge_b, 2);                            % [nF x 3]
-A2     = sqrt(sum(Ncross.^2, 2));                             % [nF x 1]  2 * area
-A_f    = A2 / 2;                                              % [nF x 1]  face areas [m²]
-n_hat  = Ncross ./ A2;                                        % [nF x 3]  unit normals from winding
+% Face normal from the trivial-connection frame orientation
+n_hat = cross(U_f, V_f, 2);                              % [nF x 3]
+n_nrm = sqrt(sum(n_hat.^2, 2));
+n_hat = n_hat ./ n_nrm;                                  % unit normals
 
-% Align with Brainstorm's outward convention by checking the median dot product
-% of n_hat with the face-averaged vertex normals.  VertNormals are required as
-% an optional input, or we estimate the orientation from the vertex positions
-% (centroid-to-brain-center direction as a proxy).
-brain_center = mean(Vertices, 1);                         % approximate brain centre
-radial       = x_f - brain_center;                        % centroid → outside
-outward_dot  = sum(n_hat .* radial, 2);                   % positive = outward
-if mean(outward_dot) < 0                                  % majority pointing inward
-    n_hat = -n_hat;                                       % flip to outward convention
-end
+% Face areas and centroids from mesh geometry
+TessMat  = in_tess_bst(SurfaceFile);
+Vertices = TessMat.Vertices;
+Faces    = double(TessMat.Faces);
+x_f      = (Vertices(Faces(:,1),:) + Vertices(Faces(:,2),:) + Vertices(Faces(:,3),:)) / 3;
+
+edge_a = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);
+edge_b = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);
+A_f    = sqrt(sum(cross(edge_a, edge_b, 2).^2, 2)) / 2;   % [nF x 1]
 
 FaceGeom.Centroids = x_f;
 FaceGeom.Normals   = n_hat;
 FaceGeom.Areas     = A_f;
+FaceGeom.U         = U_f;
+FaceGeom.V         = V_f;
 
-nF   = size(Faces, 1);
-nCh  = numel(Channel);
+nF  = size(Faces, 1);
+nCh = numel(Channel);
 
-%% ── Leadfield: Sarvas at face centroids, projected onto exact normals ─────
+%% ── Leadfield: Sarvas at face centroids, projected onto trivial-connection frame
 %
-% For block iBlock of faces:
-%   G_block = bst_meg_sph(x_f(iBlock,:)', ...)   [nCh x 3*nBlock]
+% For block iB of faces:
+%   G_block = bst_meg_sph(x_f(iB,:)', ...)         [nCh x 3*nB]
 %
-% G_block(:, 3f-2:3f) is the [nCh x 3] response to unit Cartesian dipoles at x_f.
-% Projecting onto n̂_f and scaling by A_f gives the physical face flux column:
+% Constrained — project onto n̂_f, scale by A_f:
 %   L_face(:, f) = G_block(:, 3f-2:3f) * (n̂_f * A_f)
 %
-% Vectorised using a sparse block-diagonal projection matrix P [3*nBlock x nBlock]:
-%   P(3f-2:3f, f) = n̂_f' * A_f
-%   L_face(:, block) = G_block * P
+% Loose — three columns per face:
+%   L_face(:, 3f-2) = G_block(:, 3f-2:3f) * n̂_f * A_f    normal, flux units
+%   L_face(:, 3f-1) = G_block(:, 3f-2:3f) * U_f           tangential e1
+%   L_face(:, 3f  ) = G_block(:, 3f-2:3f) * V_f           tangential e2
 %
-% This is mathematically equivalent to calling Sarvas directly with q = n̂_f * A_f,
-% but reuses bst_meg_sph without modification.
+% Both computed via a sparse block-diagonal projection matrix.
 
-L_face = zeros(nCh, nF);
+nCols  = 1 + 2*doLoose;          % 1 for constrained, 3 for loose
+L_face = zeros(nCh, nCols * nF);
 
 nBlocks = ceil(nF / BlockSize);
 for ib = 1:nBlocks
-    iF  = ((ib-1)*BlockSize + 1) : min(ib*BlockSize, nF);
-    nB  = numel(iF);
+    iF = ((ib-1)*BlockSize + 1) : min(ib*BlockSize, nF);
+    nB = numel(iF);
 
-    % Sarvas at face centroids for this block — [nCh x 3*nB]
-    G_block = bst_meg_sph(x_f(iF,:)', Channel, Param);
+    G_block = bst_meg_sph(x_f(iF,:)', Channel, Param);   % [nCh x 3*nB]
 
-    % Sparse block-diagonal projection: col f gets n̂_f * A_f
-    % Each face contributes 3 rows, 1 col to the projection matrix
-    n_scaled = (n_hat(iF,:) .* A_f(iF))';   % [3 x nB]  (n̂_f * A_f per column)
-    ri = reshape(1:3*nB, 3, nB);             % [3 x nB]  row indices
-    ci = repmat(1:nB, 3, 1);                 % [3 x nB]  col indices
-    P  = sparse(ri(:), ci(:), n_scaled(:), 3*nB, nB);
-
-    L_face(:, iF) = G_block * P;
+    if ~doLoose
+        % Constrained: one column per face = G * (n̂_f * A_f)
+        n_scaled = (n_hat(iF,:) .* A_f(iF))';            % [3 x nB]
+        ri = reshape(1:3*nB, 3, nB);
+        ci = repmat(1:nB, 3, 1);
+        P  = sparse(ri(:), ci(:), n_scaled(:), 3*nB, nB);
+        L_face(:, iF) = G_block * P;
+    else
+        % Loose: three columns per face — interleaved [n̂*A, U, V] per face
+        % Column order in output: face 1 → cols 1,2,3; face 2 → cols 4,5,6; ...
+        % Projection matrix [3*nB x 3*nB]:
+        %   For face f (local index k): rows 3k-2:3k, cols 3k-2 = n̂_f*A_f
+        %                                                col  3k-1 = U_f
+        %                                                col  3k   = V_f
+        proj = zeros(3*nB, 3*nB);
+        for k = 1:nB
+            rows = (3*k-2):(3*k);
+            proj(rows, 3*k-2) = n_hat(iF(k),:)' * A_f(iF(k));   % normal, flux
+            proj(rows, 3*k-1) = U_f(iF(k),:)';                    % tangential e1
+            proj(rows, 3*k  ) = V_f(iF(k),:)';                    % tangential e2
+        end
+        iCols = reshape([(3*(iF-1)+1); (3*(iF-1)+2); (3*iF)], 1, []);
+        L_face(:, iCols) = G_block * sparse(proj);
+    end
 end
 
 end
