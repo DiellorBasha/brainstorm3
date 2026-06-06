@@ -38,38 +38,47 @@ function [v_est, s_alpha, DispInfo] = bst_dispersion_fit(S, lambdas, f_ax, WTInf
 % Authors: Diellor Basha, 2026
 
 %% ── Parse options ────────────────────────────────────────────────────────
-TargetFreq = 10;
-Model      = 'linear';
-MinR2      = 0.3;
-Verbose    = true;
+TargetFreq    = 10;
+Model         = 'linear';
+MinR2         = 0.3;
+VelocityRange = [0.5 15];   % m/s — same default as bst_lambda_omega_spectrum
+Verbose       = true;
 for k = 1:2:numel(varargin)
     switch lower(varargin{k})
-        case 'targetfreq', TargetFreq = varargin{k+1};
-        case 'model',      Model      = lower(varargin{k+1});
-        case 'minr2',      MinR2      = varargin{k+1};
-        case 'verbose',    Verbose    = varargin{k+1};
+        case 'targetfreq',    TargetFreq    = varargin{k+1};
+        case 'model',         Model         = lower(varargin{k+1});
+        case 'minr2',         MinR2         = varargin{k+1};
+        case 'velocityrange', VelocityRange = varargin{k+1};
+        case 'verbose',       Verbose       = varargin{k+1};
     end
 end
 
 K    = size(S, 1);
 k_ax = sqrt(lambdas(:));   % [K × 1] spatial frequencies [1/m]
 
-%% ── Ridge extraction ─────────────────────────────────────────────────────
-% Smooth S lightly before peak extraction to avoid single-mode spikes
-S_sm = S;
+%% ── Speed-constrained ridge extraction ───────────────────────────────────
 try
     S_sm = imgaussfilt(double(S), 1.5);
 catch
-    % If imgaussfilt unavailable, use 2D convolution with Gaussian kernel
-    g  = fspecial('gaussian', [5 5], 1.5);
+    g    = fspecial('gaussian', [5 5], 1.5);
     S_sm = conv2(double(S), g, 'same');
 end
 
-[~, ridge_k_idx] = max(S_sm, [], 1);          % [1 × nFreq] mode index at each freq
-k_ridge = k_ax(ridge_k_idx);                   % [1 × nFreq] √λ at ridge
+nFreq   = numel(f_ax);
+ridge_k_idx = ones(1, nFreq);
+for fi = 1:nFreq
+    k_lo = 2*pi * f_ax(fi) / max(VelocityRange(2), eps);
+    k_hi = 2*pi * f_ax(fi) / max(VelocityRange(1), eps);
+    mask = k_ax >= k_lo & k_ax <= k_hi;
+    if ~any(mask), continue; end
+    S_col = S_sm(:, fi);  S_col(~mask) = -Inf;
+    [~, ridge_k_idx(fi)] = max(S_col);
+end
+f_ax    = f_ax(:)';                 % force row [1 × nFreq]
+k_ridge = k_ax(ridge_k_idx);
+k_ridge = k_ridge(:)';              % force row [1 × nFreq]
 
-% Keep only frequencies where the ridge is in the interior (avoid edge artefacts)
-valid = ridge_k_idx > 1 & ridge_k_idx < K & f_ax > 0;
+valid = ridge_k_idx > 1 & ridge_k_idx < K & f_ax > 0 & isfinite(k_ridge);
 
 %% ── Fit dispersion relation ──────────────────────────────────────────────
 f_v = f_ax(valid); k_v = k_ridge(valid);
@@ -104,8 +113,11 @@ end
 k_at_target   = 2*pi * TargetFreq / max(v_linear, eps);   % k = ω/v
 v_at_target   = 2*pi * TargetFreq / max(k_at_target, eps);
 
+R2 = double(R2(1));  % guarantee scalar, no NaN from empty-valid edge case
+if isnan(R2), R2 = 0; end
 if R2 < MinR2 && Verbose
-    warning('bst_dispersion_fit: R²=%.2f < MinR2=%.2f — weak dispersion signature.', R2, MinR2);
+    warning('bst_dispersion_fit:WeakFit', ...
+        'R²=%.2f < MinR2=%.2f — weak dispersion signature.', R2, MinR2);
 end
 
 %% ── Select CWT scale nearest TargetFreq ─────────────────────────────────

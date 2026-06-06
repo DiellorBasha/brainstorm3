@@ -27,14 +27,16 @@ function [Theta, FaceAmp, InvInfo] = bst_eigenmode_cwt_inverse(W_sensor, WTInfo,
 % Authors: Diellor Basha, 2026
 
 %% ── Parse options ────────────────────────────────────────────────────────
-SNR       = 3;
-FaceSpace = true;
-Verbose   = true;
+SNR            = 3;
+FaceSpace      = true;
+WeightBySV     = true;   % weight modes by singular value (suppresses near-null-space)
+Verbose        = true;
 for k = 1:2:numel(varargin)
     switch lower(varargin{k})
-        case 'snr',        SNR       = varargin{k+1};
-        case 'facespace',  FaceSpace = logical(varargin{k+1});
-        case 'verbose',    Verbose   = logical(varargin{k+1});
+        case 'snr',           SNR        = varargin{k+1};
+        case 'facespace',     FaceSpace  = logical(varargin{k+1});
+        case 'weightbysv',    WeightBySV = logical(varargin{k+1});
+        case 'verbose',       Verbose    = logical(varargin{k+1});
     end
 end
 
@@ -79,13 +81,33 @@ if mem_GB > 2
         'Theta will occupy %.1f GB — consider reducing K or nScales.', mem_GB);
 end
 
-%% ── Build MNE kernel (flat prior) ────────────────────────────────────────
-% sP = ones(K,1), so Lws = L_tilde and K_mne = V·diag(α)·U' (no diag(sP) wrapper).
+%% ── Build MNE kernel ─────────────────────────────────────────────────────
+% WeightBySV=true (default): scale columns of L_tilde by normalized singular
+% values sP_k = s_k / sqrt(mean(s.^2)). This suppresses near-null-space modes
+% without imposing a 1/f spectral shape — mode selection comes from the (λ,ω)
+% spectrum, not from an arbitrary prior. Set WeightBySV=false for a pure flat
+% prior (all modes equally weighted regardless of observability).
 [U, S, V] = svd(L_tilde, 'econ');
 s    = diag(S);
-Lam  = sum(s.^2) / (nHMCh * SNR^2);
-alph = s ./ (s.^2 + Lam);
-K_mne = V * diag(alph) * U';           % [K x nCh]
+if WeightBySV
+    % svd('econ') gives min(nCh,K) singular values — pad to K with eps
+    sP_short = s / sqrt(max(mean(s.^2), eps));   % [min(nCh,K) x 1]
+    sP       = [sP_short; eps*ones(K-numel(sP_short),1)];  % [K x 1]
+    Lws  = L_tilde .* sP.';                  % [nCh x K] whitened
+    [U2, S2, V2] = svd(Lws, 'econ');
+    s2   = diag(S2);
+    Lam  = sum(s2.^2) / (nHMCh * SNR^2);
+    alph = s2 ./ (s2.^2 + Lam);
+    K_mne = diag(sP) * V2 * diag(alph) * U2';  % [K x nCh]
+    if Verbose
+        fprintf('  SV-weighted prior: sP range [%.2e %.2e]\n', min(sP), max(sP));
+    end
+else
+    Lam   = sum(s.^2) / (nHMCh * SNR^2);
+    alph  = s ./ (s.^2 + Lam);
+    K_mne = V * diag(alph) * U';               % [K x nCh] flat prior
+    if Verbose, fprintf('  Flat prior (R=1)\n'); end
+end
 
 %% ── Apply kernel to each CWT scale ───────────────────────────────────────
 Theta = zeros(K, nScales, nTime, 'like', 1i);

@@ -14,10 +14,14 @@ function [S, f_ax, k_ax, lambda_ax, peak_info] = bst_lambda_omega_spectrum(Theta
 %            OR scalar Fs [Hz] when Theta is [K x nTime]
 %
 % OPTIONS (name-value):
-%   'FreqRange'    [f_lo f_hi] Hz (default: [1 30])
-%   'Normalize'    'none'|'mode'|'freq' (default: 'mode')
-%   'SmoothSigma'  Gaussian smoothing sigma before peak detection (default: 1.5)
-%   'Verbose'      logical (default: true)
+%   'FreqRange'     [f_lo f_hi] Hz (default: [1 30])
+%   'Normalize'     'none'|'mode'|'freq' (default: 'mode')
+%   'SmoothSigma'   Gaussian smoothing sigma before peak detection (default: 1.5)
+%   'VelocityRange' [v_lo v_hi] m/s for speed-constrained ridge (default: [0.5 15])
+%                   At each frequency f, only modes where 2πf/√λ ∈ VelocityRange
+%                   are candidates for the ridge. Prevents noise-dominated
+%                   high-λ modes from hijacking the peak.
+%   'Verbose'       logical (default: true)
 %
 % OUTPUTS:
 %   S          [K x nFreq] real — power spectrum S(k,omega)
@@ -30,16 +34,18 @@ function [S, f_ax, k_ax, lambda_ax, peak_info] = bst_lambda_omega_spectrum(Theta
 % Authors: Diellor Basha, 2026
 
 %% -- Parse options --
-FreqRange   = [1 30];
-Normalize   = 'mode';
-SmoothSigma = 1.5;
-Verbose     = true;
+FreqRange     = [1 30];
+Normalize     = 'mode';
+SmoothSigma   = 1.5;
+VelocityRange = [0.5 15];   % m/s: physically plausible wave speeds for brain
+Verbose       = true;
 for ki = 1:2:numel(varargin)
     switch lower(varargin{ki})
-        case 'freqrange',    FreqRange   = varargin{ki+1};
-        case 'normalize',    Normalize   = lower(varargin{ki+1});
-        case 'smoothsigma',  SmoothSigma = varargin{ki+1};
-        case 'verbose',      Verbose     = logical(varargin{ki+1});
+        case 'freqrange',     FreqRange     = varargin{ki+1};
+        case 'normalize',     Normalize     = lower(varargin{ki+1});
+        case 'smoothsigma',   SmoothSigma   = varargin{ki+1};
+        case 'velocityrange', VelocityRange = varargin{ki+1};
+        case 'verbose',       Verbose       = logical(varargin{ki+1});
     end
 end
 
@@ -103,28 +109,63 @@ else
     S_smooth = conv2(gv, gv', S, 'same');
 end
 
-[~, ridge_k] = max(S_smooth, [], 1);          % [1 x nFreq] mode index
-ridge_k      = ridge_k(:);                     % [nFreq x 1]
-ridge_kax    = k_ax(ridge_k);                  % [nFreq x 1] in 1/m
+% Speed-constrained ridge: at each frequency f, only consider modes where
+% v = 2πf/√λ ∈ VelocityRange — prevents high-λ noise modes from dominating.
+% For frequency f_j and spatial frequency k = √λ_i:  v = 2π*f_j / k_i
+% The mode mask is: k_i ∈ [2π*f_j/v_max,  2π*f_j/v_min]
+nFreq   = numel(f_ax);
+ridge_k   = ones(nFreq, 1);    % [nFreq x 1] local mode index
+ridge_kax = nan(nFreq, 1);
+for fi = 1:nFreq
+    k_lo = 2*pi * f_ax(fi) / max(VelocityRange(2), eps);   % k for v_max
+    k_hi = 2*pi * f_ax(fi) / max(VelocityRange(1), eps);   % k for v_min
+    speed_mask = (k_ax >= k_lo) & (k_ax <= k_hi);
+    if ~any(speed_mask)
+        continue;
+    end
+    S_col = S_smooth(:, fi);
+    S_col(~speed_mask) = -Inf;
+    [~, ridge_k(fi)] = max(S_col);
+    ridge_kax(fi)    = k_ax(ridge_k(fi));
+end
 
-[~, i_f]   = max(max(S_smooth, [], 1));
-f_peak     = f_ax(i_f);
-[~, i_k]   = max(S_smooth(:, i_f));
-k_peak     = k_ax(i_k);
+% Global peak within speed-constrained band
+valid_fi = ~isnan(ridge_kax);
+if any(valid_fi)
+    [~, i_f]   = max(max(S_smooth .* (k_ax >= 2*pi*f_ax/(max(VelocityRange)+eps) & ...
+                                       k_ax <= 2*pi*f_ax/(max(VelocityRange(1),eps)+eps)), [], 1));
+    % Simpler: find peak in speed-masked spectrum
+    S_masked = S_smooth;
+    for fi2 = 1:nFreq
+        k_lo2 = 2*pi*f_ax(fi2)/max(VelocityRange(2),eps);
+        k_hi2 = 2*pi*f_ax(fi2)/max(VelocityRange(1),eps);
+        S_masked(~(k_ax>=k_lo2 & k_ax<=k_hi2), fi2) = 0;
+    end
+    [~, i_f] = max(max(S_masked, [], 1));
+    f_peak   = f_ax(i_f);
+    [~, i_k] = max(S_masked(:, i_f));
+    k_peak   = k_ax(i_k);
+else
+    [~, i_f] = max(max(S_smooth, [], 1));
+    f_peak   = f_ax(i_f);
+    [~, i_k] = max(S_smooth(:, i_f));
+    k_peak   = k_ax(i_k);
+end
 v_estimate = 2*pi * f_peak / max(k_peak, eps);
 
-A     = ridge_kax(:);
-b     = f_ax(:);
-valid = ~isnan(A) & A > 0 & b > FreqRange(1);
-if sum(valid) >= 2
-    v_lin = (A(valid)' * b(valid)) / (A(valid)' * A(valid));
+% Linear dispersion fit ω = v·√λ on the constrained ridge
+A     = ridge_kax(valid_fi);
+b     = f_ax(valid_fi)';
+if numel(A) >= 2
+    v_lin = (A(:)' * b(:)) / max(A(:)' * A(:), eps);   % f = (v/2π)·k → v/2π
 else
     v_lin = v_estimate / (2*pi);
 end
-f_fit  = (v_lin / (2*pi)) * ridge_kax(:)';
-SS_res = sum((f_ax - f_fit).^2);
-SS_tot = sum((f_ax - mean(f_ax)).^2);
-R2     = max(0, 1 - SS_res / max(SS_tot, eps));
+f_fit  = v_lin * ridge_kax(valid_fi);
+SS_res = sum((f_ax(valid_fi)' - f_fit(:)).^2);
+SS_tot = sum((f_ax(valid_fi)' - mean(f_ax(valid_fi)')).^2);
+R2     = double(max(0, 1 - SS_res / max(SS_tot, eps)));
+if isnan(R2), R2 = 0; end
 
 %% -- Step 6: pack peak_info --
 peak_info.ridge_k    = ridge_k;
