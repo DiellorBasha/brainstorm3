@@ -163,6 +163,7 @@ Results.Amplitude     = abs(s_tilde);    % [nV x nTime] envelope (no rectificati
 Results.Phase         = angle(s_tilde);  % [nV x nTime] instantaneous phase [rad]
 Results.theta         = theta_hat;       % [K x nTime]  complex mode coefficients
 Results.ImagingKernel = K_mne;           % [K x nCh]    for re-application
+Results.PhiVertices   = Phi(:, idx);     % [nV x K]     cached for Poisson sharpen
 Results.Time          = Time;
 Results.Eigenvalues   = lambdas;
 Results.nModes        = K;
