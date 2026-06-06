@@ -780,7 +780,14 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 if isfield(HMeig, 'ModeIndices') && ~isempty(HMeig.ModeIndices)
                     eigModeIdx = HMeig.ModeIndices;
                 end
-                Results.ImagingKernel   = bst_eigenmode_reconstruct(HMeig.SurfaceFile, ModeKernel, eigModeIdx); % [nVert x nGoodCh]
+                % Face-based eigenmode model stores PhiVertices [nV x K] for
+                % reconstruction — use it directly when present (isFaceBased=1).
+                % Vertex-based model passes SurfaceFile so reconstruct loads Phi.
+                if isfield(HMeig,'isFaceBased') && HMeig.isFaceBased && isfield(HMeig,'PhiVertices')
+                    Results.ImagingKernel = bst_eigenmode_reconstruct(HMeig.PhiVertices, ModeKernel, eigModeIdx);
+                else
+                    Results.ImagingKernel = bst_eigenmode_reconstruct(HMeig.SurfaceFile, ModeKernel, eigModeIdx);
+                end % [nVert x nGoodCh]
                 Results.ImageGridAmp    = [];
                 Results.nComponents     = 1;
                 Results.Function        = ['eigenmode_' OPTIONS.InverseMeasure];

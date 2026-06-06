@@ -17,6 +17,17 @@ function [K, M, Info] = tess_connection_laplacian(Vertices, Faces, varargin)
 %     consume or store any tangent frame. nxr is REQUIRED (no MATLAB fallback);
 %     the operator needs geometry-central's Levi-Civita transport vectors.
 %
+%     FRAME HANDEDNESS / WINDING CONVENTION
+%     FreeSurfer cortex meshes are wound clockwise when viewed from outside the
+%     brain.  geometry-central computes face normals via the CCW cross product,
+%     so on a CW-wound mesh all normals point INWARD.  The vertex tangent basis
+%     is then e2 = n_inward × e1, which encodes clockwise (rather than the usual
+%     counter-clockwise) complex rotation.  This is consistent across all
+%     FreeSurfer subjects, so inter-subject phase comparison is valid; the
+%     absolute winding direction just reverses relative to an outward-normal
+%     convention.  To get the outward normal use TessMat.VertNormals, not
+%     nxr vertexFrames.normals.
+%
 % INPUTS:
 %     Vertices : [nV x 3] vertex positions.
 %     Faces    : [nF x 3] triangle vertex indices (1-based, Brainstorm convention).
