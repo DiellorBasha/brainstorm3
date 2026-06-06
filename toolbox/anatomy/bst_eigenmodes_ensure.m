@@ -52,5 +52,5 @@ Surf = in_tess_bst(SurfaceFile, 0);
 
 Eig = tess_eigenmodes(Surf.Vertices, Surf.Faces, 'nModes', nModesPerHemi, ...
     'MassType', 'barycentric', 'RemoveDC', 1);
-out_tess_eigenmodes(SurfaceFile, Eig);
+out_tess_eigenmodes(SurfaceFile, Eig, Surf.Vertices, Surf.Faces);
 end

@@ -110,9 +110,21 @@ if isfield(Eig,'Order') && ~isempty(Eig.Order)
 else
     [~, order] = sort(double(Eig.Values(:)), 'ascend');
 end
-sel        = order(1:K);
-Phi_v      = double(Eig.Vectors(:, sel));   % [nV x K]  vertex eigenmodes
-lam        = double(Eig.Values(sel));        % [K x 1]   eigenvalues
+% When eigenmodes span both hemispheres, RH-only modes have zero LH support
+% and produce zero columns in the face leadfield.  Select the K smallest
+% eigenvalues that have majority energy on the LH.
+[~, lH_v_tmp] = tess_hemisplit(TessMat);
+all_sel = order(1 : min(2*K, numel(order)));  % candidate pool (2K to have enough)
+Phi_cand = double(Eig.Vectors(:, all_sel));
+lh_frac  = sum(Phi_cand(lH_v_tmp,:).^2, 1) ./ max(sum(Phi_cand.^2, 1), eps);
+lh_mask  = lh_frac >= 0.4;                   % ≥40% energy on LH → LH-dominant
+lh_sel   = all_sel(lh_mask);
+lh_sel   = lh_sel(1:min(K, numel(lh_sel)));
+
+sel  = lh_sel;
+K    = numel(sel);
+Phi_v = double(Eig.Vectors(:, sel));   % [nV x K]  LH-dominant vertex eigenmodes
+lam   = double(Eig.Values(sel));        % [K x 1]   eigenvalues
 
 % 2. Interpolate vertex modes to LH faces by corner average
 lh_vmap  = zeros(nV,1); lh_vmap(lH_v) = 1:numel(lH_v);
@@ -139,7 +151,7 @@ G_gram = Phi_f_raw' * M_f_lh * Phi_f_raw;  % [K x K] Gram matrix
 if p ~= 0
     warning('bst_face_eigenmode_leadfield:GramNotPD', ...
         'Face Gram matrix not PD (condition issue); using mass-normalization only.');
-    nrm = max(sqrt(diag(G_gram))', eps);   % clamp to eps to avoid NaN
+    nrm = sqrt(max(diag(G_gram)', 0)) + eps;   % clamp neg diag to 0 before sqrt
     Phi_f = Phi_f_raw ./ nrm;
 else
     Phi_f = Phi_f_raw / R;                  % [nLHF x K]  M_f-orthonormal
