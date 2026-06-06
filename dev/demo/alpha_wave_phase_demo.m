@@ -20,7 +20,7 @@
 % The "wave" is a scalar phase field φ(x,t) on the cortex surface, one
 % number per vertex telling you "this column is at phase 1.3 rad right now."
 %
-% THE SIGN PROBLEM AND HOW THE CONSISTENT GAUGE SOLVES IT
+% WHAT THIS PIPELINE COMPUTES — AND ITS HONEST LIMITATION
 % ---------------------------------------------------------
 % The relevant signal is J_n(i,t) = J(i,t)·n̂(i), the normal projection of
 % the unconstrained MN source estimate.  For a traveling wave:
@@ -30,20 +30,36 @@
 % The temporal Hilbert transform gives the analytic signal:
 %
 %   Ã_n(i,t) = J_n(i,t) + i·H[J_n(i,t)]
-%   |Ã_n(i,t)| = amplitude envelope  (smooth, non-negative)
+%   |Ã_n(i,t)| = amplitude envelope  (correct everywhere)
 %   arg(Ã_n(i,t)) = instantaneous phase φ(i,t)
 %
-% For wave DETECTION, we need ∇_S φ(x,t) — the spatial gradient of the
-% scalar phase field.  This gradient is a tangent vector at each vertex.
-% Comparing gradient vectors at different vertices requires a CONSISTENT
-% tangent frame.  The FreeSurfer trivial-connection frame {Uv(i), Vv(i)}
-% provides this: Uv(j) is the parallel transport of Uv(i) along any path,
-% so the gradient field ∇_S φ is expressed in a globally consistent basis.
+% LIMITATION — the sign problem persists in J_n:
+% On opposite sulcal walls, cortical columns point in opposite 3D directions
+% (n̂ on the left wall points left; n̂ on the right wall points right).
+% The same physiological event — both columns firing with the same drive —
+% produces J·n̂ > 0 on one wall and J·n̂ < 0 on the other.  The sign is
+% physics, not a gauge artefact: the columns genuinely point opposite ways.
+% The temporal phase arg(Ã_n) therefore has π jumps at sulcal walls, which
+% corrupt the phase gradient there regardless of frame consistency.
 %
-% Note: cross(Uv, Vv) = n̂_mesh exactly, because tess_tangents orients the
-% frame to match the face normals.  The trivial connection contributes the
-% SMOOTH TANGENT DIRECTIONS for interpreting the gradient, not a different
-% normal direction.
+% The tangent frame {Uv, Vv} and the normal n̂ live in ORTHOGONAL subspaces:
+% no choice of tangent frame can affect the sign of J·n̂.  (Note:
+% cross(Uv, Vv) = n̂_mesh exactly; the trivial connection contributes smooth
+% TANGENT DIRECTIONS for interpreting ∇_S φ as a tangent vector field, but
+% it cannot change the sign of the scalar projection J·n̂.)
+%
+% PROPER RESOLUTION — eigenmodes:
+% The scalar (LBO) eigenmodes ψ_j(x) have fixed spatial sign patterns
+% determined by the spectral geometry, not by local normals.  Their nodal
+% lines generally do not coincide with sulcal walls.  The time-varying
+% eigenmode coefficient θ_j(t) absorbs the temporal signal without the
+% sulcal sign artefact.  This is the correct approach for sign-free phase
+% maps and is developed separately using the updated nxr-compute plugin
+% (cotangent Laplacian + trivial-connection Laplacian eigenmodes).
+%
+% This demo illustrates the wave detection CONCEPT and the role of the
+% consistent gauge for gradient interpretation.  Interpret phase maps with
+% awareness that artifacts may appear at sulcal wall boundaries.
 %
 % DEPENDENCIES
 % ------------
