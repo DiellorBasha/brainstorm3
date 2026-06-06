@@ -68,32 +68,31 @@ end
 nCh = numel(iCh);
 d   = double(DataMat.F(iCh, :));   % [nCh x nTime]
 
-%% ── Build wavelet filterbank ─────────────────────────────────────────────
-fbArgs = {'SignalLength',    nTime, ...
-          'SamplingFrequency', Fs, ...
-          'FrequencyLimits',   FreqRange, ...
-          'VoicesPerOctave',   VoicesPerOctave, ...
-          'Wavelet',           WaveletName};
+%% ── CWT per channel ──────────────────────────────────────────────────────
+% Use cwt() directly with named args (NOT cwtfilterbank → cwt, which ignores
+% FrequencyLimits and returns Nyquist-extended scales).
+% [wt, f] = cwt(x, wavelet, Fs, 'FrequencyLimits', ...) respects the range.
+cwtArgs = {WaveletName, Fs, 'FrequencyLimits', FreqRange, 'VoicesPerOctave', VoicesPerOctave};
 if strcmpi(WaveletName, 'morse')
-    fbArgs = [fbArgs, {'TimeBandwidth', TimeBandwidth}];
+    cwtArgs = [cwtArgs, {'TimeBandwidth', TimeBandwidth}];
 end
-fb      = cwtfilterbank(fbArgs{:});
-f_scales = centerFrequencies(fb);   % [nScales x 1]
+
+% Trial run on first channel to discover scale count and frequency axis
+[W1, f_scales] = cwt(d(1,:), cwtArgs{:});   % [nScales x nTime], [nScales x 1]
+f_scales = f_scales(:);
 nScales  = numel(f_scales);
 
-%% ── Memory check ─────────────────────────────────────────────────────────
 memBytes = nCh * nScales * nTime * 16;   % complex double = 16 bytes
 if memBytes > 2e9
     warning('bst_sensor_cwt:LargeMemory', ...
-        'W will require ~%.1f GB. Consider reducing FreqRange or nTime.', ...
+        'W ~%.1f GB. Reduce FreqRange, VoicesPerOctave, or trim nTime.', ...
         memBytes / 1e9);
 end
 
-%% ── CWT per channel ──────────────────────────────────────────────────────
-% cwt(x, fb) returns [nScales x nTime] complex coefficients.
 W = zeros(nCh, nScales, nTime, 'like', 1i);
-for ch = 1:nCh
-    W(ch, :, :) = cwt(d(ch,:), fb);
+W(1, :, :) = W1;
+for ch = 2:nCh
+    W(ch, :, :) = cwt(d(ch,:), cwtArgs{:});
 end
 
 %% ── Verbose summary ──────────────────────────────────────────────────────
