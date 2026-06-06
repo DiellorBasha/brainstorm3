@@ -140,6 +140,7 @@ Phi_f_raw  = (Phi_v_lh(iv1,:) + Phi_v_lh(iv2,:) + Phi_v_lh(iv3,:)) / 3;  % [nLHF
 
 % 3. M_f-orthonormalize under face area matrix
 % Load DEC operators for face areas
+bst_plugin('Load', 'nxr-compute');
 clear mex
 h_dec = nxr_compute('create', TessMat.Vertices, Faces);
 dec   = nxr_compute('assembleDECOperators', h_dec);
