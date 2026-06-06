@@ -880,6 +880,237 @@ sgtitle({'Fiedler eigenmode: norm (left) vs phase (right)', ...
     'Phase: winds once around the hemisphere — encodes cortical location'}, ...
     'Color','w','FontSize',10)
 
+t%% Section 6 — Part C: Concrete examples from TutorialAuditory data
+% All three examples use the unconstrained MN kernel applied to the deviant
+% average (Subject01, S01_AEF_20131218_01_notch) at the M100 auditory peak
+% (t ≈ 91 ms, selected by global field power).
+%
+% The tangential field z(i,t) = J(i,t)·ê₁(i) + i·J(i,t)·ê₂(i) is computed
+% at every vertex using the nxr Levi-Civita frame (the same gauge as the
+% connection-Laplacian eigenmodes), enabling the eigenmode projection.
+
+HMFile_c  = ['/Users/diellorbasha/workspace/library/datasets/brainstorm_db/' ...
+             'tmp_aggregate/TutorialAuditory/data/Subject01/' ...
+             'S01_AEF_20131218_01_notch/headmodel_surf_os_meg.mat'];
+hm_c      = load(HMFile_c,'Gain');
+Gain_c    = double(hm_c.Gain);
+ChanMat_c = load(file_fullpath('Subject01/S01_AEF_20131218_01_notch/channel_ctf_acc1.mat'),'Channel');
+iMEG_c    = find(strcmp({ChanMat_c.Channel.Type},'MEG'));
+Gain_meg_c= Gain_c(iMEG_c,:);
+
+% Find unconstrained kernel link file and apply to deviant average
+sStudies_c = bst_get('ProtocolStudies');
+allStudy_c = [sStudies_c.Study];
+ResultsFile_c = '';
+for iS=1:numel(allStudy_c)
+    for iR=1:numel(allStudy_c(iS).Result)
+        fn=allStudy_c(iS).Result(iR).FileName;
+        if isempty(fn)||~strncmp(fn,'link|',5), continue; end
+        try, Mc=load(file_fullpath(file_resolve_link(fn)),'nComponents'); catch, continue; end
+        if isfield(Mc,'nComponents')&&isequal(Mc.nComponents,3)
+            ResultsFile_c=fn; break
+        end
+    end
+    if ~isempty(ResultsFile_c), break; end
+end
+Res_c  = in_bst_results(ResultsFile_c, 1);
+IGA_c  = Res_c.ImageGridAmp;   % [3nV x nTime]
+Time_c = Res_c.Time(:)';
+nV_c   = size(TessMat.Vertices,1);
+J_c    = permute(reshape(IGA_c,3,nV_c,[]),[2 1 3]);   % [nV x 3 x nTime]
+t_ms_c = Time_c * 1000;
+
+% M100 peak
+gfp_c = sqrt(sum(IGA_c.^2,1));
+inWin_c = Time_c>=0.06 & Time_c<=0.14;
+gfp_c(~inWin_c) = -inf;
+[~,ti_c] = max(gfp_c);
+fprintf('M100 peak: %.0f ms\n', t_ms_c(ti_c))
+
+% Tangential field in nxr gauge + FS gauge
+mctx_c = nxr.manifold.context(TessMat.Vertices, double(TessMat.Faces));
+vFr_c  = nxr.manifold.measure.vertexFrame(mctx_c);
+e1_c   = vFr_c.e1;  e2_c = vFr_c.e2;
+[Uf_c,~]  = tess_tangents(SurfaceFile,'NoSave',1);
+[Uv_c,Vv_c] = bst_tangent_face2vertex(double(TessMat.Faces), Uf_c, TessMat.VertNormals);
+
+z_all_c  = squeeze(sum(J_c.*e1_c,2)) + 1i*squeeze(sum(J_c.*e2_c,2));  % nxr, [nV x nTime]
+J_peak_c = squeeze(J_c(:,:,ti_c));
+z_pk_nxr = sum(J_peak_c.*e1_c,2) + 1i*sum(J_peak_c.*e2_c,2);
+z_pk_fs  = sum(J_peak_c.*Uv_c,2) + 1i*sum(J_peak_c.*Vv_c,2);
+norm_pk  = sqrt(sum(J_peak_c.^2,2));
+
+% Auditory vertex
+Vtx_mm_c = TessMat.Vertices*1000;
+[~,iAud_c] = min(sum((Vtx_mm_c-[50 -25 12]).^2,2));
+qx_c = squeeze(J_c(iAud_c,1,:));
+qy_c = squeeze(J_c(iAud_c,2,:));
+qz_c = squeeze(J_c(iAud_c,3,:));
+norm_t_c = sqrt(qx_c.^2+qy_c.^2+qz_c.^2);
+z_t_c    = z_all_c(iAud_c,:)';
+tang_t_c = abs(z_t_c);
+ph_t_c   = angle(z_t_c);
+Fs_c     = 1/mean(diff(Time_c));
+inPost_c = Time_c>0.05 & Time_c<0.45;
+fft_qx_c = abs(fft(qx_c(inPost_c))); fft_n_c = abs(fft(norm_t_c(inPost_c)));
+nfft_c   = sum(inPost_c); freqs_c = (0:nfft_c-1)*(Fs_c/nfft_c);
+[~,ip1_c]=max(fft_qx_c(2:floor(nfft_c/2))); ip1_c=ip1_c+1;
+[~,ip2_c]=max(fft_n_c(2:floor(nfft_c/2)));  ip2_c=ip2_c+1;
+fprintf('Dominant freq: qx=%.0f Hz, norm=%.0f Hz (doubled)\n', freqs_c(ip1_c), freqs_c(ip2_c))
+
+%% Section 6 — Part C1: Norm vs phase on cortex at M100
+[rH_c,~] = tess_hemisplit(TessMat);
+rH_cv    = rH_c(:);
+inR_c    = false(nV_c,1); inR_c(rH_cv)=true;
+fHr_c    = all(inR_c(double(TessMat.Faces)),2);
+
+% Amplitude mask (>20% of peak in right hemi)
+amp_c   = abs(z_pk_fs);
+mask_c  = amp_c < 0.20*max(amp_c(rH_cv));
+
+cmap_p_c = parula(256);  cmap_h_c = hsv(256);
+nr_c   = norm_pk;
+nr_n_c = (nr_c-min(nr_c(rH_cv)))/max(nr_c(rH_cv)-min(nr_c(rH_cv)),eps);
+cN_c   = repmat([0.15 0.15 0.15],nV_c,1);
+cNxr_c = repmat([0.18 0.18 0.18],nV_c,1);
+cFs_c  = repmat([0.18 0.18 0.18],nV_c,1);
+for iv=rH_cv'
+    cN_c(iv,:) = cmap_p_c(max(1,min(256,round(nr_n_c(iv)*255)+1)),:);
+    if ~mask_c(iv)
+        ci1=max(1,min(256,round((angle(z_pk_nxr(iv))+pi)/(2*pi)*255)+1));
+        cNxr_c(iv,:)=cmap_h_c(ci1,:);
+        ci2=max(1,min(256,round((angle(z_pk_fs(iv))+pi)/(2*pi)*255)+1));
+        cFs_c(iv,:)=cmap_h_c(ci2,:);
+    end
+end
+
+figure('Name','M100 norm vs phase','Color','k','Position',[50 50 1400 440])
+plab_c  = {'Norm |q|  — amplitude only', ...
+           'Phase arg(z)  — nxr gauge (arbitrary)', ...
+           'Phase arg(z)  — FS gauge (trivial-connection, consistent)'};
+pcmap_c = {parula(256), hsv(256), hsv(256)};
+pclim_c = {[min(nr_c(rH_cv)) max(nr_c(rH_cv))], [-pi pi], [-pi pi]};
+pcdat_c = {cN_c, cNxr_c, cFs_c};
+
+for p=1:3
+    ax=subplot(1,3,p); set(ax,'Color','k')
+    patch('Faces',TessMat.Faces(fHr_c,:),'Vertices',Vtx_mm_c, ...
+        'FaceVertexCData',pcdat_c{p},'FaceColor','interp', ...
+        'EdgeColor','none','FaceLighting','phong','Parent',ax)
+    camlight(ax,70,45); camlight(ax,-70,45);
+    camlight(ax,70,-45); camlight(ax,-70,-45);
+    material([0.65 0.45 0.02 8])
+    hold(ax,'on')
+    plot3(Vtx_mm_c(iAud_c,1),Vtx_mm_c(iAud_c,2),Vtx_mm_c(iAud_c,3), ...
+        'o','MarkerSize',9,'MarkerFaceColor','w','MarkerEdgeColor','w','Parent',ax)
+    colormap(ax,pcmap_c{p}); clim(pclim_c{p})
+    cb=colorbar(ax,'Color','w');
+    if p==1, cb.Label.String='|q_i|  (Am)';
+    else,    cb.Label.String='arg(z_i)  (rad)';
+             cb.Ticks=[-pi 0 pi]; cb.TickLabels={'-\pi','0','\pi'};
+    end
+    cb.Label.Color='w';
+    view(ax,90,10); axis(ax,'equal','off')
+    t=title(ax,plab_c{p}); t.Color='w'; t.FontSize=8;
+end
+sgtitle({'Right hemisphere  |  deviant average M100 (91 ms)  |  white dot = auditory cortex', ...
+    'Phase panels masked to active region (>20% peak amplitude)'}, 'Color','w','FontSize',10)
+
+%% Section 6 — Part C2: Timeseries — frequency doubling at auditory cortex
+tWin_c = t_ms_c >= -100 & t_ms_c <= 400;
+figure('Name','Timeseries frequency doubling','Color','k','Position',[50 50 1000 550])
+
+subplot(3,1,1)
+plot(t_ms_c(tWin_c),qx_c(tWin_c)*1e12,'Color',[0.85 0.55 0.25],'LineWidth',1.2); hold on
+plot(t_ms_c(tWin_c),qy_c(tWin_c)*1e12,'Color',[0.45 0.75 0.35],'LineWidth',1.2)
+plot(t_ms_c(tWin_c),qz_c(tWin_c)*1e12,'Color',[0.40 0.65 1.00],'LineWidth',1.2)
+xline(t_ms_c(ti_c),'--','Color','w','LineWidth',0.8)
+ylabel('pA\cdotm','Color','w'); set(gca,'Color','k','XColor','w','YColor','w')
+legend({'q_x','q_y','q_z'},'TextColor','w','Color',[0.1 0.1 0.1],'Location','northeast')
+title('Cartesian components — signed, preserve true oscillation frequency','Color','w','FontSize',9)
+
+subplot(3,1,2)
+plot(t_ms_c(tWin_c),norm_t_c(tWin_c)*1e12,'Color',[0.85 0.85 0.85],'LineWidth',1.5); hold on
+plot(t_ms_c(tWin_c),tang_t_c(tWin_c)*1e12,'--','Color',[0.35 0.75 0.55],'LineWidth',1.5)
+xline(t_ms_c(ti_c),'--','Color','w','LineWidth',0.8)
+ylabel('pA\cdotm','Color','w'); set(gca,'Color','k','XColor','w','YColor','w')
+legend({'norm |q|','tangential |z|'},'TextColor','w','Color',[0.1 0.1 0.1],'Location','northeast')
+title(sprintf('Norm |q| and |z|: RECTIFIED  —  dominant at %.0f Hz  (%.0f Hz components, 2\\times frequency)', ...
+    freqs_c(ip2_c), freqs_c(ip1_c)),'Color','w','FontSize',9)
+
+subplot(3,1,3)
+plot(t_ms_c(tWin_c),ph_t_c(tWin_c),'Color',[0.35 0.75 0.55],'LineWidth',1.5); hold on
+xline(t_ms_c(ti_c),'--','Color','w','LineWidth',0.8)
+ylabel('arg(z)  (rad)','Color','w'); xlabel('time  (ms)','Color','w')
+set(gca,'Color','k','XColor','w','YColor','w','YLim',[-pi-0.3 pi+0.3])
+yticks([-pi -pi/2 0 pi/2 pi]); yticklabels({'-\pi','-\pi/2','0','\pi/2','\pi'})
+title(sprintf('Tangential phase arg(z_i(t)) — oscillates at %.0f Hz, preserves temporal phase', ...
+    freqs_c(ip1_c)),'Color','w','FontSize',9)
+
+sgtitle(sprintf('Auditory cortex [%.0f %.0f %.0f] mm  |  tangential fraction %.0f%%  |  deviant average', ...
+    Vtx_mm_c(iAud_c,:), abs(z_pk_nxr(iAud_c))/norm_pk(iAud_c)*100), 'Color','w','FontSize',10)
+
+%% Section 6 — Part C3: Eigenmode decomposition of tangential source
+% Project z(i,t) onto the connection-Laplacian eigenmodes:
+%   c_k(t) = sum_i conj(Psi_k(i)) * z(i,t) * Area_i
+% The M-inner product is valid because z and Psi share the same nxr gauge.
+% This spectral decomposition is the unique capability of gauge consistency.
+
+ConnEig_c = bst_conn_eigenmodes_ensure(SurfaceFile);
+Areas_c   = full(diag(ConnEig_c.MassMatrix));
+Psi_c     = double(ConnEig_c.Vectors);
+eigVals_c = ConnEig_c.Values;
+K_c       = size(Psi_c,2);
+
+c_time_c  = (conj(Psi_c)' .* Areas_c') * z_all_c;   % [K x nTime]
+c_peak_c  = c_time_c(:, ti_c);
+c_pow_c   = abs(c_peak_c).^2;
+
+% Find left-hemi Fiedler mode
+colL_c = 1;
+for ci_k = 1:K_c
+    supp=find(Psi_c(:,ci_k)~=0);
+    [~,lH_c]=tess_hemisplit(TessMat);
+    if mean(ismember(supp,lH_c(:)))>0.9, colL_c=ci_k; break; end
+end
+cFiedL_c = c_time_c(colL_c,:);
+
+figure('Name','Eigenmode decomposition','Color','k','Position',[50 50 1100 500])
+
+ax_sp = subplot(1,2,1); set(ax_sp,'Color','k'); hold(ax_sp,'on')
+bar(ax_sp,eigVals_c,c_pow_c*1e26,'FaceColor',[0.35 0.75 0.55],'EdgeColor','none')
+[~,top3_c]=sort(c_pow_c,'descend');
+for ki=1:3
+    text(eigVals_c(top3_c(ki)),c_pow_c(top3_c(ki))*1e26+0.05, ...
+        sprintf('\\Psi_{%d}',top3_c(ki)),'Color','w','FontSize',9, ...
+        'HorizontalAlignment','center','Parent',ax_sp)
+end
+xlabel(ax_sp,'Eigenvalue \mu_k  (spatial frequency)','Color','w')
+ylabel(ax_sp,'|c_k|^2  (\times 10^{-26})','Color','w')
+set(ax_sp,'XColor','w','YColor','w','GridColor',[0.3 0.3 0.3],'GridAlpha',0.4)
+grid(ax_sp,'on')
+t_sp=title(ax_sp,'Tangential source spectrum at M100  (eigenmode power)'); t_sp.Color='w';
+
+ax_ts = subplot(1,2,2); set(ax_ts,'Color','k'); hold(ax_ts,'on')
+yyaxis(ax_ts,'left')
+plot(t_ms_c,abs(cFiedL_c)*1e13,'Color',[0.35 0.75 0.55],'LineWidth',1.5)
+ylabel(ax_ts,'|c_1(t)|  (\times 10^{-13})','Color',[0.35 0.75 0.55])
+set(ax_ts,'YColor',[0.35 0.75 0.55])
+yyaxis(ax_ts,'right')
+plot(t_ms_c,angle(cFiedL_c),'Color',[0.85 0.65 0.25],'LineWidth',1.0)
+ylabel(ax_ts,'arg(c_1(t))  (rad)','Color',[0.85 0.65 0.25])
+set(ax_ts,'YColor',[0.85 0.65 0.25],'YLim',[-pi-0.3 pi+0.3])
+yticks(ax_ts,[-pi 0 pi]); yticklabels(ax_ts,{'-\pi','0','\pi'})
+xline(ax_ts,t_ms_c(ti_c),'--','Color','w','LineWidth',0.8)
+xline(ax_ts,0,'--','Color',[0.5 0.5 0.5],'LineWidth',0.6)
+xlim(ax_ts,[-100 400]); xlabel(ax_ts,'time  (ms)','Color','w')
+set(ax_ts,'XColor','w','GridColor',[0.3 0.3 0.3],'GridAlpha',0.4); grid(ax_ts,'on')
+t_ts=title(ax_ts,'Fiedler coefficient c_1(t)  — left hemisphere'); t_ts.Color='w';
+
+sgtitle({'Connection-eigenmode decomposition of tangential source', ...
+    'Requires gauge-consistent frame  |  Fiedler mode (\Psi_1, left hemi) dominates at M100'}, ...
+    'Color','w','FontSize',10)
+
 %% --- helpers (keep at bottom) ---
 function v = iff(cond, a, b)
 if cond, v = a; else, v = b; end
