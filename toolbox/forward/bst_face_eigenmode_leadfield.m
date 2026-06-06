@@ -139,7 +139,7 @@ G_gram = Phi_f_raw' * M_f_lh * Phi_f_raw;  % [K x K] Gram matrix
 if p ~= 0
     warning('bst_face_eigenmode_leadfield:GramNotPD', ...
         'Face Gram matrix not PD (condition issue); using mass-normalization only.');
-    nrm = sqrt(diag(G_gram))';
+    nrm = max(sqrt(diag(G_gram))', eps);   % clamp to eps to avoid NaN
     Phi_f = Phi_f_raw ./ nrm;
 else
     Phi_f = Phi_f_raw / R;                  % [nLHF x K]  M_f-orthonormal
