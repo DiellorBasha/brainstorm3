@@ -82,14 +82,20 @@ fprintf('  Sign-correct sweeps: %d\n', info.nSweeps);
 assert(mean_plv >= 0.10, 'PLV too low — no directional wave detected');
 assert(mean_speed >= 0.5 && mean_speed <= 15, 'Speed outside plausible wave range');
 assert(nIso > 0, 'No isoline segments at peak time');
-% NOTE: sign correction from sigma=+1 neutral start does not guarantee
-% smoothness improvement because sulcal-wall pairs (both sides wrong) stay
-% stuck at their initial values when their neighbours are also wrong. Full
-% correction requires sulcal-pair-aware flipping (sa_sulcal_walls + Fiedler
-% disambiguation) — this is the next planned iteration.
-flip_frac = info.nFlipped / numel(info.lH_v);
-assert(flip_frac >= 0.0 && flip_frac <= 0.60, ...
-    sprintf('Sign flip fraction %.3f outside expected range', flip_frac));
+
+% Sign correction: pair discontinuity rate should drop after correction
+TessMat_pairs = in_tess_bst(SURF, 0);
+lhSet_pairs = false(size(TessMat_pairs.Vertices,1),1); lhSet_pairs(info.lH_v) = true;
+pairs_val = tess_sulcal_pairs(TessMat_pairs.Vertices, TessMat_pairs.VertNormals, ...
+    TessMat_pairs.SulciMap .* double(lhSet_pairs), TessMat_pairs.VertConn, ...
+    struct('MaxDist',0.003,'NormalDot',-0.7,'Nring',3));
+t_val = round(numel(R.Time)/2);
+disc_pre  = mean(abs(angle(R.ImageGridAmp(pairs_val(:,1),t_val) .* ...
+                      conj(R.ImageGridAmp(pairs_val(:,2),t_val)))) > pi/2);
+disc_post = mean(abs(angle(s_corr(pairs_val(:,1),t_val) .* ...
+                      conj(s_corr(pairs_val(:,2),t_val)))) > pi/2);
+fprintf('  Pair disc: pre=%.1f%%  post=%.1f%%\n', 100*disc_pre, 100*disc_post);
+assert(disc_post < disc_pre, 'Sign correction did not reduce pair discontinuity rate');
 
 fprintf('\nAll assertions passed.\n');
 
