@@ -1,41 +1,47 @@
-function [Z_joint, phi_F, phi_T, confidence] = bst_fiedler_joint_field(Theta, FaceIndices, SurfaceFile, s_alpha, varargin)
-% BST_FIEDLER_JOINT_FIELD  Form the joint Fiedler torus field from eigenmode CWT.
+function [Z_joint, phi_F, phi_T, confidence] = bst_fiedler_joint_field(s_face, FaceIndices, SurfaceFile, varargin)
+% BST_FIEDLER_JOINT_FIELD  Demodulate a face source field into the Fiedler gauge.
 %
 % USAGE:
-%   [Z, phi_F, phi_T, conf] = bst_fiedler_joint_field(Theta, FaceIndices, SurfaceFile, s_alpha)
+%   [Z, phi_F, phi_T, conf] = bst_fiedler_joint_field(s_face, FaceIndices, SurfaceFile)
 %
 % DESCRIPTION:
-%   Constructs the joint Fiedler field Z_joint(x,t) = conj(u₁(x)) · θ₁(s,t)
+%   Forms the joint Fiedler field by demodulating the FULL reconstructed face
+%   source field against the unit spatial-Fiedler phasor:
+%
+%       Z_joint(x,t) = conj( u₁(x)/|u₁(x)| ) · s_face(x,t)
+%
 %   where:
-%     u₁(x) ∈ ℂ  — face Fiedler eigenmode from TessMat.nxr (spatial Fiedler)
-%     θ₁(s,t) ∈ ℂ — CWT coefficient of the DOMINANT FACE EIGENMODE at scale s
+%     s_face(x,t) — full face 2-form reconstruction (all modes superposed),
+%                   e.g. FaceAmp(:, s_alpha, :) from bst_eigenmode_cwt_inverse
+%                   or FaceGridAmp from bst_eigenmode_analytic_inverse
+%     u₁(x) ∈ ℂ   — face connection-Laplacian Fiedler eigenmode (TessMat.nxr)
 %
-%   arg(Z_joint(x,t)) = arg(θ₁(s,t)) − arg(u₁(x))
-%                     ≈ ω₀t − k·φ_F(x) + const   [wave phase in Fiedler coordinates]
+%   arg(Z_joint(x,t)) = arg(s_face(x,t)) − arg(u₁(x))   [wave phase in Fiedler gauge]
 %
-%   where φ_F(x) = arg(u₁(x)) is the Fiedler longitude — a smooth scalar
-%   coordinate on the cortex that is continuous across sulcal walls.
+%   IMPORTANT — why the FULL field, not a single mode coefficient:
+%     A traveling wave is a superposition of multiple spatial modes with
+%     phase-shifted temporal coefficients.  Using only the dominant mode
+%     coefficient θ₁(t) would make Z_joint rank-1 (= −φ_F(x) trivially) and
+%     reveal no wave.  The full s_face(x,t) carries the multi-mode spatial
+%     structure; the unit Fiedler phasor only fixes the spatial gauge/sign.
 %
-%   Sign ambiguity is automatic: conj(u₁(x)) demodulates the wave relative
-%   to the Fiedler frame, absorbing sulcal π-jumps in u₁ not in the wave.
+%   Sign ambiguity is removed: conj(u₁/|u₁|) absorbs the sulcal-wall π-jumps
+%   carried by u₁'s gauge, not by the physical wave.
 %
 % INPUTS:
-%   Theta       [K × nScales × nTime] complex — from bst_eigenmode_cwt_inverse
-%               OR [K × nTime] complex — eigenmode analytic signal (Hilbert)
-%   FaceIndices [nLHF × 1]   global face indices from HeadModel.FaceIndices
+%   s_face      [nLHF × nTime] complex — full face source field at one scale
+%   FaceIndices [nLHF × 1]    global face indices into TessMat.Faces
 %   SurfaceFile Brainstorm cortex surface file path
-%   s_alpha     integer — CWT scale index to use (from bst_dispersion_fit)
-%               ignored if Theta is [K × nTime]
 %
 % OPTIONS (name-value):
-%   'ModeIndex'  which eigenmode to use as temporal Fiedler (default: 1 = dominant)
+%   'ModeIndex'  which connection eigenmode is the Fiedler coordinate (default: 1)
 %   'Verbose'    logical (default: true)
 %
 % OUTPUTS:
-%   Z_joint    [nLHF × nTime] complex — joint Fiedler field
+%   Z_joint    [nLHF × nTime] complex — gauge-demodulated face field
 %   phi_F      [nLHF × 1]  real — Fiedler longitude = arg(u₁(x)) ∈ (−π,π]
-%   phi_T      [1 × nTime] real — temporal phase = arg(θ₁(s,t))
-%   confidence [nLHF × nTime] real — |u₁(x)| · |θ₁(s,t)| product
+%   phi_T      [1 × nTime] real — mean phase of Z_joint across active faces
+%   confidence [nLHF × nTime] real — |u₁(x)| · |s_face(x,t)| product
 %
 % AUTHORS: Diellor Basha, 2026
 
@@ -49,6 +55,10 @@ for k = 1:2:numel(varargin)
     end
 end
 
+nLHF  = size(s_face, 1);
+nTime = size(s_face, 2);
+FaceIndices = FaceIndices(:);
+
 %% ── Load face Fiedler eigenvector from TessMat.nxr ───────────────────────
 TessMat = in_tess_bst(SurfaceFile, 0);
 if ~isfield(TessMat,'nxr') || isempty(TessMat.nxr)
@@ -59,44 +69,39 @@ NxrData = TessMat.nxr;
 
 % Map FaceIndices to LH-local index in ConnEigLH
 lH_f_nxr = NxrData.lH_f;
-[~, lhf_loc] = ismember(FaceIndices(:), lH_f_nxr);
-if any(lhf_loc == 0)
-    warning('bst_fiedler_joint_field: %d FaceIndices not in nxr LH face set.', sum(lhf_loc==0));
-end
-
-nLHF = numel(FaceIndices);
-u1_full = zeros(nLHF, 1, 'like', 1i);
+[~, lhf_loc] = ismember(FaceIndices, lH_f_nxr);
 valid_f = lhf_loc > 0;
-u1_full(valid_f) = NxrData.ConnEigLH.Vectors(lhf_loc(valid_f), ModeIndex);
 
-% Fiedler longitude: smooth scalar coordinate on cortex
-phi_F = angle(u1_full);      % [nLHF × 1] ∈ (−π, π]
-amp_F = abs(u1_full);        % confidence per face
+u1 = zeros(nLHF, 1, 'like', 1i);
+u1(valid_f) = NxrData.ConnEigLH.Vectors(lhf_loc(valid_f), ModeIndex);
 
-%% ── Extract temporal Fiedler: θ₁(s,t) at selected scale ─────────────────
-ndims_Theta = ndims(Theta);
-if ndims_Theta == 3
-    % Theta [K × nScales × nTime]
-    theta1 = squeeze(Theta(ModeIndex, s_alpha, :)).';   % [1 × nTime]
-else
-    % Theta [K × nTime] — from Hilbert inverse (no scale dimension)
-    theta1 = Theta(ModeIndex, :);                        % [1 × nTime]
+phi_F = angle(u1);          % [nLHF × 1] Fiedler longitude
+amp_F = abs(u1);            % confidence per face
+
+% Unit Fiedler phasor (gauge only — amplitude removed)
+u1_unit = u1 ./ max(abs(u1), eps);
+
+%% ── Demodulate full field into Fiedler gauge ─────────────────────────────
+% Z_joint(x,t) = conj(û₁(x)) · s_face(x,t)
+% This rotates each face's complex value by −arg(u₁(x)), removing the spatial
+% gauge (and its sulcal sign flips) while keeping the full temporal+spatial
+% structure of the wave intact.
+Z_joint    = conj(u1_unit) .* s_face;          % [nLHF × nTime] complex
+confidence = amp_F .* abs(s_face);             % [nLHF × nTime] joint confidence
+
+% Temporal phase: amplitude-weighted mean phase across faces at each time
+phi_T = zeros(1, nTime);
+w = amp_F .* (amp_F > 0);
+for t = 1:nTime
+    z_t = sum(w .* Z_joint(:,t)) / max(sum(w), eps);
+    phi_T(t) = angle(z_t);
 end
-
-phi_T  = angle(theta1);   % [1 × nTime] temporal phase
-amp_T  = abs(theta1);     % [1 × nTime] burst amplitude
-
-%% ── Joint field: outer product in complex notation ───────────────────────
-% Z_joint(x,t) = conj(u₁(x)) · θ₁(s,t)
-% arg(Z_joint) = arg(θ₁) − arg(u₁) ≈ wave phase in Fiedler coordinates
-Z_joint    = conj(u1_full) .* theta1;          % [nLHF × nTime] broadcast
-confidence = amp_F .* amp_T;                   % [nLHF × nTime] joint confidence
 
 if Verbose
-    fprintf('bst_fiedler_joint_field: %d LH faces  mode=%d\n', nLHF, ModeIndex);
+    fprintf('bst_fiedler_joint_field: %d LH faces  Fiedler mode=%d\n', nLHF, ModeIndex);
     fprintf('  Fiedler |u₁| range: [%.3f %.3f]  phi_F range: [%.2f %.2f] rad\n', ...
         min(amp_F), max(amp_F), min(phi_F), max(phi_F));
-    fprintf('  |θ₁| mean=%.3e  phi_T range: [%.2f %.2f] rad\n', ...
-        mean(amp_T), min(phi_T), max(phi_T));
+    fprintf('  |s_face| mean=%.3e  Z_joint demodulated (full multi-mode field)\n', ...
+        mean(abs(s_face(:))));
 end
 end

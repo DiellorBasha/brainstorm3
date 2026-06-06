@@ -105,9 +105,28 @@ for bi = 1:numel(b_vals)
     cv(bi) = 1 - abs(mean(exp(1i * residual)));   % circular variance
 end
 [~, best_bi] = min(cv);
-k_fiedler = -b_vals(best_bi);   % k = -slope (phase DECREASES with phi_F for forward wave)
+k_fiedler = -b_vals(best_bi);   % slope dφ_joint/dφ_F [dimensionless]
 
-% Bootstrap uncertainty
+% Physical scaling: φ_F is dimensionless (Fiedler longitude in radians).
+% The wave phase φ_joint = ω₀t − k_phys·d(x) where d is physical distance.
+% slope b = dφ_joint/dφ_F, and k_phys = |b| · |∇φ_F| [rad/m].
+% Estimate |∇φ_F| from active-region centroids: regress φ_F on position,
+% the gradient magnitude is the physical longitude-to-distance scale.
+ctr_act = ctr_lh(act_idx, :);                  % [nAct × 3] m
+pF      = phi_F_act;
+% Robust gradient: |∇φ_F| ≈ range(φ_F) / spatial extent along principal axis
+% Use PCA of centroids to find the dominant spatial axis, project φ_F onto it
+ctr_c = ctr_act - mean(ctr_act, 1);
+[~, ~, Vpca] = svd(ctr_c, 'econ');
+proj  = ctr_c * Vpca(:,1);                     % [nAct × 1] position along principal axis [m]
+% Linear fit φ_F vs proj → slope = |∇φ_F| along principal axis [rad/m]
+grad_phiF = abs((proj(:)' * (pF - mean(pF))) / max(proj(:)'*proj(:), eps));
+grad_phiF = max(grad_phiF, eps);
+
+k_phys = abs(k_fiedler) * grad_phiF;           % [rad/m]
+v_fiedler = omega0 / max(k_phys, eps);          % [m/s]
+
+% Bootstrap uncertainty over the slope estimate
 nBoot = 20; v_boot = zeros(nBoot,1);
 for bi_boot = 1:nBoot
     idx_b = randsample(numel(act_idx), round(0.7*numel(act_idx)), false);
@@ -115,9 +134,8 @@ for bi_boot = 1:nBoot
     pF_b  = phi_F_act(idx_b);
     cv_b  = arrayfun(@(b) 1-abs(mean(exp(1i*(ph_b - b*pF_b)))), b_vals);
     [~,bb] = min(cv_b);
-    v_boot(bi_boot) = omega0 / max(abs(-b_vals(bb)), eps);
+    v_boot(bi_boot) = omega0 / max(abs(b_vals(bb))*grad_phiF, eps);
 end
-v_fiedler     = omega0 / max(abs(k_fiedler), eps);
 v_fiedler_std = std(v_boot);
 
 %% ── PLV and dominant phase over time ─────────────────────────────────────

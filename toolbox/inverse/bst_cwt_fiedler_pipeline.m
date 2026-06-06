@@ -83,10 +83,12 @@ if Verbose, vp('Stage 1/6 — sensor CWT...'); end
     'FreqRange', FreqRange, 'VoicesPerOctave', VoicesPerOctave, ...
     'Verbose', Verbose);
 
-%% ── Stage 2: Flat-prior eigenmode CWT inverse ────────────────────────────
-if Verbose, vp('Stage 2/6 — eigenmode CWT inverse (flat prior)...'); end
-[Theta, FaceAmp, InvInfo] = bst_eigenmode_cwt_inverse(W_sensor, WTInfo, HeadModelFile, ...
-    'SNR', SNR, 'FaceSpace', true, 'Verbose', Verbose);
+%% ── Stage 2: Eigenmode CWT inverse (mode coefficients only) ──────────────
+% Defer face-space reconstruction: FaceAmp at all scales would be ~60 GB.
+% We reconstruct only the selected alpha scale after dispersion fit (Stage 5).
+if Verbose, vp('Stage 2/6 — eigenmode CWT inverse...'); end
+[Theta, ~, InvInfo] = bst_eigenmode_cwt_inverse(W_sensor, WTInfo, HeadModelFile, ...
+    'SNR', SNR, 'FaceSpace', false, 'Verbose', Verbose);
 
 %% ── Stage 3: (λ,ω) joint spectral analysis ───────────────────────────────
 if Verbose, vp('Stage 3/6 — (λ,ω) spectrum...'); end
@@ -101,9 +103,14 @@ if Verbose, vp('Stage 4/6 — dispersion fit...'); end
     f_ax, WTInfo, 'TargetFreq', TargetFreq, 'Verbose', Verbose);
 
 %% ── Stage 5: Joint Fiedler torus field ───────────────────────────────────
+% Reconstruct the FULL face field ONLY at the selected alpha scale (memory-safe),
+% then demodulate against the Fiedler gauge.
 if Verbose, vp('Stage 5/6 — joint Fiedler field...'); end
+Phi_f = double(HM.PhiFaces);                       % [nLHF × K]
+s_face_alpha = Phi_f * squeeze(Theta(:, s_alpha, :));   % [nLHF × nTime] full reconstruction
 [Z_joint, phi_F, phi_T, confidence] = bst_fiedler_joint_field( ...
-    Theta, InvInfo.FaceIndices, SurfaceFile, s_alpha, 'Verbose', Verbose);
+    s_face_alpha, InvInfo.FaceIndices, SurfaceFile, 'Verbose', Verbose);
+FaceAmp = s_face_alpha;   % return the single-scale face field
 
 %% ── Stage 6: Wave analysis in Fiedler coordinates ────────────────────────
 if Verbose, vp('Stage 6/6 — Fiedler wave analysis...'); end
