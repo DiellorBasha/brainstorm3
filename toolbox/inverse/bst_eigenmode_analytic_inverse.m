@@ -70,16 +70,18 @@ function Results = bst_eigenmode_analytic_inverse(HeadModelFile, DataFile, varar
 % Authors: Diellor Basha, 2026
 
 %% ── Parse options ────────────────────────────────────────────────────────
-FreqBand = [];
-SNR      = 3;
-Prior    = 'log';
-Alpha    = 1;
+FreqBand     = [];
+SNR          = 3;
+Prior        = 'log';
+Alpha        = 1;
+HelmetFilter = [];   % [nCh x J] helmet eigenmodes for spatial pre-filtering
 for k = 1:2:numel(varargin)
     switch lower(varargin{k})
-        case 'freqband', FreqBand = varargin{k+1};
-        case 'snr',      SNR      = varargin{k+1};
-        case 'prior',    Prior    = lower(varargin{k+1});
-        case 'alpha',    Alpha    = varargin{k+1};
+        case 'freqband',     FreqBand     = varargin{k+1};
+        case 'snr',          SNR          = varargin{k+1};
+        case 'prior',        Prior        = lower(varargin{k+1});
+        case 'alpha',        Alpha        = varargin{k+1};
+        case 'helmetfilter', HelmetFilter = varargin{k+1};
     end
 end
 
@@ -117,6 +119,22 @@ d = F(iMEG, :);               % [nCh x nTime]
 if ~isempty(FreqBand)
     d = bst_bandpass_hfilter(d, Fs, FreqBand(1), FreqBand(2), 0, 'iir');
     fprintf('  Bandpassed to [%.1f %.1f] Hz\n', FreqBand(1), FreqBand(2));
+end
+
+%% ── Helmet spatial pre-filter (optional) ─────────────────────────────────
+% Project sensor data onto the J smoothest helmet LBO modes before inversion.
+% d_filt = Phi_h * (Phi_h' * d)  removes spatially incoherent sensor noise
+% while preserving spatially coherent brain signals.
+if ~isempty(HelmetFilter)
+    Phi_h  = HelmetFilter;                    % [nCh x J]
+    J_helm = size(Phi_h, 2);
+    % Proper oblique projector onto col(Phi_h): P = Phi*(Phi'*Phi)^{-1}*Phi'
+    % Works correctly even when Phi columns are not Euclidean-orthonormal
+    % (as happens after nearest-neighbor interpolation to off-hull sensors).
+    AtAinv = inv(Phi_h' * Phi_h);            % [J x J]
+    d      = Phi_h * (AtAinv * (Phi_h' * d)); % [nCh x nTime] — smooth modes only
+    fprintf('  Helmet filter: J=%d modes  (%.0f%% of channels)\n', ...
+        J_helm, 100*J_helm/nHMCh);
 end
 
 %% ── Complex analytic signal per channel ──────────────────────────────────
