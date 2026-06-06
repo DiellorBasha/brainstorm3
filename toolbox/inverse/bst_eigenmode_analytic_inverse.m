@@ -75,6 +75,7 @@ SNR          = 3;
 Prior        = 'log';
 Alpha        = 1;
 HelmetFilter = [];   % [nCh x J] helmet eigenmodes for spatial pre-filtering
+FaceSpace    = false;  % return s_f = PhiFaces*theta in face space (physically consistent)
 for k = 1:2:numel(varargin)
     switch lower(varargin{k})
         case 'freqband',     FreqBand     = varargin{k+1};
@@ -82,6 +83,7 @@ for k = 1:2:numel(varargin)
         case 'prior',        Prior        = lower(varargin{k+1});
         case 'alpha',        Alpha        = varargin{k+1};
         case 'helmetfilter', HelmetFilter = varargin{k+1};
+        case 'facespace',    FaceSpace    = logical(varargin{k+1});
     end
 end
 
@@ -176,6 +178,17 @@ else
 end
 s_tilde = Phi(:, idx) * theta_hat;  % [nV x nTime]  complex source field
 
+%% ── Face-space reconstruction (physically consistent) ─────────────────────
+% s_f = Ψ·θ̂ [nLHF × nTime] is the primal 2-form: current flux per face.
+% This is the quantity the forward model actually encodes — not vertex dipoles.
+FaceGridAmp = [];
+if FaceSpace && isfield(HM,'PhiFaces') && ~isempty(HM.PhiFaces) && ...
+        isfield(HM,'isFaceBased') && HM.isFaceBased
+    FaceGridAmp = double(HM.PhiFaces) * theta_hat;   % [nLHF x nTime] complex
+    fprintf('  Face-space reconstruction: [%d faces x %d]\n', ...
+        size(FaceGridAmp,1), size(FaceGridAmp,2));
+end
+
 %% ── Pack results ─────────────────────────────────────────────────────────
 Results = struct();
 Results.ImageGridAmp  = s_tilde;         % complex [nV x nTime]
@@ -184,6 +197,11 @@ Results.Phase         = angle(s_tilde);  % [nV x nTime] instantaneous phase [rad
 Results.theta         = theta_hat;       % [K x nTime]  complex mode coefficients
 Results.ImagingKernel = K_mne;           % [K x nCh]    for re-application
 Results.PhiVertices   = Phi(:, idx);     % [nV x K]     cached for Poisson sharpen
+Results.FaceGridAmp   = FaceGridAmp;     % [nLHF x nTime] complex, or [] if FaceSpace=false
+Results.FaceIndices   = [];              % filled below if FaceSpace
+if FaceSpace && ~isempty(FaceGridAmp)
+    Results.FaceIndices = HM.FaceIndices;
+end
 Results.Time          = Time;
 Results.Eigenvalues   = lambdas;
 Results.nModes        = K;

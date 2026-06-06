@@ -209,6 +209,8 @@ CompHM.GridAreas     = FHM.GridAreas;       % face areas [m²]
 CompHM.GridU         = FHM.GridU;           % trivial-connection e1
 CompHM.GridV         = FHM.GridV;           % trivial-connection e2
 CompHM.PhiVertices   = Phi_V;              % [nV x K]  for bst_eigenmode_reconstruct
+CompHM.PhiFaces      = Phi_f;               % [nLHF x K]  face eigenmodes Ψ
+CompHM.FaceIndices   = lH_f(:);             % [nLHF x 1]  LH face indices into TessMat.Faces
 
 CompHM = bst_history('add', CompHM, 'compute', ...
     sprintf('Face eigenmode leadfield | %s | %d modes', FaceHeadModelFile, K));
