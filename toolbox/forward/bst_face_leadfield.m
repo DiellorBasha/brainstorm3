@@ -81,9 +81,14 @@ x_f = (Vertices(Faces(:,1),:) + Vertices(Faces(:,2),:) + Vertices(Faces(:,3),:))
 % (which are corrected to point outward during import).
 % We detect and correct the sign so that n_hat is consistently outward,
 % matching the convention used by the rest of the Brainstorm pipeline.
-e01    = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);   % [nF x 3]
-e02    = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);   % [nF x 3]
-Ncross = cross(e01, e02, 2);                                  % [nF x 3]
+% edge_a, edge_b are TRIANGLE EDGE VECTORS — purely geometric, used only to
+% compute the cross product.  They are NOT the trivial-connection tangent frame
+% vectors {e1, e2} from tess_tangents, which are smooth, globally consistent,
+% and determined by the Poisson solve.  The cross product gives n̂_f regardless
+% of which tangent frame parameterises the face plane.
+edge_a = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);   % [nF x 3]
+edge_b = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);   % [nF x 3]
+Ncross = cross(edge_a, edge_b, 2);                            % [nF x 3]
 A2     = sqrt(sum(Ncross.^2, 2));                             % [nF x 1]  2 * area
 A_f    = A2 / 2;                                              % [nF x 1]  face areas [m²]
 n_hat  = Ncross ./ A2;                                        % [nF x 3]  unit normals from winding
