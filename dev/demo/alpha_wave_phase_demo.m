@@ -48,6 +48,14 @@
 % TANGENT DIRECTIONS for interpreting ∇_S φ as a tangent vector field, but
 % it cannot change the sign of the scalar projection J·n̂.)
 %
+% FRAME HANDEDNESS — CW WINDING
+% FreeSurfer meshes are wound clockwise (viewed from outside).  geometry-central
+% computes normals via the CCW cross product → nxr normals point INWARD.  The
+% frame is therefore e2 = n_inward × e1 (clockwise convention).  This is
+% consistent across all FreeSurfer subjects so inter-subject phase comparisons
+% are valid.  For J·n̂ we use TessMat.VertNormals (Brainstorm outward), not
+% nxr normals.
+%
 % PROPER RESOLUTION — eigenmodes:
 % The scalar (LBO) eigenmodes ψ_j(x) have fixed spatial sign patterns
 % determined by the spectral geometry, not by local normals.  Their nodal
@@ -316,6 +324,134 @@ title(ax3, sprintf(['Normal-component phase  |  lead V1\\rightarrowV2 = %.2f rad
     'Color','w','FontSize',9)
 sgtitle({'Instantaneous phase of normal (columnar) current  |  analytic signal', ...
     'Phase gradient \\nabla_S\\phi is the wavefront direction  |  consistent gauge needed to compare across vertices'}, ...
+    'Color','w','FontSize',10)
+
+%% Section 2 — Scalar LBO eigenmodes for sign-free phase detection
+% The sign problem in direct J_n arises because opposing sulcal walls have
+% anti-parallel normals → J·n̂ has opposite signs for the same physiological
+% event.  Scalar LBO eigenmodes ψ_j(x) resolve this: their spatial sign
+% patterns are fixed by the spectral geometry of the cortex, not by the
+% local normal direction, and their nodal lines generally do not coincide
+% with sulcal walls.  The temporal coefficient θ_j(t) = ∫ ψ_j(x) J_n(x,t) dA
+% absorbs the wave signal without the sulcal sign artefact.
+
+% --- Build scalar LBO and solve for eigenmodes (left hemisphere) ---
+clear mex
+h_lbo = nxr_compute('create', TessMat.Vertices, double(TessMat.Faces));
+dec   = nxr_compute('assembleDECOperators', h_lbo);
+L_sc  = dec.d0' * dec.hodge1 * dec.d0;   % cotangent stiffness [nV x nV]
+M_sc  = dec.hodge0;                        % lumped mass matrix   [nV x nV]
+nxr_compute('destroy', h_lbo);
+
+[~, lH_eig] = tess_hemisplit(TessMat);
+lH_eig = lH_eig(:);
+idx_eig = lH_eig;
+L_lh = L_sc(idx_eig, idx_eig);
+M_lh = M_sc(idx_eig, idx_eig);
+
+nModes = 10;
+[Phi_lbo, Lambda_lbo] = eigs(L_lh, M_lh, nModes, 'smallestabs');
+lam_lbo = real(diag(Lambda_lbo));
+[lam_lbo, so] = sort(lam_lbo, 'ascend');
+Phi_lbo = Phi_lbo(:, so);
+Phi_nm  = Phi_lbo(:, 2:end);   % skip DC (j=1, λ=0)
+fprintf('LBO eigenvalues: %s\n', mat2str(round(lam_lbo',1)))
+
+% --- Project J_n onto LBO modes ---
+% θ_j(t) = Φ_j' · M · J_n(t)  [M-weighted; real and Hilbert parts]
+M_diag_eig = full(diag(M_lh));
+Jn_lh_eig  = J_n(idx_eig, :);
+Jnh_lh_eig = J_n_h(idx_eig, :);
+theta_re_eig = (Phi_nm .* M_diag_eig)' * Jn_lh_eig;    % [9 x nWin]
+theta_im_eig = (Phi_nm .* M_diag_eig)' * Jnh_lh_eig;
+theta_a_eig  = theta_re_eig + 1i * theta_im_eig;        % analytic coefficients
+
+% Dominant non-DC mode at peak
+gfp_t  = sqrt(mean(abs(theta_a_eig).^2, 1));
+[~, iPkW_eig] = max(gfp_t);
+iWin_eig = max(1,iPkW_eig-250):min(size(theta_a_eig,2),iPkW_eig+250);
+[~, jDom_eig] = max(mean(abs(theta_a_eig(:, iWin_eig)).^2, 2));
+fprintf('Dominant mode: j=%d  λ=%.2f\n', jDom_eig+1, lam_lbo(jDom_eig+1))
+
+% Reconstruct source from dominant mode
+Jn_recon_re_eig = Phi_nm(:, jDom_eig) * theta_re_eig(jDom_eig, :);
+Jn_recon_im_eig = Phi_nm(:, jDom_eig) * theta_im_eig(jDom_eig, :);
+Jn_recon_a_eig  = Jn_recon_re_eig + 1i * Jn_recon_im_eig;
+
+%% Section 2 — Comparison figure: direct vs eigenmode phase
+
+cmap_hsv_eig = hsv(256);
+cGrey_eig    = repmat([0.25 0.25 0.23], nV, 1);
+fHl_eig      = all(inL(double(TessMat.Faces)), 2);
+Vtx_mm_eig   = TessMat.Vertices * 1000;
+
+% Amplitude mask and bounding box (from eigenmode reconstruction)
+amp_eig_map = zeros(nV, 1);
+amp_eig_map(idx_eig) = abs(Jn_recon_a_eig(:, iPkW_eig));
+mask_eig2   = amp_eig_map < 0.06 * max(amp_eig_map(idx_eig));
+actV_eig    = idx_eig(amp_eig_map(idx_eig) > median(amp_eig_map(idx_eig(~mask_eig2(idx_eig)))));
+pad_eig = 12;
+xl_eig = [min(Vtx_mm_eig(actV_eig,1))-pad_eig, max(Vtx_mm_eig(actV_eig,1))+pad_eig];
+yl_eig = [min(Vtx_mm_eig(actV_eig,2))-pad_eig, max(Vtx_mm_eig(actV_eig,2))+pad_eig];
+zl_eig = [min(Vtx_mm_eig(actV_eig,3))-pad_eig, max(Vtx_mm_eig(actV_eig,3))+pad_eig];
+
+% Phase maps at peak
+ph_dir_full = zeros(nV,1);
+ph_dir_full(idx_eig) = angle(J_n(idx_eig,iPkW_eig) + 1i*J_n_h(idx_eig,iPkW_eig));
+ph_eig_full = zeros(nV,1);
+ph_eig_full(idx_eig) = angle(Jn_recon_a_eig(:, iPkW_eig));
+
+% Eigenmode spatial pattern
+eig_pat = zeros(nV,1);  eig_pat(idx_eig) = Phi_nm(:, jDom_eig);
+ep_min  = min(eig_pat(idx_eig));  ep_rng = max(eig_pat(idx_eig)) - ep_min;
+ep_norm = (eig_pat - ep_min) / max(ep_rng, eps);
+
+cmap_div = [linspace(0.2,1,128)', linspace(0.3,0.3,128)', linspace(0.8,0.2,128)'; ...
+            linspace(1,0.9,128)', linspace(0.3,0.9,128)', linspace(0.2,0.2,128)'];
+
+figure('Name','Eigenmode wave detection','Color','k','Position',[50 50 1300 520])
+
+panel_data = {ph_dir_full, ph_eig_full, []};
+panel_ttl  = {'Direct J_n phase  (sign artefacts at sulcal walls)', ...
+    sprintf('Eigenmode \\Psi_{%d} reconstruction  (\\lambda=%.0f)  — sign-free', ...
+        jDom_eig+1, lam_lbo(jDom_eig+1)), ...
+    sprintf('Eigenmode \\Psi_{%d}  spatial pattern', jDom_eig+1)};
+
+for p = 1:3
+    ax = subplot(1,3,p);  set(ax,'Color','k');  hold(ax,'on')
+    cPh = cGrey_eig;
+    if p < 3
+        ph_f = panel_data{p};
+        for iv = find(~mask_eig2 & inL)'
+            ci = max(1, min(256, round((ph_f(iv)+pi)/(2*pi)*255)+1));
+            cPh(iv,:) = cmap_hsv_eig(ci,:);
+        end
+        colormap(ax, hsv(256));  clim([-pi pi])
+        cb = colorbar(ax,'Color','w','Ticks',[-pi 0 pi],'TickLabels',{'-\pi','0','\pi'});
+        cb.Label.String = 'phase (rad)';
+    else
+        for iv = find(~mask_eig2 & inL)'
+            ci = max(1, min(256, round(ep_norm(iv)*255)+1));
+            cPh(iv,:) = cmap_div(ci,:);
+        end
+        colormap(ax, cmap_div);  clim([0 1])
+        cb = colorbar(ax,'Color','w');
+        cb.Label.String = '\psi_j amplitude';
+    end
+    cb.Label.Color = 'w';
+    patch('Faces',double(TessMat.Faces(fHl_eig,:)),'Vertices',Vtx_mm_eig, ...
+        'FaceVertexCData',cPh,'FaceColor','interp','EdgeColor','none', ...
+        'FaceLighting','phong','Parent',ax)
+    camlight(ax,70,45); camlight(ax,-70,45);
+    camlight(ax,70,-45); camlight(ax,-70,-45);
+    material([0.65 0.45 0.02 8])
+    xlim(ax,xl_eig); ylim(ax,yl_eig); zlim(ax,zl_eig);
+    view(ax,-90,35);  axis(ax,'off')
+    t = title(ax, panel_ttl{p});  t.Color = 'w';  t.FontSize = 8;
+end
+
+sgtitle({'Alpha wave phase: direct J_n  vs  scalar LBO eigenmode reconstruction', ...
+    'Eigenmodes give a spatially smooth, sign-consistent phase field'}, ...
     'Color','w','FontSize',10)
 
 %% --- helpers ---

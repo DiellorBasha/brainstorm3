@@ -20,6 +20,9 @@ function R = bst_conn_phase(ConnEig, vFrame, varargin)
 %     ConnEig : struct from in_tess_conn_eigenmodes (fields Vectors [nV x nModes]
 %               complex, Component, CompRank).
 %     vFrame  : struct with e1, e2, normals ([nV x 3]) from nxr vertexFrame.
+%               NOTE: nxr normals point INWARD on FreeSurfer meshes (CW face
+%               winding).  The frame is self-consistent for phase decoding (e1,
+%               e2 are used, not normals).  For J·n̂ use TessMat.VertNormals.
 %
 % OPTIONS:
 %     'Rank'    : within-component mode rank to use (default 1 = Fiedler).
