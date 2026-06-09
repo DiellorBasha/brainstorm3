@@ -1,5 +1,5 @@
 function [U, V, N] = tess_frame(SurfaceFile, varargin)
-% TESS_FRAME: Derived per-element intrinsic frame {U,V,N} from the stored bundle.
+% TESS_FRAME: Derive per-element intrinsic frame {U,V,N} from the stored bundle.
 %
 % USAGE:  [U,V,N] = tess_frame(SurfaceFile)                    % 'vertex' domain
 %         [U,V,N] = tess_frame(SurfaceFile, 'Domain','face')
@@ -38,7 +38,9 @@ function [U, V, N] = tess_frame(SurfaceFile, varargin)
 
     Domain = 'vertex';
     for i = 1:2:numel(varargin)
-        if strcmpi(varargin{i}, 'domain'); Domain = lower(varargin{i+1}); end
+        switch lower(varargin{i})
+            case 'domain', Domain = lower(varargin{i+1});
+        end
     end
     if ~ismember(Domain, {'vertex','face'})
         error('tess_frame:badDomain', 'Domain must be ''vertex'' or ''face''.');

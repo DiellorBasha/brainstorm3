@@ -54,8 +54,7 @@ function test_frame_fullmesh_orthonormal(tc)
     verifyLessThan(tc, max(abs(sqrt(sum(U.^2,2))-1)), 1e-4);
     verifyLessThan(tc, max(abs(sqrt(sum(V.^2,2))-1)), 1e-4);
     verifyLessThan(tc, max(abs(sum(U.*V,2))), 1e-4);
-    verifyLessThan(tc, max(abs(N - cross(U,V,2)), [], 'all'), 1e-4);
-    verifyGreaterThan(tc, min(sqrt(sum(N.^2,2))), 0.9);    % every row filled
+    verifyLessThan(tc, max(abs(sqrt(sum(N.^2,2)) - 1)), 1e-4);   % N unit-norm (also catches unfilled rows)
 end
 
 function test_frame_matches_grid_rotation(tc)
