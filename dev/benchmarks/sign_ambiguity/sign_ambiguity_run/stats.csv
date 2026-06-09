@@ -1,0 +1,11 @@
+component,metric,value
+C1,dn_sulci_median,0.444074
+C1,dn_crown_median,0.533555
+C1,df_sulci_median,0.069007
+C1,df_crown_median,0.076577
+C1,singEnergyFrac,0.013270
+C2,nPairs,65
+C2,signFlipRate,0.923077
+C2,phaseDisc_fiedler,1.369351
+C2,phaseDisc_tang,1.095968
+C2,phaseDisc_xyz,1.297823

@@ -1,0 +1,5 @@
+regime,eig_method,K,median_locerror_mm
+focal,eig_mne_log,600,85.13395
+focal,eig_mne_log,2000,98.42755
+focal,eig_dspm_log,600,93.9429
+focal,eig_dspm_log,2000,98.1549

@@ -1,0 +1,6 @@
+regime,method,median_locerror_mm,iqr_locerror_mm,mean_locerror_mm,n
+focal,wmne,23.90645,9.9478775,21.8191225,4
+focal,dspm,9.444365,1.0541275,10.1811575,4
+focal,sloreta,4.5369,9.1444325,4.6075325,4
+focal,eig_mne_log,98.42755,18.645475,99.810975,4
+focal,eig_dspm_log,98.1549,38.951375,94.435725,4

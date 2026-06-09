@@ -35,6 +35,11 @@ is what embeds the nxr frames into the same Cartesian space as the leadfield.
 
 - **Three fields mirror the bundle.** `TessMat.{Topology,Geometry,Gauge}` store
   the nxr `bundle` structs as-is (1-based indices, complex `grid`, etc.).
+- **Per-hemisphere `1×2` struct arrays.** nxr never integrates the two
+  hemispheres, so each field is a `1×2` struct array (`(1)`=left, `(2)`=right),
+  each element the verbatim nxr submesh bundle in local indexing plus
+  `GlobalVertices`/`GlobalFaces`/`Hemisphere` scatter maps. Internal
+  connectivity stays local; no halfedge re-indexing across hemispheres.
 - **Light by default; heavy `.operators` opt-in.** The default write stores the
   *light* bundle (frames, areas, curvature, rotations, singularities, halfedge
   connectivity). The heavy `.operators` sub-structs (DEC `d0/d1/hodge*`, cotan
@@ -92,9 +97,27 @@ B = tess_bundle(SurfaceFile, 'NoSave', 1, 'ForceRecompute', 1)
   is true.
 - `NoSave`, `ForceRecompute` — as in `tess_operators.m`/`tess_coordinates.m`.
 
-**Returned / stored value** `B = struct('Topology',…, 'Geometry',…, 'Gauge',…)`,
-stored as the three top-level `TessMat` fields (not nested under one parent), so
-a consumer reads `TessMat.Geometry.face.grid` directly.
+**Returned / stored value — per-hemisphere struct arrays.** Because each
+hemisphere is bundled independently, each of the three fields is a **`1×2`
+struct array** indexed by hemisphere (`(1)`=left, `(2)`=right):
+
+- `TessMat.Topology`  `1×2` — `TessMat.Topology(h)` is hemisphere `h`'s nxr Topology.
+- `TessMat.Geometry`  `1×2` — `TessMat.Geometry(h).vertex.grid`, etc.
+- `TessMat.Gauge`     `1×2` — `TessMat.Gauge(h).vertex.rotation`, etc.
+
+Each element is the **verbatim nxr submesh bundle in local indexing**, plus two
+maps the writer adds so consumers can scatter to global `TessMat.Vertices`/
+`.Faces` order:
+- `GlobalVertices` `[nVh×1]` — local→global vertex indices (`= lH` / `rH`).
+- `GlobalFaces`    `[nFh×1]` — local→global face indices (the hemisphere face mask).
+- `Hemisphere` — `'L'` / `'R'`.
+
+These maps live on each of the three structs (small, cheap). All connectivity
+cross-references inside a hemisphere's `Topology`/`.operators` stay **local and
+self-consistent** — never remapped — so the fragile halfedge re-indexing of a
+stitched mesh is avoided entirely. Global assembly happens only where it is
+trivial (scatter of per-element vertex/face values) or where the math is
+naturally block-diagonal (operators, eigenmodes).
 
 **Field schema (mirrors the nxr bundle; representative fields):**
 - `Topology` — 1-based halfedge struct-of-arrays (`vertex/edge/face/corner/
@@ -113,31 +136,49 @@ a consumer reads `TessMat.Geometry.face.grid` directly.
 - Each struct carries its nxr `schemaVersion`; the writer adds provenance
   (`Backend='nxr'`, `nxr_version`, `ComputeDate`, gauge/coupling/mass options used).
 
-**Computation**
+**Computation (per hemisphere)**
 ```matlab
-[isOk,errMsg] = bst_plugin('Install','nxr-compute');   % nxr-required, no fallback
-h = nxr_compute('create', double(TessMat.Vertices), double(TessMat.Faces));
-opts = struct();                       % trivial gauge needs singularities:
-opts.singVerts = …; opts.singValues = …;   % FreeSurfer poles per hemisphere
-if Operators, opts.operators = true; opts.coupling = Coupling; opts.mass = Mass; end
-B = nxr_compute('bundle', h, Gauge, opts);
-nxr_compute('destroy', h);
+bst_plugin('Install','nxr-compute');                 % nxr-required, no fallback
+[rH, lH, isConn] = tess_hemisplit(TessMat);          % import-label split
+assert(~isConn, 'tess_bundle:connectedHemispheres'); % each must be its own component
+hemis = {lH(:), rH(:)}; tags = {'L','R'};
+for hh = 1:2
+    vH   = hemis{hh};                                % global vertex indices
+    fMask = all(ismember(TessMat.Faces, vH), 2);     % faces fully inside this hemi
+    map  = zeros(size(TessMat.Vertices,1),1); map(vH) = 1:numel(vH);
+    Vloc = double(TessMat.Vertices(vH,:));
+    Floc = map(TessMat.Faces(fMask,:));              % local 1-based faces
+    [iN,iS] = local_poles(TessMat.Reg.Sphere.Vertices(vH,:));  % N/S sphere poles (local)
+    h = nxr_compute('create', Vloc, Floc);
+    opts = struct('singVerts',[iN;iS], 'singValues',[1;1]);    % trivial-gauge poles
+    if Operators, opts.operators = true; opts.coupling = Coupling; opts.mass = Mass; end
+    Bh = nxr_compute('bundle', h, Gauge, opts);
+    nxr_compute('destroy', h);
+    % attach scatter maps, accumulate into the 1x2 struct arrays
+    for f = {'Topology','Geometry','Gauge'}
+        s = Bh.(f{1});
+        s.GlobalVertices = vH;  s.GlobalFaces = find(fMask);  s.Hemisphere = tags{hh};
+        B.(f{1})(hh) = s;
+    end
+end
 ```
+(`local_poles` = max/min sphere-`z`; the singularity/Gauss–Bonnet handling
+mirrors `tess_coordinates.m`'s `solve_hemisphere`.) For `euclidean`/`levi-civita`
+gauges, `singVerts`/`singValues` are omitted.
 Singularity placement for the `trivial` gauge reuses the hemisphere-split +
 FreeSurfer-pole logic currently in `tess_coordinates.m`/`tess_tangents.m`
 (import-label hemisphere split, north/south sphere poles, Gauss–Bonnet check).
 
-**Open question to resolve first (Task 0 probe).** The cortex is two
-**disconnected** hemispheres (χ=2 each, 4 singularities total). The morning's
-`tess_coordinates` solved each hemisphere as an independent genus-0 submesh.
-It is unverified whether nxr's single `bundle` call on the *whole* mesh
-integrates the trivial gauge **per connected component** (accepting all 4
-singularities, 2 per component) or assumes one component (which would fail
-Gauss–Bonnet at total χ=4). Probe this against nxr before building the writer.
-If per-component is unsupported, `tess_bundle` calls `bundle` **per hemisphere
-submesh** and stitches the three structs back to full-mesh indexing (the
-`Topology`/index-remap the morning code already did). This choice only affects
-internal assembly, not the stored schema.
+**Per-hemisphere by construction (settled).** nxr does **not** integrate the two
+hemispheres — every `bundle` call operates on a single connected genus-0
+submesh. So `tess_bundle` splits the cortex (`tess_hemisplit` → `lH`, `rH`,
+asserting the two are not connected), and for each hemisphere: builds the
+submesh in **local** indexing, creates an nxr handle, calls `bundle` with that
+hemisphere's two FreeSurfer poles as the trivial-gauge singularities, and
+destroys the handle. This is also the *correct* representation downstream: the
+connection-Laplacian eigenbasis (Spec 2) is per connected component — there are
+no cross-hemisphere modes — so the natural store is per hemisphere, not a
+stitched single mesh.
 
 **Save** load full file → set the three fields → `bst_history('add', …)` →
 `bst_save(..., 'v7')` (the `out_tess_eigenmodes.m` / `tess_operators.m` pattern).
@@ -152,14 +193,17 @@ per nxr's own `CLAUDE.md`. Document on the field; don't trust a "Voronoi" label.
 [U,V,N] = tess_frame(SurfaceFile)                 % default 'vertex' domain
 [U,V,N] = tess_frame(SurfaceFile, 'Domain','face')
 ```
-Reads `TessMat.Geometry.<domain>.grid` and `TessMat.Gauge.<domain>.rotation`,
-applies `c' = c .* rotation` (gauge rotation of the grid), and returns
-`U=real(c')`, `V=imag(c')`, `N=cross(U,V)` (`N×3` each). Pure function over the
-stored bundle — computes nothing new, persists nothing. If
-`Gauge.<domain>.rotation` is absent (euclidean/levi-civita: grid is already the
-gauge), the grid is used directly (`rotation ≡ 1`). This is the per-source
-`SO(3)` transform a consumer applies to re-express a Cartesian `Gain` block in
-intrinsic coordinates.
+Iterates the two hemispheres, and for each reads
+`TessMat.Geometry(h).<domain>.grid` and `TessMat.Gauge(h).<domain>.rotation`,
+applies `c' = c .* rotation` (gauge rotation of the grid), then **scatters** into
+full-mesh rows via `GlobalVertices` (vertex domain) or `GlobalFaces` (face
+domain): `U(global,:) = real(c')`, `V(global,:) = imag(c')`, `N = cross(U,V)`
+(`nVert×3` / `nFace×3` full-mesh). Pure function over the stored bundle —
+computes nothing new, persists nothing. If `Gauge(h).<domain>.rotation` is absent
+(euclidean/levi-civita: grid is already the gauge), the grid is used directly
+(`rotation ≡ 1`). The full-mesh `{U,V,N}` is the per-source `SO(3)` transform a
+consumer applies to re-express a Cartesian `Gain` block in intrinsic
+coordinates.
 
 **Domain default is `vertex`** because that is the source space we are
 targeting and the only domain for which the **trivial** gauge currently ships a
@@ -186,30 +230,34 @@ TDD pattern (`matlab.unittest`, `local_find_cortex(20484)`, backup/restore file
 isolation via `onCleanup`).
 
 **`tess_bundle` (light):**
-- Returns/stores all three of `Topology`, `Geometry`, `Gauge`; each carries a
-  `schemaVersion`.
+- Each of `Topology`, `Geometry`, `Gauge` is a `1×2` struct array; each element
+  carries `schemaVersion` and `GlobalVertices`/`GlobalFaces`/`Hemisphere`.
+- The two hemispheres' `GlobalVertices` are **disjoint** and their **union is
+  `1:nVert`** (every vertex assigned once); likewise `GlobalFaces` over `1:nFace`.
 - Light write has **no** `.operators` on any struct.
-- `Geometry.vertex.grid` is `V×3` complex; `Geometry.face.grid` is `F×3`
-  complex. Per element the embedded frame is orthonormal: with `e1=real(c)`,
+- `Geometry(h).vertex.grid` is `nVh×3` complex; `.face.grid` is `nFh×3` complex.
+  Per element the embedded frame is orthonormal: with `e1=real(c)`,
   `e2=imag(c)`, `‖e1‖=‖e2‖=1`, `e1·e2≈0` (the `SO(3)` precondition the ambient
   operator relies on).
-- `Gauge.type` matches the requested gauge; trivial carries `singularity`
-  with `Σ indices == χ` per hemisphere (Gauss–Bonnet), `source` recorded.
-- Field is stored on disk (real save path) and reloads via `in_tess_bst`.
+- `Gauge(h).type` matches the requested gauge; trivial carries `singularity`
+  with `Σ indices == χ == 2` for the hemisphere (Gauss–Bonnet), `source` recorded.
+- Stored on disk (real save path) and reloads via `in_tess_bst` as a `1×2` array.
 
-**`tess_bundle` (heavy, `Operators=1`):**
-- `Topology.operators.dec.{d0,d1}` present; `d1*d0 == 0` (`d∘d=0`).
-- `Geometry.operators.{laplacian,mass,hodge}` present; cotan `K=d0'*hodge.h1*d0`
-  symmetric, near-zero row sums.
-- `Gauge.operators.laplacian` is complex `V×V`, Hermitian (`‖K−K'‖≈0`).
-- `Gauge.operators.covariantLaplacian` is `3N×3N` real, symmetric; default
-  coupling `ambient`; world-form sanity `blockdiag(F)·L3·blockdiag(F)' ≈
-  kron(I3, cotanL)` (the defining ambient identity).
+**`tess_bundle` (heavy, `Operators=1`):** (per hemisphere `h`)
+- `Topology(h).operators.dec.{d0,d1}` present; `d1*d0 == 0` (`d∘d=0`).
+- `Geometry(h).operators.{laplacian,mass,hodge}` present; cotan
+  `K=d0'*hodge.h1*d0` symmetric, near-zero row sums.
+- `Gauge(h).operators.laplacian` is complex `nVh×nVh`, Hermitian (`‖K−K'‖≈0`).
+- `Gauge(h).operators.covariantLaplacian` is `3nVh×3nVh` real, symmetric;
+  default coupling `ambient`; world-form sanity
+  `blockdiag(F)·L3·blockdiag(F)' ≈ kron(I3, cotanL)` (the defining ambient identity).
 
-**`tess_frame`:** (vertex domain)
-- `[U,V,N]` orthonormal per vertex, `N==cross(U,V)`.
-- Equals `Geometry.vertex.grid` decomposition rotated by `Gauge.vertex.rotation`
-  (consistency with the stored bundle).
+**`tess_frame`:** (vertex domain, full-mesh output)
+- `[U,V,N]` are `nVert×3`, orthonormal per row, `N==cross(U,V)`, no zero rows
+  (every vertex filled by exactly one hemisphere's scatter).
+- For each hemisphere, the scattered rows equal `Geometry(h).vertex.grid`
+  decomposition rotated by `Gauge(h).vertex.rotation` (consistency with the
+  stored bundle).
 - Face domain under `trivial` gauge errors clearly (deferred
   `Gauge.face.rotation`); face domain under `levi-civita` returns the grid.
 
@@ -223,6 +271,10 @@ isolation via `onCleanup`).
    `tess_coordinates.m`.
 4. **Canonical authority:** nxr frames; Brainstorm normals ignored; vertex
    positions (SCS) are the only shared quantity.
+5. **Per-hemisphere shape:** each field is a `1×2` struct array (nxr never
+   integrates hemispheres; the connection-Laplacian basis is per component).
+   Local connectivity is never remapped; `GlobalVertices`/`GlobalFaces` carry
+   the scatter to global order.
 
 ## Future steps (built on this)
 

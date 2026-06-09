@@ -1,0 +1,7 @@
+regime,eig_method,std_method,median_diff_mm,n_pairs,p_value
+focal,eig_mne_log,wmne,80.402605,4,0.067889154861829
+focal,eig_mne_log,dspm,87.7033,4,0.067889154861829
+focal,eig_mne_log,sloreta,93.89065,4,0.067889154861829
+focal,eig_dspm_log,wmne,74.24845,4,0.067889154861829
+focal,eig_dspm_log,dspm,88.8518,4,0.067889154861829
+focal,eig_dspm_log,sloreta,93.618,4,0.067889154861829
