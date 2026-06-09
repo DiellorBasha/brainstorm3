@@ -59,6 +59,7 @@ function B = tess_bundle(SurfaceFile, varargin)
             case 'forcerecompute', ForceRecompute=varargin{i+1};
         end
     end
+    Gauge = lower(Gauge);
 
     nxrVer = '';
     try, nxrVer = nxr_compute('version'); catch, end   %#ok<CTCH>

@@ -56,6 +56,7 @@ function Gauge = tess_gauge(SurfaceFile, varargin)
             case 'forcerecompute', ForceRecompute=varargin{i+1};
         end
     end
+    GaugeType = lower(GaugeType);
 
     nxrVer = '';
     try, nxrVer = nxr_compute('version'); catch, end   %#ok<CTCH>
