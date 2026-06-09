@@ -151,6 +151,11 @@ function B = tess_bundle(SurfaceFile, varargin)
             opts.singVerts  = [iN; iS];
             opts.singValues = [1; 1];
         end
+        if Operators
+            opts.operators = true;
+            opts.coupling  = Coupling;
+            opts.mass      = Mass;
+        end
         Bh = nxr_compute('bundle', h, Gauge, opts);
         nxr_compute('destroy', h);
 
