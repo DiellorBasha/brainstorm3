@@ -108,8 +108,7 @@ function test_heavy_dec_identity(tc)
     B = tess_bundle(local_cortex(), 'NoSave', 1, 'ForceRecompute', 1, 'Operators', 1);
     for hh = 1:2
         op = B.Topology(hh).operators;
-        Z = op.dec.d1 * op.dec.d0;            % d o d = 0
-        verifyLessThan(tc, full(max(abs(Z(:)))), 1e-9);
+        verifyEqual(tc, nnz(op.dec.d1 * op.dec.d0), 0);   % d o d = 0 (exact, integer)
     end
 end
 
@@ -117,7 +116,8 @@ function test_heavy_connection_laplacian_hermitian(tc)
     B = tess_bundle(local_cortex(), 'NoSave', 1, 'ForceRecompute', 1, 'Operators', 1);
     for hh = 1:2
         K = B.Gauge(hh).operators.laplacian;   % complex nVh x nVh
-        verifyTrue(tc, issparse(K) && ~isreal(K));            % complex sparse
+        verifyTrue(tc, issparse(K));
+        verifyGreaterThan(tc, full(max(abs(imag(K)), [], 'all')), 0);  % genuinely complex (connection rotations)
         verifyLessThan(tc, full(max(abs(K - K'), [], 'all')), 1e-6);   % Hermitian
     end
 end
@@ -128,6 +128,7 @@ function test_heavy_covariant_laplacian_shape_sym(tc)
         nVh = numel(B.Gauge(hh).GlobalVertices);
         L3  = B.Gauge(hh).operators.covariantLaplacian;       % 3N x 3N real
         verifyEqual(tc, size(L3), [3*nVh, 3*nVh]);
+        verifyTrue(tc, issparse(L3));
         verifyTrue(tc, isreal(L3));
         verifyLessThan(tc, full(max(abs(L3 - L3.'), [], 'all')), 1e-9);   % symmetric
     end
