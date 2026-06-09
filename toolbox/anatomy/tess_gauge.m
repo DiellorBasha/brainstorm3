@@ -9,7 +9,8 @@ function Gauge = tess_gauge(SurfaceFile, varargin)
 % nxr connection Laplacian + covariant Laplacian are attached.
 %
 % OPTIONS:
-%     'Gauge'           'trivial' (default)
+%     'Gauge'           'trivial' (default) | 'levi-civita' | 'euclidean'
+%                       (only 'trivial' places sphere-pole singularities)
 %     'Operators'       false (default) | true   - attach .operators (laplacian, covariantLaplacian)
 %     'Coupling'        'ambient' (default) | other nxr coupling strings
 %     'Mass'            'lumped' (default) | 'galerkin'
