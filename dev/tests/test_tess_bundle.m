@@ -89,3 +89,17 @@ function test_field_is_stored(tc)
     verifyTrue(tc, isfield(T,'Geometry') && isequal(size(T.Geometry),[1 2]));
     verifyTrue(tc, isfield(T,'Gauge')    && isequal(size(T.Gauge),[1 2]));
 end
+
+function test_cache_return(tc)
+    % Verify that a second call (no ForceRecompute) returns the cached result.
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+    % Populate the cache
+    tess_bundle(SurfaceFile, 'ForceRecompute', 1);   % compute + save
+    % Second call should hit the cache (no ForceRecompute)
+    B = tess_bundle(SurfaceFile);
+    verifyEqual(tc, size(B.Topology), [1 2]);
+    verifyEqual(tc, B.Topology(1).Hemisphere, 'L');
+end
