@@ -18,6 +18,24 @@ function B = tess_store_perhemi(SurfaceFile, FieldNames, NeedSphere, Provenance,
 %
 % OUTPUT: B, struct with the FieldNames as 1x2 per-hemisphere struct arrays.
 %
+% @=============================================================================
+% This function is part of the Brainstorm software:
+% https://neuroimage.usc.edu/brainstorm
+%
+% Copyright (c) University of Southern California & McGill University
+% This software is distributed under the terms of the GNU General Public License
+% as published by the Free Software Foundation. Further details on the GPLv3
+% license can be found at http://www.gnu.org/copyleft/gpl.html.
+%
+% FOR RESEARCH PURPOSES ONLY. THE SOFTWARE IS PROVIDED "AS IS," AND THE
+% UNIVERSITY OF SOUTHERN CALIFORNIA AND ITS COLLABORATORS DO NOT MAKE ANY
+% WARRANTY, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+% MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, NOR DO THEY ASSUME ANY
+% LIABILITY OR RESPONSIBILITY FOR THE USE OF THIS SOFTWARE.
+%
+% For more information type "brainstorm license" at command prompt.
+% =============================================================================@
+%
 % Authors: Diellor Basha, 2026
 
     TessFile = file_fullpath(SurfaceFile);
@@ -42,6 +60,9 @@ function B = tess_store_perhemi(SurfaceFile, FieldNames, NeedSphere, Provenance,
     [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
     if ~isOk
         error('tess_store_perhemi:nxrUnavailable', 'requires nxr-compute: %s', errMsg);
+    end
+    if ~isfield(Provenance,'NxrVersion') || isempty(Provenance.NxrVersion)
+        try, Provenance.NxrVersion = nxr_compute('version'); catch, end   %#ok<CTCH>
     end
 
     % --- require FreeSurfer registration sphere (gauge only) ---
@@ -110,7 +131,7 @@ function B = tess_store_perhemi(SurfaceFile, FieldNames, NeedSphere, Provenance,
             s.GlobalFaces    = find(fMask);
             s.Hemisphere     = tags{hh};
             s.Provenance     = Provenance;
-            Arr.(FieldNames{f})(hh) = s;   %#ok<AGROW>
+            Arr.(FieldNames{f})(hh) = s;   %#ok<AGROW>  % grows to exactly 1x2; pre-alloc would require the nxr field schema upfront
         end
     end
 
@@ -121,8 +142,15 @@ function B = tess_store_perhemi(SurfaceFile, FieldNames, NeedSphere, Provenance,
     if ~NoSave
         TessMat_full = load(TessFile);
         for f = 1:numel(FieldNames), TessMat_full.(FieldNames{f}) = B.(FieldNames{f}); end
-        TessMat_full = bst_history('add', TessMat_full, 'bundle', ...
-            sprintf('Stored %s (per-hemisphere nxr).', strjoin(FieldNames, '/')));
+        histTag = 'bundle';
+        if isfield(Provenance,'Package') && ~isempty(Provenance.Package)
+            histTag = Provenance.Package;
+        end
+        histMsg = sprintf('Stored %s (per-hemisphere nxr', strjoin(FieldNames, '/'));
+        if isfield(Provenance,'Gauge') && ~isempty(Provenance.Gauge)
+            histMsg = sprintf('%s, gauge=%s', histMsg, Provenance.Gauge);
+        end
+        TessMat_full = bst_history('add', TessMat_full, histTag, [histMsg ').']);
         bst_save(TessFile, TessMat_full, 'v7');
     end
 end
