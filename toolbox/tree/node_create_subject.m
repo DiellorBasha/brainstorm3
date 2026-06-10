@@ -127,6 +127,18 @@ else
                 nodeRoot.add(nodeSurface);
             end
             numElems = numElems + 1;
+            % Nest manifold child nodes under this surface
+            if isfield(sSubject.Surface(iSurface), 'Manifold')
+                for iM = 1:numel(sSubject.Surface(iSurface).Manifold)
+                    [chCreated, chNode] = CreateNode('manifold', ...
+                        char(sSubject.Surface(iSurface).Manifold(iM).Comment), ...
+                        char(sSubject.Surface(iSurface).Manifold(iM).FileName), ...
+                        iM, iSubject, iSearch);
+                    if chCreated
+                        nodeSurface.add(chNode);
+                    end
+                end
+            end
         end
     end
 end

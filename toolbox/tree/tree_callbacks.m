@@ -68,7 +68,7 @@ nodeType = char(bstNodes(1).getType());
 filenameRelative = char(bstNodes(1).getFileName());
 % Build full filename (depends on the file type)
 switch lower(nodeType)
-    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct', 'volpet'}
+    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct', 'volpet', 'manifold'}
         filenameFull = bst_fullfile(ProtocolInfo.SUBJECTS, filenameRelative);
     case {'study', 'condition', 'rawcondition', 'channel', 'headmodel', 'data','rawdata', 'datalist', 'results', 'kernel', 'pdata', 'presults', 'ptimefreq', 'pspectrum', 'image', 'video', 'videolink', 'noisecov', 'ndatacov', 'dipoles','timefreq', 'spectrum', 'matrix', 'matrixlist', 'pmatrix', 'spike'}
         filenameFull = bst_fullfile(ProtocolInfo.STUDIES, filenameRelative);
@@ -1184,6 +1184,11 @@ switch (lower(action))
                     end
                     gui_component('MenuItem', jPopup, [], 'View eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_eigenmodes, filenameRelative));
                     gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_connection_phase, filenameRelative));
+                end
+
+                % === MANIFOLD (cortex only) ===
+                if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
+                    gui_component('MenuItem', jPopup, [], 'Compute manifold', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_manifold, filenameRelative));
                 end
 
                 % === SET SURFACE TYPE ===
@@ -2519,6 +2524,18 @@ switch (lower(action))
 %% ===== POPUP: MATRIX LIST =====
             case 'matrixlist'
                 gui_component('MenuItem', jPopup, [], 'Display as image', IconLoader.ICON_NOISECOV, [], @(h,ev)view_erpimage(GetAllFilenames(bstNodes, 'matrix'), 'erpimage', 'none'));
+
+%% ===== POPUP: MANIFOLD =====
+            case 'manifold'
+                if (length(bstNodes) == 1)
+                    % === VIEW ===
+                    gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@ManifoldView_Callback, filenameFull));
+                    % === DELETE ===
+                    if ~bst_get('ReadOnly')
+                        AddSeparator(jPopup);
+                        gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@ManifoldDelete_Callback, filenameRelative));
+                    end
+                end
         end
         
 %% ===== POPUP: COMMON MENUS =====
@@ -3915,4 +3932,52 @@ end
 function ViewTexturedSurface(filenameRelative)
     sSurf = bst_memory('LoadSurface', filenameRelative);
     view_surface_matrix(sSurf.Vertices, sSurf.Faces, [], sSurf.Color, [], [], filenameRelative);
+end
+
+%% ===== MANIFOLD: VIEW =====
+function ManifoldView_Callback(filenameFull)
+    % Minimal inspector for SP1: load and show field names + sizes
+    if ~file_exist(filenameFull)
+        bst_error('Manifold file not found.', 'View manifold', 0);
+        return;
+    end
+    m = load(filenameFull);
+    fnames = fieldnames(m);
+    fprintf('=== Manifold: %s ===\n', filenameFull);
+    for k = 1:numel(fnames)
+        val = m.(fnames{k});
+        if isnumeric(val) || islogical(val)
+            fprintf('  %s: [%s]\n', fnames{k}, num2str(size(val)));
+        elseif ischar(val)
+            fprintf('  %s: ''%s''\n', fnames{k}, val);
+        elseif isstruct(val)
+            fprintf('  %s: struct 1x%d, fields: {%s}\n', fnames{k}, numel(val), strjoin(fieldnames(val),', '));
+        else
+            fprintf('  %s: %s\n', fnames{k}, class(val));
+        end
+    end
+end
+
+%% ===== MANIFOLD: DELETE =====
+function ManifoldDelete_Callback(filenameRelative)
+    % Confirm deletion
+    if ~java_dialog('confirm', ['Delete manifold file?' 10 filenameRelative], 'Delete manifold')
+        return;
+    end
+    % Resolve to full path and delete the file
+    filenameFull = file_fullpath(filenameRelative);
+    file_delete(filenameFull, 1);
+    % Find the manifold entry in the DB and remove it
+    [~, iSubject, iSurface, iManifold] = bst_get('ManifoldFile', filenameRelative);
+    if ~isempty(iSubject)
+        ProtocolSubjects = bst_get('ProtocolSubjects');
+        if iSubject == 0
+            ProtocolSubjects.DefaultSubject.Surface(iSurface).Manifold(iManifold) = [];
+        else
+            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Manifold(iManifold) = [];
+        end
+        bst_set('ProtocolSubjects', ProtocolSubjects);
+        db_save();
+        panel_protocols('UpdateNode', 'Subject', iSubject);
+    end
 end
