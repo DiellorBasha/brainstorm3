@@ -119,3 +119,54 @@ function test_eigenpair_residual(tc)
         verifyLessThan(tc, relResid, 1e-6);   % every stored column is a genuine eigenpair
     end
 end
+
+function test_cache_return_no_recompute(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    K = 40;
+    tess_dirac_eigenmodes(SurfaceFile, 'K', K, 'Tau', 0.5, 'ForceRecompute', 1);
+    TF = load(TessFile);
+    TF.DiracEigen(1).Provenance.ComputeDate = 'SENTINEL';
+    bst_save(TessFile, TF, 'v7');
+
+    tess_dirac_eigenmodes(SurfaceFile, 'K', K, 'Tau', 0.5);   % must cache-return
+    T = in_tess_bst(SurfaceFile, 0);
+    verifyEqual(tc, T.DiracEigen(1).Provenance.ComputeDate, 'SENTINEL');
+end
+
+function test_tau_mismatch_recomputes(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    K = 40;
+    tess_dirac_eigenmodes(SurfaceFile, 'K', K, 'Tau', 0.5, 'ForceRecompute', 1);
+    TF = load(TessFile);
+    TF.DiracEigen(1).Provenance.ComputeDate = 'SENTINEL';
+    bst_save(TessFile, TF, 'v7');
+
+    tess_dirac_eigenmodes(SurfaceFile, 'K', K, 'Tau', 0.75);  % different Tau -> recompute
+    T = in_tess_bst(SurfaceFile, 0);
+    verifyNotEqual(tc, T.DiracEigen(1).Provenance.ComputeDate, 'SENTINEL');
+    verifyEqual(tc, T.DiracEigen(1).Tau, 0.75);
+end
+
+function test_nosave_returns_without_writing(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    TF = load(TessFile);
+    if isfield(TF,'DiracEigen'), TF = rmfield(TF,'DiracEigen'); end
+    bst_save(TessFile, TF, 'v7');
+
+    DE = tess_dirac_eigenmodes(SurfaceFile, 'K', 40, 'NoSave', 1, 'ForceRecompute', 1);
+    verifyEqual(tc, size(DE), [1 2]);
+    T = in_tess_bst(SurfaceFile, 0);
+    verifyFalse(tc, isfield(T,'DiracEigen'));
+end
