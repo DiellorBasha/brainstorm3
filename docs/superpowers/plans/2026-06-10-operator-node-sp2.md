@@ -80,9 +80,9 @@ disp('T1 OK');
 - [ ] **Step 1: Write `tess_operators(SurfaceFile, OperatorName, varargin)`** — mirror `tess_manifold` structure:
   - Options: `Tau` (0.5, for Dirac/connection trivial gauge), `NoSave`, `ForceRecompute`.
   - Map `OperatorName` → `Variant`: `'Laplace-Beltrami'`|`'Connection Laplacian'`|`'Dirac'` (accept case-insensitive; error on unknown with a clear list).
-  - Guards (nxr install; Structures L/R atlas; `Reg.Sphere` for trivial gauge); `tess_hemisplit`; per hemisphere build local submesh + FS-pole singularities (as `tess_manifold` does), `h=nxr_safe_create(Vloc,Floc)` (validating wrapper — NOT raw `nxr_compute('create')`):
+  - Guards (nxr install; Structures L/R atlas). **NOTE (Step-0 finding):** unlike `tess_manifold`'s `facets` call, the three *operators* do NOT need the trivial gauge or FS-pole singularities — `laplacian/connection` builds the intrinsic Levi-Civita connection internally (verified bit-identical with/without a `facets` call) and `dirac`/`cotan`/`mass` act directly on the discrete submesh. So **no `Reg.Sphere` guard and no `singVerts/singValues` opts** here. `tess_hemisplit`; per hemisphere build local submesh, `h=nxr_safe_create(Vloc,Floc)` (validating wrapper — NOT raw `nxr_compute('create')`):
     - **Laplace-Beltrami:** `A = nxr_compute('operators',h,'laplacian','cotan')`; `B = nxr_compute('operators',h,'mass','galerkin')`.
-    - **Connection Laplacian:** `A = <connection call from Step 0>` (trivial gauge, FS poles); `B = nxr_compute('operators',h,'mass','galerkin')`.
+    - **Connection Laplacian:** `A = nxr_compute('operators',h,'laplacian','connection')` (complex Hermitian; intrinsic Levi-Civita connection — no gauge/FS-pole config needed, per Step-0 finding); `B = nxr_compute('operators',h,'mass','galerkin')`.
     - **Dirac:** `A = nxr_compute('operators',h,'dirac',Tau)`; `B = kron(nxr_compute('operators',h,'mass','galerkin'), speye(4))`.
     - `nxr_compute('destroy',h)`.
   - Assemble `OperatorMat = db_template('operatormat')`: 1×2 `Operator`/`Mass`/`GlobalVertices`, `Variant`, `Provenance` (Backend='nxr', NxrVersion, Variant, Tau if applicable, ComputeDate).
