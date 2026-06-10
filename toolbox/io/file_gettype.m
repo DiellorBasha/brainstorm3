@@ -97,6 +97,8 @@ if ischar(fileName)
             fileType = 'subjectimage';
         elseif ~isempty(strfind(fileName, '_manifold_'))
             fileType = 'manifold';
+        elseif ~isempty(strfind(fileName, '_operator_'))
+            fileType = 'operator';
         elseif ~isempty(strfind(fileName, '_tess'))
             if ~isempty(strfind(fileName, '_cortex'))   % || ~isempty(strfind(fileName, '_brain'))
                 fileType = 'cortex';

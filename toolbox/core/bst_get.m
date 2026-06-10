@@ -112,6 +112,7 @@ function [argout1, argout2, argout3, argout4, argout5] = bst_get( varargin )
 %    - bst_get('ConditionsForSubject', SubjectFile)           : Find all conditions for a given subject
 %    - bst_get('SurfaceFile',          SurfaceFile)           : Find a surface in current protocol
 %    - bst_get('ManifoldFile',         ManifoldFile)          : Find a manifold child node in current protocol [sSubject, iSubject, iSurface, iManifold]
+%    - bst_get('OperatorFile',         OperatorFile)          : Find an operator child node in current protocol [sSubject, iSubject, iSurface, iOperator]
 %    - bst_get('SurfaceFileByType',    iSubject,    SurfaceType) : Find surfaces with given type for subject #i (default only)
 %    - bst_get('SurfaceFileByType',    SubjectFile, SurfaceType) : Find surfaces with given type for subject SubjectFile (default only)
 %    - bst_get('SurfaceFileByType',    SurfaceName, SurfaceType) : Find surfaces with given type for subject that also has surface SurfaceName (default only)
@@ -2281,6 +2282,26 @@ switch contextName
                 iItem = 0;
                 if (nargout >= 5) && ~isempty(sStudy)
                     sItem = sStudy;
+                end
+            case 'manifold'
+                % Manifold child node: resolve via ManifoldFile
+                % Returns [sSubject, iSubject, iSurface, iManifold]; map to AnyFile convention
+                [sStudy, iStudy, iSurf, iItem] = bst_get('ManifoldFile', FileName);
+                if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
+                    sItem = sStudy.Surface(iSurf).Manifold(iItem);
+                end
+            case 'operator'
+                % Operator child node: resolve via OperatorFile.
+                % bst_get('OperatorFile') is added in Task 2 (db_add_operator).
+                % Guard with try/catch so AnyFile returns empty (not an error) until T2 lands.
+                sStudy = []; iStudy = 0; iItem = 0;
+                try
+                    [sStudy, iStudy, iSurf, iItem] = bst_get('OperatorFile', FileName);
+                    if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
+                        sItem = sStudy.Surface(iSurf).Operator(iItem);
+                    end
+                catch
+                    % OperatorFile not yet registered — return empty (safe fallback)
                 end
             otherwise
                 error('File type is not recognized.');
