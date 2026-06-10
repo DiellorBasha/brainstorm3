@@ -113,6 +113,7 @@ function [argout1, argout2, argout3, argout4, argout5] = bst_get( varargin )
 %    - bst_get('SurfaceFile',          SurfaceFile)           : Find a surface in current protocol
 %    - bst_get('ManifoldFile',         ManifoldFile)          : Find a manifold child node in current protocol [sSubject, iSubject, iSurface, iManifold]
 %    - bst_get('OperatorFile',         OperatorFile)          : Find an operator child node in current protocol [sSubject, iSubject, iSurface, iOperator]
+%    - bst_get('EigenFile',            EigenFile)             : Find an eigen child node in current protocol [sSubject, iSubject, iSurface, iEigen]
 %    - bst_get('SurfaceFileByType',    iSubject,    SurfaceType) : Find surfaces with given type for subject #i (default only)
 %    - bst_get('SurfaceFileByType',    SubjectFile, SurfaceType) : Find surfaces with given type for subject SubjectFile (default only)
 %    - bst_get('SurfaceFileByType',    SurfaceName, SurfaceType) : Find surfaces with given type for subject that also has surface SurfaceName (default only)
@@ -1315,6 +1316,61 @@ switch contextName
                         argout2 = iSubj;
                         argout3 = iSurf;
                         argout4 = iOperator;
+                        return
+                    end
+                end
+            end
+        end
+
+%% ==== EIGEN FILE ====
+    % Usage : [sSubject, iSubject, iSurface, iEigen] = bst_get('EigenFile', EigenFile)
+    case 'EigenFile'
+        % No protocol in database
+        if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
+            return;
+        end
+        % Get list of current protocol subjects
+        ProtocolSubjects = GlobalData.DataBase.ProtocolSubjects(GlobalData.DataBase.iProtocol);
+        if isempty(ProtocolSubjects)
+            return
+        end
+
+        % Parse inputs
+        if (nargin == 2)
+            EigenFile = varargin{2};
+        else
+            error('Invalid call to bst_get().');
+        end
+
+        % Remove SUBJECTS path from EigenFile
+        EigenFile = file_short(EigenFile);
+        % Look for eigen file in DefaultSubject
+        if ~isempty(ProtocolSubjects.DefaultSubject)
+            for iSurf = 1:length(ProtocolSubjects.DefaultSubject.Surface)
+                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Eigen') && ...
+                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Eigen)
+                    iEigen = find(file_compare(EigenFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Eigen.FileName}), 1);
+                    if ~isempty(iEigen)
+                        argout1 = ProtocolSubjects.DefaultSubject;
+                        argout2 = 0;
+                        argout3 = iSurf;
+                        argout4 = iEigen;
+                        return
+                    end
+                end
+            end
+        end
+        % Look for eigen file in all subjects
+        for iSubj = 1:length(ProtocolSubjects.Subject)
+            for iSurf = 1:length(ProtocolSubjects.Subject(iSubj).Surface)
+                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Eigen') && ...
+                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Eigen)
+                    iEigen = find(file_compare(EigenFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Eigen.FileName}), 1);
+                    if ~isempty(iEigen)
+                        argout1 = ProtocolSubjects.Subject(iSubj);
+                        argout2 = iSubj;
+                        argout3 = iSurf;
+                        argout4 = iEigen;
                         return
                     end
                 end
