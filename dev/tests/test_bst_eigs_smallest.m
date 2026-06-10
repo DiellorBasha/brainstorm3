@@ -21,7 +21,7 @@ function test_real_case()
     lastwarn('');
     [V, D] = bst_eigs_smallest(A, B, k, opts);
     [wmsg, wid] = lastwarn;
-    assert(~strcmp(wid, 'MATLAB:nearlySingularMatrix'), 'real: nearly-singular warning: %s', wmsg);
+    assert(isempty(wid), 'real: new path emitted a warning [%s] %s', wid, wmsg);
 
     lam = sort(real(diag(D)));
     scale = max(1, abs(lam_ref(end)));
@@ -59,7 +59,7 @@ function test_hermitian_case()
     lastwarn('');
     [V, D] = bst_eigs_smallest(A, B, k, opts);
     [wmsg, wid] = lastwarn;
-    assert(~strcmp(wid, 'MATLAB:nearlySingularMatrix'), 'hermitian: nearly-singular warning: %s', wmsg);
+    assert(isempty(wid), 'hermitian: new path emitted a warning [%s] %s', wid, wmsg);
 
     lam = diag(D);
     assert(isreal(lam), 'hermitian: eigenvalues not enforced real (max|imag|=%.3e)', max(abs(imag(lam))));
@@ -102,10 +102,10 @@ function test_real_operator_case()
 
     lastwarn('');
     [~, D] = bst_eigs_smallest(A, B, k, opts);
-    [~, wid_new] = lastwarn;
+    [wmsg_new, wid_new] = lastwarn;
     lam_new = sort(real(diag(D)));
 
-    assert(~strcmp(wid_new, 'MATLAB:nearlySingularMatrix'), 'real operator: new path warned');
+    assert(isempty(wid_new), 'real operator: new path emitted a warning [%s] %s', wid_new, wmsg_new);
     sc = max(abs(lam_old));
     assert(max(abs(lam_old - lam_new)) < 1e-3 * sc, ...
         'real operator: spectrum mismatch %.3e (rel %.1e)', max(abs(lam_old-lam_new)), max(abs(lam_old-lam_new))/sc);
