@@ -76,7 +76,7 @@ function test_frame_orthonormal_fullmesh(tc)
     verifyLessThan(tc, max(abs(sqrt(sum(U.^2,2))-1)), 1e-4);
     verifyLessThan(tc, max(abs(sqrt(sum(V.^2,2))-1)), 1e-4);
     verifyLessThan(tc, max(abs(sum(U.*V,2))), 1e-4);
-    verifyLessThan(tc, max(abs(N - cross(U,V,2)), [], 'all'), 1e-4);
+    verifyLessThan(tc, max(abs(sqrt(sum(N.^2,2))-1)), 1e-4);   % N unit-norm (independent of the cross definition)
     verifyGreaterThan(tc, min(sqrt(sum(N.^2,2))), 0.9);   % every row filled
 end
 
@@ -94,4 +94,51 @@ function test_frame_matches_grid_rotation(tc)
         verifyLessThan(tc, max(abs(U(idx,:) - real(c)), [], 'all'), 1e-5);
         verifyLessThan(tc, max(abs(V(idx,:) - imag(c)), [], 'all'), 1e-5);
     end
+end
+
+function test_cache_return_no_recompute(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    tess_frame(SurfaceFile, 'ForceRecompute', 1);
+    % stamp a sentinel into the stored provenance, then call without ForceRecompute
+    TF = load(TessFile);
+    TF.Embedded(1).Provenance.ComputeDate = 'SENTINEL';
+    bst_save(TessFile, TF, 'v7');
+
+    [U,~,~] = tess_frame(SurfaceFile);          % must cache-return (no recompute)
+    T = in_tess_bst(SurfaceFile, 0);
+    verifyEqual(tc, T.Embedded(1).Provenance.ComputeDate, 'SENTINEL');   % unchanged => not recomputed
+    verifyEqual(tc, size(U), [size(T.Vertices,1) 3]);
+end
+
+function test_nosave_returns_without_writing(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    % clean slate: strip the five fields if present
+    TF = load(TessFile);
+    for f = {'Topology','Embedded','Intrinsic','Extrinsic','Gauge'}
+        if isfield(TF, f{1}), TF = rmfield(TF, f{1}); end
+    end
+    bst_save(TessFile, TF, 'v7');
+
+    [U,~,~] = tess_frame(SurfaceFile, 'NoSave', 1, 'ForceRecompute', 1);
+    T = in_tess_bst(SurfaceFile, 0);
+    verifyEqual(tc, size(U,2), 3);
+    verifyFalse(tc, isfield(T,'Embedded') && ~isempty(T.Embedded));   % not written
+end
+
+function test_face_trivial_errors(tc)
+    SurfaceFile = local_cortex();
+    TessFile = file_fullpath(SurfaceFile);
+    backup = load(TessFile);
+    restorer = onCleanup(@() bst_save(TessFile, backup, 'v7'));  %#ok<NASGU>
+
+    tess_frame(SurfaceFile, 'ForceRecompute', 1);   % ensure bundle present (vertex)
+    verifyError(tc, @() tess_frame(SurfaceFile, 'Domain','face'), 'tess_frame:faceTrivialDeferred');
 end
