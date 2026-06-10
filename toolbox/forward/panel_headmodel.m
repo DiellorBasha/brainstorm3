@@ -62,11 +62,6 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
     if ~isMixed
         jRadioGridMixed.setEnabled(0);
     end
-    % Cortex surface harmonics (LBO eigenmode basis of the cortical source space)
-    jRadioGridHarmonics = gui_component('Radio', jPanelSourceSpace, 'br hfill', 'Cortex surface harmonics', jButtonGroupGridType, 'Re-expresses the cortical source space in the LBO eigenmode basis (L*Phi)', @UpdateComment);
-    gui_component('label', jPanelSourceSpace, 'br', 'Number of modes (0=all): ');
-    jTextNModes = gui_component('text', jPanelSourceSpace, 'tab hfill', '0');
-    jTextNModes.setEnabled(0);
     % Default: surface
     jRadioGridSurface.setSelected(1);
     % Attach sub panel to NewPanel
@@ -145,6 +140,12 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
         jCheckMethodNIRS = [];
         jComboMethodNIRS = [];
     end
+    % === Dirac transform ===
+    % Post-process the computed leadfield into the Dirac (curvature-aware vector)
+    % eigenbasis via bst_dirac. The forward method above produces the base
+    % unconstrained surface leadfield; bst_dirac transforms it into Dirac eigenmodes.
+    jCheckDirac = gui_component('CheckBox', jPanelMethod, 'br', 'Dirac Transform', [], ...
+        'Transform the computed leadfield into the Dirac (curvature-aware vector) eigenbasis via bst_dirac', @UpdateComment);
     % Attach sub panel to NewPanel
     jPanelNew.add('br hfill', jPanelMethod);
 
@@ -162,8 +163,6 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
                   'jRadioGridSurface',   jRadioGridSurface, ...
                   'jRadioGridVolume',    jRadioGridVolume, ...
                   'jRadioGridMixed',     jRadioGridMixed, ...
-                  'jRadioGridHarmonics', jRadioGridHarmonics, ...
-                  'jTextNModes',         jTextNModes, ...
                   'jCheckMethodMEG',     jCheckMethodMEG, ...
                   'jComboMethodMEG',     jComboMethodMEG, ...
                   'jCheckMethodEEG',     jCheckMethodEEG, ...
@@ -173,7 +172,8 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
                   'jCheckMethodSEEG',    jCheckMethodSEEG, ...
                   'jComboMethodSEEG',    jComboMethodSEEG, ...
                   'jCheckMethodNIRS',    jCheckMethodNIRS, ...
-                  'jComboMethodNIRS',    jComboMethodNIRS ...
+                  'jComboMethodNIRS',    jComboMethodNIRS, ...
+                  'jCheckDirac',         jCheckDirac ...
                  );
     % Create the BstPanel object that is returned by the function
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
@@ -208,11 +208,9 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
         elseif isNirs && ~isMeg && ~isEeg && ~isEcog && ~isSeeg
             jCheckMethodNIRS.setSelected(1);
         end
-        % Enable the "Number of modes" field only for the harmonics source space
-        jTextNModes.setEnabled(jRadioGridHarmonics.isSelected());
         % Disable NIRS for anything other than a plain cortex-surface head model
         if isNirs
-            if jRadioGridVolume.isSelected() || jRadioGridMixed.isSelected() || jRadioGridHarmonics.isSelected()
+            if jRadioGridVolume.isSelected() || jRadioGridMixed.isSelected()
                 jCheckMethodNIRS.setSelected(0);
                 jCheckMethodNIRS.setEnabled(0);
             else
@@ -273,10 +271,12 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
             Comment = [Comment ' (volume)'];
         elseif jRadioGridMixed.isSelected()
             Comment = [Comment ' (mixed)'];
-        elseif jRadioGridHarmonics.isSelected()
-            Comment = [Comment ' | harmonic'];
         else
             %Comment = [Comment ' (cortex)'];
+        end
+        % Dirac transform suffix (e.g. "Overlapping spheres | Dirac basis")
+        if jCheckDirac.isSelected()
+            Comment = [Comment ' | Dirac basis'];
         end
         % Update control
         jTextComment.setText(Comment);
@@ -306,13 +306,9 @@ function s = GetPanelContents() %#ok<DEFNU>
         s.HeadModelType = 'volume';
     elseif ctrl.jRadioGridMixed.isSelected()
         s.HeadModelType = 'mixed';
-    elseif ctrl.jRadioGridHarmonics.isSelected()
-        s.HeadModelType = 'surface';            % base physics is a surface run
-        s.SourceCompression = 'eigenmode';
-        nModes = str2double(char(ctrl.jTextNModes.getText()));
-        if isnan(nModes) || isinf(nModes) || nModes < 0; nModes = 0; end
-        s.nModes = round(nModes);
     end
+    % Dirac transform: post-process the computed leadfield into the Dirac eigenbasis
+    s.DiracTransform = ctrl.jCheckDirac.isSelected();
     % Get methods for MEG, EEG, ECOG, SEEG
     if ~isempty(ctrl.jCheckMethodMEG) && ctrl.jCheckMethodMEG.isSelected()
         s.MEGMethod = char(ctrl.jComboMethodMEG.getSelectedItem.getType());
@@ -463,12 +459,21 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
         elseif strcmpi(sMethod.HeadModelType, 'mixed')
             sMethod.Comment = [sMethod.Comment ' (mixed)'];
         end
+        % Dirac transform suffix (e.g. "Overlapping spheres | Dirac basis")
+        if isfield(sMethod, 'DiracTransform') && ~isempty(sMethod.DiracTransform) && sMethod.DiracTransform
+            sMethod.Comment = [sMethod.Comment ' | Dirac basis'];
+        end
     end
     isOpenMEEG = any(strcmpi(allMethods, 'openmeeg'));
     isDuneuro = any(strcmpi(allMethods, 'duneuro'));
-    % "Cortex surface harmonics" source space: compose L*Phi on an in-memory base
-    % leadfield and save ONLY the harmonic node (not a separate base node).
+    % DEPRECATED ("Cortex surface harmonics" / scalar LBO eigenmode leadfield): the GUI
+    % option has been removed (bst_dirac is now the canonical eigenmode forward method).
+    % This isEigenSpace path is unreachable from the panel and only triggers if a caller
+    % passes sMethod.SourceCompression='eigenmode'. Scheduled for deletion; do not extend.
     isEigenSpace = isfield(sMethod, 'SourceCompression') && strcmpi(sMethod.SourceCompression, 'eigenmode');
+    % "Dirac Transform": compose the base unconstrained surface leadfield into the
+    % Dirac eigenbasis (bst_dirac) on an in-memory base, saving only the Dirac node.
+    isDiracTransform = isfield(sMethod, 'DiracTransform') && ~isempty(sMethod.DiracTransform) && sMethod.DiracTransform;
     % Get protocol description
     ProtocolInfo = bst_get('ProtocolInfo');
 
@@ -508,10 +513,10 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
         % Override fields with input structure
         OPTIONS = struct_copy_fields(OPTIONS, sMethod, 1);
         % Output folder: folder of the channel file
-        if sMethod.SaveFile && ~isEigenSpace
+        if sMethod.SaveFile && ~isEigenSpace && ~isDiracTransform
             OPTIONS.HeadModelFile = bst_fileparts(ChannelFile);
         else
-            OPTIONS.HeadModelFile = '';   % eigenspace: base computed in-memory; only the harmonic node is saved
+            OPTIONS.HeadModelFile = '';   % eigenspace / Dirac: base computed in-memory; only the composed node is saved
         end
         
         % ===== Fields Related to Sensor Information =====
@@ -770,6 +775,43 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
 %             corr = sum(bst_bsxfun(@rdivide, Gsph, sqrt(sum(Gsph.^2,1))) .* bst_bsxfun(@rdivide, Gbem, sqrt(sum(Gbem.^2,1))), 1);
 %         end
         
+        % ===== DIRAC TRANSFORM (canonical eigenmode forward method) =====
+        % Compose the in-memory base unconstrained surface leadfield into the Dirac
+        % (curvature-aware vector) eigenbasis. bst_dirac fetches/creates the Dirac
+        % eigen node on the cortex and projects; only the Dirac node is saved.
+        if isDiracTransform
+            baseHM = OPTIONS.HeadModelMat;            % in-memory base (no file written)
+            try
+                CompHM = bst_dirac(baseHM);           % default nModes=400/hemi, tau=0.5
+            catch ME
+                errMessage = ['Dirac transform failed: ' ME.message];
+                continue;
+            end
+            CompHM.Comment = OPTIONS.Comment;         % e.g. "Overlapping spheres | Dirac basis"
+            CompHM = bst_history('add', CompHM, 'dirac_eigenmode_leadfield', ...
+                sprintf('Dirac eigenmode leadfield (%d modes) composed in Compute head model', CompHM.nModes));
+            % Save only the Dirac node
+            StudyDir = bst_fileparts(file_fullpath(sStudy.FileName));
+            OutputFile = bst_process('GetNewFilename', StudyDir, 'headmodel_dirac_eigenmode');
+            bst_save(OutputFile, CompHM, 'v7');
+            newHeadModel = db_template('HeadModel');
+            newHeadModel.FileName      = file_short(OutputFile);
+            newHeadModel.Comment       = CompHM.Comment;
+            newHeadModel.HeadModelType = 'surface';
+            newHeadModel.MEGMethod     = OPTIONS.MEGMethod;
+            newHeadModel.EEGMethod     = OPTIONS.EEGMethod;
+            newHeadModel.ECOGMethod    = OPTIONS.ECOGMethod;
+            newHeadModel.SEEGMethod    = OPTIONS.SEEGMethod;
+            newHeadModel.NIRSMethod    = OPTIONS.NIRSMethod;
+            iHeadModel = length(sStudy.HeadModel) + 1;
+            sStudy.HeadModel(iHeadModel) = newHeadModel;
+            sStudy.iHeadModel = iHeadModel;
+            bst_set('Study', iStudy, sStudy);
+            panel_protocols('UpdateNode', 'Study', iStudy);
+            OutputFiles{end+1} = OutputFile;
+            continue;     % skip the normal base-node save block
+        end
+
         % ===== EIGENMODE COMPOSITION ("Cortex surface harmonics") =====
         if isEigenSpace
             baseHM = OPTIONS.HeadModelMat;            % in-memory base (no file written)

@@ -44,7 +44,6 @@ CortexSurface = [];
 ChannelMat = [];
 Channels = [];
 iChannels = [];
-DiracEigenAll = cell(1, length(HeadmodelFiles));   % per-file Dirac eigenbasis (empty for regular leadfields)
 allModalities = {'EEG', 'MEG', 'SEEG', 'ECOG'};
 markersLocs = [];
 bst_progress('start', 'View leadfields', 'Loading headmodels...');
@@ -97,15 +96,9 @@ for iFile = 1:length(HeadmodelFiles)
         TessMat = in_tess_bst(HeadmodelMat{iFile}.SurfaceFile);
         HeadmodelMat{iFile}.GridLoc = TessMat.Vertices;
     end
-    % Dirac eigenmode leadfield: load the eigenbasis so the per-channel field can be
-    % reconstructed to vertex space (Gain is [nCh x 2K], not [nCh x 3*nVert]).
-    if isfield(HeadmodelMat{iFile},'isDiracEigenmode') && ~isempty(HeadmodelMat{iFile}.isDiracEigenmode) && HeadmodelMat{iFile}.isDiracEigenmode
-        Tdir = in_tess_bst(HeadmodelMat{iFile}.SurfaceFile);
-        if ~isfield(Tdir,'DiracEigen') || isempty(Tdir.DiracEigen)
-            error(['No Dirac eigenbasis on surface: ' HeadmodelMat{iFile}.SurfaceFile '. Recompute the Dirac eigenmode leadfield.']);
-        end
-        DiracEigenAll{iFile} = Tdir.DiracEigen;
-    end
+    % Dirac eigenmode leadfield (Gain is [nCh x 2K], not [nCh x 3*nVert]): the
+    % per-channel field is reconstructed to vertex space on demand in GetLeadField
+    % via bst_dirac(..., 'Reconstruct', ...), which fetches the eigenbasis itself.
 end
 if isempty(allModalities)
     error('No modality available for all the files.');
@@ -534,12 +527,12 @@ bst_progress('stop');
     function GetLeadField
         % Update the LF according to the selected channels only
         for iLF = 1:length(HeadmodelFiles)
-            if ~isempty(DiracEigenAll{iLF})
+            if isfield(HeadmodelMat{iLF},'isDiracEigenmode') && ~isempty(HeadmodelMat{iLF}.isDiracEigenmode) && HeadmodelMat{iLF}.isDiracEigenmode
                 % Dirac eigenmode leadfield: reconstruct the selected channels' fields
-                % to vertex space (imag(Phi_D * Gain(c,:)')) so the standard quiver
+                % to vertex space (inverse spectral transform) so the standard quiver
                 % display (per-channel [1 x 3*nVert]) applies unchanged.
-                LF_finale{iLF} = bst_dirac_eigenmode_field(DiracEigenAll{iLF}, ...
-                    HeadmodelMat{iLF}.Gain(iChannels,:), HeadmodelMat{iLF});
+                LF_finale{iLF} = bst_dirac(HeadmodelMat{iLF}, 'Reconstruct', ...
+                    HeadmodelMat{iLF}.Gain(iChannels,:));
             else
                 LF_finale{iLF} = HeadmodelMat{iLF}.Gain(iChannels,:);
             end
