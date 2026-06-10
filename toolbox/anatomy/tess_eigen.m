@@ -214,7 +214,11 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         hemiName = 'left'; if hh == 2, hemiName = 'right'; end
         bst_progress('text', sprintf('Eigensolve: %s hemisphere (%s, K=%d)...', hemiName, Variant, K));
         opts = struct('tol', 1e-6, 'maxit', 1000, 'disp', 0);
-        [V, D] = eigs(A, B, nRequest, 'smallestabs', opts);
+        % Robust smallest-eigenpair solve: A has a near-zero kernel (constant /
+        % constant-quaternion modes), so eigs(...,'smallestabs') would shift-invert at
+        % sigma=0 and factorize the singular A (RCOND ~ 1e-18 warning). bst_eigs_smallest
+        % symmetrizes A,B (forces the Lanczos path) and uses a small negative sigma shift.
+        [V, D] = bst_eigs_smallest(A, B, nRequest, opts);
         lam = real(diag(D));
         [lam, idx] = sort(lam, 'ascend');
         V = V(:, idx);

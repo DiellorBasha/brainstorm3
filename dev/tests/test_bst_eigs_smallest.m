@@ -2,6 +2,7 @@ function test_bst_eigs_smallest()
 % TEST_BST_EIGS_SMALLEST: bst_eigs_smallest on singular symmetric AND Hermitian pencils.
     test_real_case();
     test_hermitian_case();
+    test_real_operator_case();
 end
 
 function test_real_case()
@@ -72,4 +73,41 @@ function test_hermitian_case()
     assert(max(max(abs(G - eye(k)))) < 1e-8, 'hermitian: not B-orthonormal %.3e', max(max(abs(G-eye(k)))));
 
     disp('PASS: test_bst_eigs_smallest (complex Hermitian case)');
+end
+
+function test_real_operator_case()
+% Reuse a stored Dirac operator node (if present) to confirm on REAL data: legacy
+% 'smallestabs' warns, bst_eigs_smallest does not, and the K smallest eigenvalues agree.
+% Skips cleanly if no protocol / Dirac operator node is available.
+    PI = bst_get('ProtocolInfo');
+    if isempty(PI) || ~isfield(PI,'SUBJECTS') || isempty(PI.SUBJECTS)
+        disp('SKIP: test_bst_eigs_smallest (real operator) -- no protocol loaded'); return;
+    end
+    opFiles = dir(fullfile(PI.SUBJECTS, '**', 'operator_*.mat'));
+    f = '';
+    for i = 1:numel(opFiles)
+        p = fullfile(opFiles(i).folder, opFiles(i).name);
+        S = load(p, 'Variant');
+        if isfield(S,'Variant') && strcmpi(S.Variant,'Dirac'); f = p; break; end
+    end
+    if isempty(f)
+        disp('SKIP: test_bst_eigs_smallest (real operator) -- no Dirac operator node found'); return;
+    end
+    Op = load(f); A = Op.Operator{1}; B = Op.Mass{1};
+    k = 12; opts = struct('tol',1e-6,'maxit',1000,'disp',0);
+
+    lastwarn('');
+    lam_old = sort(real(eigs(A, B, k, 'smallestabs', opts)));
+    [~, wid_old] = lastwarn;
+
+    lastwarn('');
+    [~, D] = bst_eigs_smallest(A, B, k, opts);
+    [~, wid_new] = lastwarn;
+    lam_new = sort(real(diag(D)));
+
+    assert(~strcmp(wid_new, 'MATLAB:nearlySingularMatrix'), 'real operator: new path warned');
+    sc = max(abs(lam_old));
+    assert(max(abs(lam_old - lam_new)) < 1e-3 * sc, ...
+        'real operator: spectrum mismatch %.3e (rel %.1e)', max(abs(lam_old-lam_new)), max(abs(lam_old-lam_new))/sc);
+    fprintf('PASS: test_bst_eigs_smallest (real operator; legacy warned id=%s)\n', wid_old);
 end
