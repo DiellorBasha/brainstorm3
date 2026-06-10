@@ -43,8 +43,10 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
 %                   GlobalVertices(1x2), Provenance
 %
 % Requires the nxr-compute plugin.  The hemisphere split requires a Structures
-% atlas with left/right labels and (for the FS-pole guards mirrored from the
-% other assemblers) a FreeSurfer registration sphere (TessMat.Reg.Sphere).
+% atlas with left/right labels.  Unlike tess_manifold, no FreeSurfer
+% registration sphere is needed: the operators act directly on the discrete
+% per-hemisphere submesh and the connection Laplacian uses the intrinsic
+% Levi-Civita connection (no trivial gauge / FS-pole singularities).
 %
 % SEE ALSO: tess_manifold, tess_dirac_eigenmodes, tess_hemisplit, db_add_operator
 
@@ -109,14 +111,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             'tess_operators requires nxr-compute: %s', errMsg);
     end
 
-    % --- guard: Reg.Sphere present (needed for FS-pole singularities) ---
-    if ~isfield(TessMat,'Reg') || ~isstruct(TessMat.Reg) || ...
-       ~isfield(TessMat.Reg,'Sphere') || ...
-       ~isfield(TessMat.Reg.Sphere,'Vertices') || ...
-       isempty(TessMat.Reg.Sphere.Vertices)
-        error('tess_operators:noRegSphere', ...
-            'tess_operators needs a FreeSurfer registration sphere (Reg.Sphere.Vertices).');
-    end
+    % NOTE: No registration-sphere guard. The LBO/connection/Dirac operators act
+    % directly on the discrete per-hemisphere submesh; the connection Laplacian
+    % builds the intrinsic Levi-Civita connection internally, so no trivial-gauge
+    % or FreeSurfer-pole singularity configuration is required (verified in SP2
+    % Step 0: bit-identical with/without a gauge/facets call). This is the
+    % deliberate difference from tess_manifold, which does call nxr 'facets'.
 
     % --- guard: Structures atlas with L/R labels ---
     hasLabels = false;
