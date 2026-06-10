@@ -170,3 +170,9 @@ function test_nosave_returns_without_writing(tc)
     T = in_tess_bst(SurfaceFile, 0);
     verifyFalse(tc, isfield(T,'DiracEigen'));
 end
+
+function test_bad_tau_errors(tc)
+    SurfaceFile = local_cortex();
+    verifyError(tc, @() tess_dirac_eigenmodes(SurfaceFile, 'Tau', 2.0), ...
+        'tess_dirac_eigenmodes:badTau');
+end

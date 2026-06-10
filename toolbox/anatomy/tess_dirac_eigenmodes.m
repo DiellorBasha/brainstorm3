@@ -62,6 +62,8 @@ function DiracEigen = tess_dirac_eigenmodes(SurfaceFile, varargin)
     end
 
     TessFile = file_fullpath(SurfaceFile);
+    % VertConn not requested (0): the Structures-atlas L/R guard below ensures
+    % tess_hemisplit returns via its atlas path and never reaches the VertConn fallback.
     TessMat  = in_tess_bst(SurfaceFile, 0);
 
     % --- cache return: both hemispheres must match Tau AND nModes ---
@@ -99,7 +101,7 @@ function DiracEigen = tess_dirac_eigenmodes(SurfaceFile, varargin)
     [rH, lH, isConn] = tess_hemisplit(TessMat);
     if isConn
         error('tess_dirac_eigenmodes:connectedHemispheres', ...
-            'Hemispheres are connected; each is eigensolved as an independent component.');
+            'Cannot split the surface into two disconnected hemispheres (they share vertices/faces); check the Structures atlas and mesh.');
     end
     hemis = {lH(:), rH(:)}; tags = {'L','R'};
     Vtx = double(TessMat.Vertices); Fcs = double(TessMat.Faces); nVtot = size(Vtx,1);
@@ -135,6 +137,8 @@ function DiracEigen = tess_dirac_eigenmodes(SurfaceFile, varargin)
         % over-fetch generously: the 4-fold multiplets make eigs return a
         % rank-deficient spanning set (~12-15% deficient), so K+8 is not enough
         % for large K; ~30% over-fetch keeps rank >= K after the rank drop.
+        % When K is near 4*nVh-2 the cap shrinks the over-fetch and
+        % local_ritz_basis may then throw :rankDeficient (caught, not silent).
         nRequest = min(K + max(8, ceil(0.3*K)), 4*nVh - 2);
         opts = struct('tol', 1e-6, 'maxit', 1000, 'disp', 0);
         [Uraw, ~] = eigs(L, B, nRequest, 'smallestabs', opts);
@@ -193,5 +197,12 @@ function [Phi, mu] = local_ritz_basis(L, B, U, K)
     end
     Phi = Phi(:, 1:K);
     mu  = mu(1:K);
+    negThresh = -1e-6 * max(abs(mu));
+    if any(mu < negThresh)
+        warning('tess_dirac_eigenmodes:nonPSD', ...
+            ['Dirac eigenproblem returned %d eigenvalue(s) below %.2e (most negative %.3e); ' ...
+             'clamping to 0. The nxr mass/operator may be non-PSD.'], ...
+            sum(mu < negThresh), negThresh, min(mu));
+    end
     mu(mu < 0) = 0;
 end
