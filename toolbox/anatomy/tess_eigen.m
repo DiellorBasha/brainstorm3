@@ -114,6 +114,16 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             'tess_eigen requires nxr-compute: %s', errMsg);
     end
 
+    % --- progress feedback: indeterminate bar so the user can see the
+    %     (potentially long) eigensolve is running. Only open our own bar if
+    %     one is not already visible (so we don't disrupt a parent process'
+    %     bar). onCleanup guarantees it stops on normal return AND on error. ---
+    eigenBar = [];
+    if ~bst_progress('isVisible')
+        bst_progress('start', 'Eigenmodes', sprintf('Computing %s eigenmodes...', Variant));
+        eigenBar = onCleanup(@() bst_progress('stop'));  %#ok<NASGU>
+    end
+
     % --- resolve subject / surface for the parent ---
     [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', SurfaceFile);
     if isempty(sSubject) || isempty(iSurface)
@@ -125,6 +135,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     OperatorFile = local_find_operator(sSubject, iSurface, Variant);
     if isempty(OperatorFile)
         % Create it (tess_operators -> nxr_safe_create -> nxr_compute('create')).
+        bst_progress('text', sprintf('Computing %s operator...', Variant));
         tess_operators(SurfaceFile, OperatorName, 'Tau', Tau);
         % Re-read the surface's Operator list from a fresh subject struct.
         sSubject = bst_get('Subject', iSubject);
@@ -200,6 +211,8 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             nRequest = min(K + 8, n - 2);
         end
 
+        hemiName = 'left'; if hh == 2, hemiName = 'right'; end
+        bst_progress('text', sprintf('Eigensolve: %s hemisphere (%s, K=%d)...', hemiName, Variant, K));
         opts = struct('tol', 1e-6, 'maxit', 1000, 'disp', 0);
         [V, D] = eigs(A, B, nRequest, 'smallestabs', opts);
         lam = real(diag(D));
@@ -244,6 +257,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 
     % --- save / register in DB ---
     if ~NoSave
+        bst_progress('text', 'Saving eigenmodes to database...');
         Comment = sprintf('%s eigenmodes (K=%d)', Variant, K);
         db_add_eigen(iSubject, SurfaceFile, EigenMat, Comment);
     end
