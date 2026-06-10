@@ -130,7 +130,7 @@ function test_nosave_returns_without_writing(tc)
     [U,~,~] = tess_frame(SurfaceFile, 'NoSave', 1, 'ForceRecompute', 1);
     T = in_tess_bst(SurfaceFile, 0);
     verifyEqual(tc, size(U,2), 3);
-    verifyFalse(tc, isfield(T,'Embedded') && ~isempty(T.Embedded));   % not written
+    verifyFalse(tc, isfield(T,'Embedded'));   % not written (fields were stripped, NoSave must not re-add)
 end
 
 function test_face_trivial_errors(tc)

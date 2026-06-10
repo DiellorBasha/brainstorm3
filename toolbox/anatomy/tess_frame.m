@@ -62,6 +62,9 @@ function [U, V, N] = tess_frame(SurfaceFile, varargin)
     if ~ismember(Domain, {'vertex','face'})
         error('tess_frame:badDomain', 'Domain must be ''vertex'' or ''face''.');
     end
+    if ~ismember(Gauge, {'trivial','levi-civita','euclidean'})
+        error('tess_frame:badGauge', 'Gauge must be ''trivial'', ''levi-civita'', or ''euclidean''.');
+    end
 
     TessFile = file_fullpath(SurfaceFile);
     TessMat  = in_tess_bst(SurfaceFile, 0);
@@ -93,6 +96,26 @@ function TessMat = local_compute_store(TessFile, TessMat, Gauge, NoSave)
             error('tess_frame:noRegSphere', ...
                 'Trivial gauge needs a FreeSurfer registration sphere (Reg.Sphere.Vertices).');
         end
+    end
+
+    % require a Structures atlas with L/R labels so tess_hemisplit uses the
+    % atlas split — never the geometric/connectivity fallback
+    hasLabels = false;
+    if isfield(TessMat,'Atlas') && ~isempty(TessMat.Atlas)
+        iStruct = find(strcmpi({TessMat.Atlas.Name}, 'Structures'), 1);
+        if ~isempty(iStruct) && ~isempty(TessMat.Atlas(iStruct).Scouts)
+            scouts = TessMat.Atlas(iStruct).Scouts;
+            labels = {scouts.Label}; regions = {scouts.Region};
+            reg1 = cellfun(@(c) c(1), regions(~cellfun(@isempty, regions)), 'UniformOutput', false);
+            hasL = any(strcmpi(labels,'lh')) || any(strcmpi(reg1,'L'));
+            hasR = any(strcmpi(labels,'rh')) || any(strcmpi(reg1,'R'));
+            hasLabels = hasL && hasR;
+        end
+    end
+    if ~hasLabels
+        error('tess_frame:noHemisphereLabels', ...
+            ['Surface has no Structures atlas with left/right hemisphere labels ' ...
+             '(required for the atlas-based hemisphere split; the geometric fallback is not allowed).']);
     end
 
     % hemisphere split from atlas labels (never conncomp)
@@ -191,5 +214,6 @@ function [U, V, N] = local_derive_frame(TessMat, Domain)
         V(idx,:) = imag(cRot);
     end
 
+    % N is unit-norm because nxr returns an orthonormal tangent grid (|e1|=|e2|=1, e1⊥e2).
     N = cross(U, V, 2);
 end
