@@ -78,6 +78,8 @@ end
 function test_real_operator_case()
 % Reuse a stored Dirac operator node (if present) to confirm on REAL data: legacy
 % 'smallestabs' warns, bst_eigs_smallest does not, and the K smallest eigenvalues agree.
+% Environment-dependent: only runs when a protocol with a stored Dirac operator
+% node is loaded; otherwise it SKIPs (the two synthetic cases carry the suite).
 % Skips cleanly if no protocol / Dirac operator node is available.
     PI = bst_get('ProtocolInfo');
     if isempty(PI) || ~isfield(PI,'SUBJECTS') || isempty(PI.SUBJECTS)
@@ -99,6 +101,8 @@ function test_real_operator_case()
     lastwarn('');
     lam_old = sort(real(eigs(A, B, k, 'smallestabs', opts)));
     [~, wid_old] = lastwarn;
+    assert(~isempty(wid_old), ...
+        'real operator: legacy ''smallestabs'' did not warn as expected (premise broken)');
 
     lastwarn('');
     [~, D] = bst_eigs_smallest(A, B, k, opts);
@@ -106,7 +110,7 @@ function test_real_operator_case()
     lam_new = sort(real(diag(D)));
 
     assert(isempty(wid_new), 'real operator: new path emitted a warning [%s] %s', wid_new, wmsg_new);
-    sc = max(abs(lam_old));
+    sc = max(1, max(abs(lam_old)));
     assert(max(abs(lam_old - lam_new)) < 1e-3 * sc, ...
         'real operator: spectrum mismatch %.3e (rel %.1e)', max(abs(lam_old-lam_new)), max(abs(lam_old-lam_new))/sc);
     fprintf('PASS: test_bst_eigs_smallest (real operator; legacy warned id=%s)\n', wid_old);
