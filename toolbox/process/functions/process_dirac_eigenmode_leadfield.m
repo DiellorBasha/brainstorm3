@@ -91,7 +91,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     end
 
     % Compose (all Kbasis modes) + history
-    CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen);
+    CompHM = bst_dirac(HeadModel, DiracEigen);
     CompHM = bst_history('add', CompHM, 'dirac_eigenmode_leadfield', ...
         sprintf('Composed Dirac eigenmode leadfield: %d modes (tau=%.3g) from %s', ...
         CompHM.nModes, Tau, HeadModelFile));

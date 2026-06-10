@@ -1,7 +1,7 @@
-function CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, varargin)
-% BST_DIRAC_EIGENMODE_LEADFIELD: Compose the UNCONSTRAINED leadfield into the Dirac eigenbasis.
+function CompHM = bst_dirac(HeadModel, DiracEigen, varargin)
+% BST_DIRAC: Compose the UNCONSTRAINED leadfield into the Dirac eigenbasis.
 %
-% USAGE:  CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, 'nModes', K)
+% USAGE:  CompHM = bst_dirac(HeadModel, DiracEigen, 'nModes', K)
 %
 % DESCRIPTION:
 %     Forward step for Dirac eigenmode source mapping. Unlike the scalar LBO
@@ -41,23 +41,23 @@ function CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, varargin)
     % surface head model only
     if isfield(HeadModel,'HeadModelType') && ~isempty(HeadModel.HeadModelType) ...
             && ~strcmpi(HeadModel.HeadModelType,'surface')
-        error('bst_dirac_eigenmode_leadfield:NotSurface', ...
+        error('bst_dirac:NotSurface', ...
             'Dirac eigenmode leadfield requires a surface head model (got ''%s'').', HeadModel.HeadModelType);
     end
 
     G = double(HeadModel.Gain);          % [nCh x 3*nVert] unconstrained
     nCh = size(G,1);
     if mod(size(G,2), 3) ~= 0
-        error('bst_dirac_eigenmode_leadfield:NotUnconstrained', ...
+        error('bst_dirac:NotUnconstrained', ...
             'Dirac leadfield requires an unconstrained head model: Gain must be [nCh x 3*nVert].');
     end
 
     if numel(DiracEigen) ~= 2
-        error('bst_dirac_eigenmode_leadfield:badBasis', ...
+        error('bst_dirac:badBasis', ...
             'DiracEigen must be a 1x2 per-hemisphere struct array (from tess_dirac_eigenmodes).');
     end
     if DiracEigen(1).Tau ~= DiracEigen(2).Tau
-        error('bst_dirac_eigenmode_leadfield:tauMismatch', ...
+        error('bst_dirac:tauMismatch', ...
             'Hemispheres have different Tau (%.3g vs %.3g); recompute DiracEigen with a single Tau.', ...
             DiracEigen(1).Tau, DiracEigen(2).Tau);
     end
@@ -75,11 +75,11 @@ function CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, varargin)
         nVh = numel(vH);
         Phi = double(DiracEigen(hh).Vectors);
         if size(Phi,1) ~= 4*nVh
-            error('bst_dirac_eigenmode_leadfield:shapeMismatch', ...
+            error('bst_dirac:shapeMismatch', ...
                 'Hemisphere %d: Vectors has %d rows, expected 4*nV=%d.', hh, size(Phi,1), 4*nVh);
         end
         if size(Phi,2) < K
-            error('bst_dirac_eigenmode_leadfield:shapeMismatch', ...
+            error('bst_dirac:shapeMismatch', ...
                 'Hemisphere %d: Vectors has %d columns, fewer than K=%d.', hh, size(Phi,2), K);
         end
         Phi  = Phi(:, 1:K);

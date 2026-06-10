@@ -42,7 +42,7 @@ HeadModel = struct('Gain', GainU, 'GridLoc', zeros(nVert,3), 'GridOrient', zeros
     'GridAtlas', [], 'HeadModelType', 'surface', 'SurfaceFile', 'tess_cortex_test.mat', ...
     'Comment', 'OS-MEG test');
 
-CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DE, 'nModes', K);
+CompHM = bst_dirac(HeadModel, DE, 'nModes', K);
 
 % --- shape + carried metadata ---
 assert(isequal(size(CompHM.Gain), [nCh, 2*K]), 'Composed Gain must be [nCh x 2K].');
@@ -74,12 +74,12 @@ end
 % --- errors ---
 ok = false;
 HMvol = HeadModel; HMvol.HeadModelType = 'volume';
-try, bst_dirac_eigenmode_leadfield(HMvol, DE); catch ME, ok = strcmp(ME.identifier,'bst_dirac_eigenmode_leadfield:NotSurface'); end
+try, bst_dirac(HMvol, DE); catch ME, ok = strcmp(ME.identifier,'bst_dirac:NotSurface'); end
 assert(ok, 'Volume head model must raise NotSurface.');
 
 ok = false;
 HMbad = HeadModel; HMbad.Gain = GainU(:, 1:end-1);   % cols not a multiple of 3
-try, bst_dirac_eigenmode_leadfield(HMbad, DE); catch ME, ok = strcmp(ME.identifier,'bst_dirac_eigenmode_leadfield:NotUnconstrained'); end
+try, bst_dirac(HMbad, DE); catch ME, ok = strcmp(ME.identifier,'bst_dirac:NotUnconstrained'); end
 assert(ok, 'Non-unconstrained gain must raise NotUnconstrained.');
 
 disp('ALL TESTS PASSED');
