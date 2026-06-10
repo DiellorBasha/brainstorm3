@@ -9,24 +9,8 @@ function SurfaceFile = local_cortex()
 end
 
 function s = local_find_cortex(nVertTarget)
-    s = '';
-    P = bst_get('ProtocolSubjects');
-    subj = P.Subject;
-    if isfield(P,'DefaultSubject') && ~isempty(P.DefaultSubject)
-        subj = [P.DefaultSubject, subj];
-    end
-    for k = 1:numel(subj)
-        surfs = subj(k).Surface;
-        for i = 1:numel(surfs)
-            if strcmpi(surfs(i).SurfaceType, 'Cortex')
-                m = load(file_fullpath(surfs(i).FileName), 'Vertices');
-                if size(m.Vertices,1) == nVertTarget
-                    s = surfs(i).FileName; return;
-                end
-            end
-        end
-    end
-    error('No %d-vertex cortex found in the loaded protocol.', nVertTarget);
+    % Single source of truth for the canonical test cortex (never a hand-built mesh).
+    s = bst_canonical_cortex(nVertTarget);
 end
 
 function test_store_1x2_shapes(tc)
