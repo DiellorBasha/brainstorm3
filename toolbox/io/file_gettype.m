@@ -99,6 +99,8 @@ if ischar(fileName)
             fileType = 'manifold';
         elseif ~isempty(strfind(fileName, '_operator_'))
             fileType = 'operator';
+        elseif ~isempty(strfind(fileName, '_eigen_'))
+            fileType = 'eigen';
         elseif ~isempty(strfind(fileName, '_tess'))
             if ~isempty(strfind(fileName, '_cortex'))   % || ~isempty(strfind(fileName, '_brain'))
                 fileType = 'cortex';

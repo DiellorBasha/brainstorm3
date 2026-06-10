@@ -2351,6 +2351,12 @@ switch contextName
                 if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
                     sItem = sStudy.Surface(iSurf).Operator(iItem);
                 end
+            case 'eigen'
+                % Eigen child node: resolve via EigenFile
+                [sStudy, iStudy, iSurf, iItem] = bst_get('EigenFile', FileName);
+                if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
+                    sItem = sStudy.Surface(iSurf).Eigen(iItem);
+                end
             otherwise
                 error('File type is not recognized.');
         end 
