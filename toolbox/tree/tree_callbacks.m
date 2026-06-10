@@ -1180,7 +1180,7 @@ switch (lower(action))
                 if strcmpi(nodeType, 'cortex')
                     AddSeparator(jPopup);
                     if ~bst_get('ReadOnly')
-                        gui_component('MenuItem', jPopup, [], 'Compute eigenmodes', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@process_eigenmodes, 'ComputeInteractive', iSubject, filenameRelative));
+                        gui_component('MenuItem', jPopup, [], 'Compute eigenmodes (legacy)', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@process_eigenmodes, 'ComputeInteractive', iSubject, filenameRelative));
                     end
                     gui_component('MenuItem', jPopup, [], 'View eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_eigenmodes, filenameRelative));
                     gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_connection_phase, filenameRelative));
