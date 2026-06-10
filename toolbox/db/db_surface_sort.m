@@ -52,7 +52,16 @@ surfaces = struct('Scalp',      repmat(templateSurface,0), ...
                   'IndexFEM',        [], ...
                   'IndexOther',      []);
 
+% Normalize each surface to have all template fields so the struct array
+% remains homogeneous (surfaces saved before schema updates may be missing
+% newer fields such as Manifold, Eigen, Operator).
+tFields = fieldnames(templateSurface);
 for iSurf = 1:length(surfacesArray)
+    for iF = 1:length(tFields)
+        if ~isfield(surfacesArray(iSurf), tFields{iF})
+            surfacesArray(iSurf).(tFields{iF}) = templateSurface.(tFields{iF});
+        end
+    end
     surfaces.(surfacesArray(iSurf).SurfaceType)(end + 1) = surfacesArray(iSurf);
     surfaces.(['Index' surfacesArray(iSurf).SurfaceType])(end + 1) = iSurf;
 end

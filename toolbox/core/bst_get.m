@@ -111,6 +111,7 @@ function [argout1, argout2, argout3, argout4, argout5] = bst_get( varargin )
 %    - bst_get('NormalizedSubject')               : Get group analysis subject for the current protocol
 %    - bst_get('ConditionsForSubject', SubjectFile)           : Find all conditions for a given subject
 %    - bst_get('SurfaceFile',          SurfaceFile)           : Find a surface in current protocol
+%    - bst_get('ManifoldFile',         ManifoldFile)          : Find a manifold child node in current protocol [sSubject, iSubject, iSurface, iManifold]
 %    - bst_get('SurfaceFileByType',    iSubject,    SurfaceType) : Find surfaces with given type for subject #i (default only)
 %    - bst_get('SurfaceFileByType',    SubjectFile, SurfaceType) : Find surfaces with given type for subject SubjectFile (default only)
 %    - bst_get('SurfaceFileByType',    SurfaceName, SurfaceType) : Find surfaces with given type for subject that also has surface SurfaceName (default only)
@@ -1209,7 +1210,64 @@ switch contextName
             end
         end
             
-        
+
+
+%% ==== MANIFOLD FILE ====
+    % Usage : [sSubject, iSubject, iSurface, iManifold] = bst_get('ManifoldFile', ManifoldFile)
+    case 'ManifoldFile'
+        % No protocol in database
+        if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
+            return;
+        end
+        % Get list of current protocol subjects
+        ProtocolSubjects = GlobalData.DataBase.ProtocolSubjects(GlobalData.DataBase.iProtocol);
+        if isempty(ProtocolSubjects)
+            return
+        end;
+
+        % Parse inputs
+        if (nargin == 2)
+            ManifoldFile = varargin{2};
+        else
+            error('Invalid call to bst_get().');
+        end
+
+        % Remove SUBJECTS path from ManifoldFile
+        ManifoldFile = file_short(ManifoldFile);
+        % Look for manifold file in DefaultSubject
+        if ~isempty(ProtocolSubjects.DefaultSubject)
+            for iSurf = 1:length(ProtocolSubjects.DefaultSubject.Surface)
+                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Manifold') && ...
+                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Manifold)
+                    iManifold = find(file_compare(ManifoldFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Manifold.FileName}), 1);
+                    if ~isempty(iManifold)
+                        argout1 = ProtocolSubjects.DefaultSubject;
+                        argout2 = 0;
+                        argout3 = iSurf;
+                        argout4 = iManifold;
+                        return
+                    end
+                end
+            end
+        end
+        % Look for manifold file in all subjects
+        for iSubj = 1:length(ProtocolSubjects.Subject)
+            for iSurf = 1:length(ProtocolSubjects.Subject(iSubj).Surface)
+                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Manifold') && ...
+                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Manifold)
+                    iManifold = find(file_compare(ManifoldFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Manifold.FileName}), 1);
+                    if ~isempty(iManifold)
+                        argout1 = ProtocolSubjects.Subject(iSubj);
+                        argout2 = iSubj;
+                        argout3 = iSurf;
+                        argout4 = iManifold;
+                        return
+                    end
+                end
+            end
+        end
+
+
 %% ==== SURFACE FILE BY TYPE ====
     % Usage : [sSurface, iSurface] = bst_get('SurfaceFileByType', iSubject,    SurfaceType)
     %         [sSurface, iSurface] = bst_get('SurfaceFileByType', SubjectFile, SurfaceType)
