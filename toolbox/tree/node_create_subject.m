@@ -151,6 +151,18 @@ else
                     end
                 end
             end
+            % Nest eigen child nodes under this surface
+            if isfield(sSubject.Surface(iSurface), 'Eigen')
+                for iE = 1:numel(sSubject.Surface(iSurface).Eigen)
+                    [chCreated, chNode] = CreateNode('eigen', ...
+                        char(sSubject.Surface(iSurface).Eigen(iE).Comment), ...
+                        char(sSubject.Surface(iSurface).Eigen(iE).FileName), ...
+                        iE, iSubject, iSearch);
+                    if chCreated
+                        nodeSurface.add(chNode);
+                    end
+                end
+            end
         end
     end
 end

@@ -68,7 +68,7 @@ nodeType = char(bstNodes(1).getType());
 filenameRelative = char(bstNodes(1).getFileName());
 % Build full filename (depends on the file type)
 switch lower(nodeType)
-    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct', 'volpet', 'manifold', 'operator'}
+    case {'surface', 'scalp', 'cortex', 'outerskull', 'innerskull', 'fibers', 'fem', 'other', 'subject', 'studysubject', 'anatomy', 'volatlas', 'volct', 'volpet', 'manifold', 'operator', 'eigen'}
         filenameFull = bst_fullfile(ProtocolInfo.SUBJECTS, filenameRelative);
     case {'study', 'condition', 'rawcondition', 'channel', 'headmodel', 'data','rawdata', 'datalist', 'results', 'kernel', 'pdata', 'presults', 'ptimefreq', 'pspectrum', 'image', 'video', 'videolink', 'noisecov', 'ndatacov', 'dipoles','timefreq', 'spectrum', 'matrix', 'matrixlist', 'pmatrix', 'spike'}
         filenameFull = bst_fullfile(ProtocolInfo.STUDIES, filenameRelative);
@@ -1197,6 +1197,14 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuOperator, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Laplace-Beltrami'));
                     gui_component('MenuItem', jMenuOperator, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Connection Laplacian'));
                     gui_component('MenuItem', jMenuOperator, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Dirac'));
+                end
+
+                % === EIGEN (cortex only) ===
+                if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
+                    jMenuEigen = gui_component('Menu', jPopup, [], 'Compute eigenmodes', IconLoader.ICON_SURFACE_CORTEX, [], []);
+                    gui_component('MenuItem', jMenuEigen, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Laplace-Beltrami'));
+                    gui_component('MenuItem', jMenuEigen, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Connection Laplacian'));
+                    gui_component('MenuItem', jMenuEigen, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac'));
                 end
 
                 % === SET SURFACE TYPE ===
@@ -2554,6 +2562,18 @@ switch (lower(action))
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
                         gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@OperatorDelete_Callback, filenameRelative));
+                    end
+                end
+
+%% ===== POPUP: EIGEN =====
+            case 'eigen'
+                if (length(bstNodes) == 1)
+                    % === VIEW ===
+                    gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@EigenView_Callback, filenameFull));
+                    % === DELETE ===
+                    if ~bst_get('ReadOnly')
+                        AddSeparator(jPopup);
+                        gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@EigenDelete_Callback, filenameRelative));
                     end
                 end
         end
@@ -4043,6 +4063,54 @@ function OperatorDelete_Callback(filenameRelative)
             ProtocolSubjects.DefaultSubject.Surface(iSurface).Operator(iOperator) = [];
         else
             ProtocolSubjects.Subject(iSubject).Surface(iSurface).Operator(iOperator) = [];
+        end
+        bst_set('ProtocolSubjects', ProtocolSubjects);
+        db_save();
+        panel_protocols('UpdateNode', 'Subject', iSubject);
+    end
+end
+
+%% ===== EIGEN: VIEW =====
+function EigenView_Callback(filenameFull)
+    % Minimal inspector for SP3: load and show field names + sizes
+    if ~file_exist(filenameFull)
+        bst_error('Eigen file not found.', 'View eigen', 0);
+        return;
+    end
+    m = load(filenameFull);
+    fnames = fieldnames(m);
+    fprintf('=== Eigen: %s ===\n', filenameFull);
+    for k = 1:numel(fnames)
+        val = m.(fnames{k});
+        if isnumeric(val) || islogical(val)
+            fprintf('  %s: [%s]\n', fnames{k}, num2str(size(val)));
+        elseif ischar(val)
+            fprintf('  %s: ''%s''\n', fnames{k}, val);
+        elseif isstruct(val)
+            fprintf('  %s: struct 1x%d, fields: {%s}\n', fnames{k}, numel(val), strjoin(fieldnames(val),', '));
+        else
+            fprintf('  %s: %s\n', fnames{k}, class(val));
+        end
+    end
+end
+
+%% ===== EIGEN: DELETE =====
+function EigenDelete_Callback(filenameRelative)
+    % Confirm deletion
+    if ~java_dialog('confirm', ['Delete eigen file?' 10 filenameRelative], 'Delete eigen')
+        return;
+    end
+    % Resolve to full path and delete the file
+    filenameFull = file_fullpath(filenameRelative);
+    file_delete(filenameFull, 1);
+    % Find the eigen entry in the DB and remove it
+    [~, iSubject, iSurface, iEigen] = bst_get('EigenFile', filenameRelative);
+    if ~isempty(iSubject)
+        ProtocolSubjects = bst_get('ProtocolSubjects');
+        if iSubject == 0
+            ProtocolSubjects.DefaultSubject.Surface(iSurface).Eigen(iEigen) = [];
+        else
+            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Eigen(iEigen) = [];
         end
         bst_set('ProtocolSubjects', ProtocolSubjects);
         db_save();
