@@ -1,9 +1,9 @@
-function [Vertices, Faces, isManifold, report] = tess_manifold(Vertices, Faces, varargin)
-% TESS_MANIFOLD: Validate and (optionally) repair a triangulated surface as a 2-manifold.
+function [Vertices, Faces, isManifold, report] = tess_repair(Vertices, Faces, varargin)
+% TESS_REPAIR: Validate and (optionally) repair a triangulated surface as a 2-manifold.
 %
-% USAGE:  [~, ~, isManifold, report]            = tess_manifold(Vertices, Faces)              % check only
-%         [Vertices, Faces, isManifold, report] = tess_manifold(Vertices, Faces, 'Repair', 1) % check + repair
-%         [Vertices, Faces, isManifold, report] = tess_manifold(Vertices, Faces, 'RequireClosed', 1, ...)
+% USAGE:  [~, ~, isManifold, report]            = tess_repair(Vertices, Faces)              % check only
+%         [Vertices, Faces, isManifold, report] = tess_repair(Vertices, Faces, 'Repair', 1) % check + repair
+%         [Vertices, Faces, isManifold, report] = tess_repair(Vertices, Faces, 'RequireClosed', 1, ...)
 %
 % DESCRIPTION:
 %     Single entry point for 2-manifold validation and repair of a triangulated
@@ -143,7 +143,7 @@ end
 if Repair && ~isManifold
     validationBefore = report;
     if Verbose
-        fprintf('BST> tess_manifold: Mesh has defects, repairing...\n');
+        fprintf('BST> tess_repair: Mesh has defects, repairing...\n');
     end
     [Vertices, Faces, repairDetails] = doRepair(Vertices, Faces, MaxIter, Verbose);
     % Re-validate the repaired mesh: the report must describe what the caller gets back.
@@ -169,7 +169,7 @@ end
 if Verbose
     printSummary(report);
     if isfield(report, 'repair') && report.repair.performed
-        fprintf('BST> tess_manifold: Repaired %d face(s) in %d iteration(s), %d orientation flip(s). Final: %d V, %d F.\n', ...
+        fprintf('BST> tess_repair: Repaired %d face(s) in %d iteration(s), %d orientation flip(s). Final: %d V, %d F.\n', ...
             report.repair.nFixed, report.repair.iterations, report.repair.nFlippedFaces, ...
             size(Vertices, 1), size(Faces, 1));
     end
