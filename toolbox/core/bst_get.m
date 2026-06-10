@@ -1209,8 +1209,6 @@ switch contextName
                 return
             end
         end
-            
-
 
 %% ==== MANIFOLD FILE ====
     % Usage : [sSubject, iSubject, iSurface, iManifold] = bst_get('ManifoldFile', ManifoldFile)
@@ -1223,7 +1221,7 @@ switch contextName
         ProtocolSubjects = GlobalData.DataBase.ProtocolSubjects(GlobalData.DataBase.iProtocol);
         if isempty(ProtocolSubjects)
             return
-        end;
+        end
 
         % Parse inputs
         if (nargin == 2)
@@ -1266,7 +1264,6 @@ switch contextName
                 end
             end
         end
-
 
 %% ==== SURFACE FILE BY TYPE ====
     % Usage : [sSurface, iSurface] = bst_get('SurfaceFileByType', iSubject,    SurfaceType)

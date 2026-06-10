@@ -371,6 +371,37 @@ if (CurrentDbVersion < 5.03) && ~isempty(ProtocolsListStudies) && ~isfield(Proto
     bst_set('ProcessOptions', []);
 end
 
+%% ===== UPDATE: 10-Jun-2026 =====
+% Modification: Add 'Manifold', 'Eigen' and 'Operator' child lists to the Surface structures.
+% Surfaces saved before this schema update are missing these fields, which breaks any
+% homogeneous struct-array assignment (e.g. db_add_surface's "Surface(i) = db_template('Surface')").
+if (CurrentDbVersion < 5.04)
+    isSurfFixed = 0;
+    templateSurface = db_template('Surface');
+    for iProt = 1:length(ProtocolsListSubjects)
+        subjFields = fieldnames(ProtocolsListSubjects(iProt));
+        for iField = 1:length(subjFields)
+            subjField = subjFields{iField};
+            for iSubj = 1:length(ProtocolsListSubjects(iProt).(subjField))
+                sSurf = ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface;
+                if isempty(sSurf)
+                    continue;
+                end
+                [sSurf, isFix] = NormalizeSurfaceArray(sSurf, templateSurface);
+                if isFix
+                    ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface = sSurf;
+                    isSurfFixed = 1;
+                end
+            end
+        end
+    end
+    if isSurfFixed
+        disp('BST> Database structure: Adding manifold/eigen/operator support to surfaces...');
+        SaveProtocolSubjects();
+        disp('BST> Database structure: Done.');
+    end
+end
+
 %% ===== JUST BEFORE RETURNING TO STARTUP FUNCTION =====
 % Save the new database version
 if saveMetadata
@@ -480,6 +511,41 @@ end
         end
     end
     
+end
+
+%% ===== NORMALIZE SURFACE ARRAY =====
+% Backfill any missing template fields (Manifold/Eigen/Operator, ...) on every element of a
+% Surface struct array, preserving existing values and keeping the array homogeneous and in
+% template field order so that "Surface(i) = db_template('Surface')" assignments succeed.
+function [sSurf, isFixed] = NormalizeSurfaceArray(sSurf, templateSurface)
+    if (nargin < 2) || isempty(templateSurface)
+        templateSurface = db_template('Surface');
+    end
+    isFixed = 0;
+    if isempty(sSurf)
+        return;
+    end
+    tFields = fieldnames(templateSurface);
+    % Only rebuild if at least one element is missing one of the template fields
+    if all(isfield(sSurf, tFields))
+        return;
+    end
+    isFixed = 1;
+    origSize = size(sSurf);
+    % Build a brand-new array element by element: we cannot widen the field set of a single
+    % element of an existing struct array in place (MATLAB throws "Subscripted assignment between
+    % dissimilar structures"). Normalize each scalar struct, then concatenate into a fresh array.
+    sNew = cell(1, numel(sSurf));
+    for iSurf = 1:numel(sSurf)
+        % override=0: keep existing values, only add missing fields
+        s = struct_copy_fields(sSurf(iSurf), templateSurface, 0);
+        % Enforce a consistent field order so all elements are homogeneous with
+        % db_template('Surface'): template fields first, then any legacy fields not in template.
+        extraFields = setdiff(fieldnames(s), tFields, 'stable');
+        sNew{iSurf} = orderfields(s, [tFields; extraFields]);
+    end
+    % Concatenate and restore the original array orientation (Surface lists are 1xN row vectors)
+    sSurf = reshape([sNew{:}], origSize);
 end
 
 function [ProtocolMat, ProtocolFile] = GetProtocolMat(sProtocol)

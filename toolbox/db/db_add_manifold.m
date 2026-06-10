@@ -66,23 +66,24 @@ ManifoldMat.Comment = Comment;
 % Save to disk
 bst_save(OutputFileFull, ManifoldMat, 'v7');
 
-% Normalize all surfaces to have the Manifold/Eigen/Operator fields so the
-% struct array remains homogeneous (required by db_surface_sort and MATLAB's
-% struct-array assignment rules).  Surfaces written before Task 2's schema
-% update will be missing these fields.
-emptyManifold = struct('FileName', {}, 'Comment', {});
-emptyEigen    = struct('FileName', {}, 'Comment', {}, 'Variant', {});
-emptyOperator = struct('FileName', {}, 'Comment', {}, 'Variant', {});
-for k = 1:numel(sSubject.Surface)
-    if ~isfield(sSubject.Surface(k), 'Manifold')
-        sSubject.Surface(k).Manifold = emptyManifold;
+% Normalize all surfaces against db_template('Surface') so the struct array stays
+% homogeneous (required by db_surface_sort and MATLAB's struct-array assignment
+% rules). db_template is the single source of truth for the Manifold/Eigen/Operator
+% empty schemas, so they cannot drift. Existing protocols are normally backfilled at
+% load time by db_update (DB v5.04); this remains correct (and a near no-op) even if a
+% non-normalized surface is passed. A fresh array is rebuilt rather than assigned
+% element-by-element, because widening the field set of one element of an existing
+% struct array in place throws "Subscripted assignment between dissimilar structures".
+templateSurface = db_template('Surface');
+tFields = fieldnames(templateSurface);
+if ~isempty(sSubject.Surface) && ~all(isfield(sSubject.Surface, tFields))
+    sNew = cell(1, numel(sSubject.Surface));
+    for k = 1:numel(sSubject.Surface)
+        s = struct_copy_fields(sSubject.Surface(k), templateSurface, 0);
+        extraFields = setdiff(fieldnames(s), tFields, 'stable');
+        sNew{k} = orderfields(s, [tFields; extraFields]);
     end
-    if ~isfield(sSubject.Surface(k), 'Eigen')
-        sSubject.Surface(k).Eigen = emptyEigen;
-    end
-    if ~isfield(sSubject.Surface(k), 'Operator')
-        sSubject.Surface(k).Operator = emptyOperator;
-    end
+    sSubject.Surface = reshape([sNew{:}], size(sSubject.Surface));
 end
 
 % Append a child entry to the parent surface's Manifold list
