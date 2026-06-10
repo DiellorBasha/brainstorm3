@@ -105,6 +105,12 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     sHeadModel.FileName      = file_short(OutputFile);
     sHeadModel.Comment       = CompHM.Comment;
     sHeadModel.HeadModelType = CompHM.HeadModelType;
+    % Carry the base model's modality methods so the node offers "View <mod>
+    % leadfield vectors" in the tree and the viewer can detect its modalities.
+    sHeadModel.MEGMethod  = sStudy.HeadModel(iBase).MEGMethod;
+    sHeadModel.EEGMethod  = sStudy.HeadModel(iBase).EEGMethod;
+    sHeadModel.SEEGMethod = sStudy.HeadModel(iBase).SEEGMethod;
+    sHeadModel.ECOGMethod = sStudy.HeadModel(iBase).ECOGMethod;
     iHM = length(sStudy.HeadModel) + 1;
     sStudy.HeadModel(iHM) = sHeadModel;
     sStudy.iHeadModel     = iHM;

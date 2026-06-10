@@ -44,6 +44,7 @@ CortexSurface = [];
 ChannelMat = [];
 Channels = [];
 iChannels = [];
+DiracEigenAll = cell(1, length(HeadmodelFiles));   % per-file Dirac eigenbasis (empty for regular leadfields)
 allModalities = {'EEG', 'MEG', 'SEEG', 'ECOG'};
 markersLocs = [];
 bst_progress('start', 'View leadfields', 'Loading headmodels...');
@@ -95,6 +96,15 @@ for iFile = 1:length(HeadmodelFiles)
     if isempty(HeadmodelMat{iFile}.GridLoc)
         TessMat = in_tess_bst(HeadmodelMat{iFile}.SurfaceFile);
         HeadmodelMat{iFile}.GridLoc = TessMat.Vertices;
+    end
+    % Dirac eigenmode leadfield: load the eigenbasis so the per-channel field can be
+    % reconstructed to vertex space (Gain is [nCh x 2K], not [nCh x 3*nVert]).
+    if isfield(HeadmodelMat{iFile},'isDiracEigenmode') && ~isempty(HeadmodelMat{iFile}.isDiracEigenmode) && HeadmodelMat{iFile}.isDiracEigenmode
+        Tdir = in_tess_bst(HeadmodelMat{iFile}.SurfaceFile);
+        if ~isfield(Tdir,'DiracEigen') || isempty(Tdir.DiracEigen)
+            error(['No Dirac eigenbasis on surface: ' HeadmodelMat{iFile}.SurfaceFile '. Recompute the Dirac eigenmode leadfield.']);
+        end
+        DiracEigenAll{iFile} = Tdir.DiracEigen;
     end
 end
 if isempty(allModalities)
@@ -521,10 +531,18 @@ bst_progress('stop');
     end
 
 %% ===== GET LEADFIELD =====
-    function GetLeadField       
+    function GetLeadField
         % Update the LF according to the selected channels only
         for iLF = 1:length(HeadmodelFiles)
-            LF_finale{iLF} = HeadmodelMat{iLF}.Gain(iChannels,:);
+            if ~isempty(DiracEigenAll{iLF})
+                % Dirac eigenmode leadfield: reconstruct the selected channels' fields
+                % to vertex space (imag(Phi_D * Gain(c,:)')) so the standard quiver
+                % display (per-channel [1 x 3*nVert]) applies unchanged.
+                LF_finale{iLF} = bst_dirac_eigenmode_field(DiracEigenAll{iLF}, ...
+                    HeadmodelMat{iLF}.Gain(iChannels,:), HeadmodelMat{iLF});
+            else
+                LF_finale{iLF} = HeadmodelMat{iLF}.Gain(iChannels,:);
+            end
         end
     end
 
