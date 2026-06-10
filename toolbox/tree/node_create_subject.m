@@ -139,6 +139,18 @@ else
                     end
                 end
             end
+            % Nest operator child nodes under this surface
+            if isfield(sSubject.Surface(iSurface), 'Operator')
+                for iO = 1:numel(sSubject.Surface(iSurface).Operator)
+                    [chCreated, chNode] = CreateNode('operator', ...
+                        char(sSubject.Surface(iSurface).Operator(iO).Comment), ...
+                        char(sSubject.Surface(iSurface).Operator(iO).FileName), ...
+                        iO, iSubject, iSearch);
+                    if chCreated
+                        nodeSurface.add(chNode);
+                    end
+                end
+            end
         end
     end
 end
