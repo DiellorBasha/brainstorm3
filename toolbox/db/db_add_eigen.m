@@ -89,6 +89,8 @@ end
 % Append a child entry to the parent surface's Eigen list
 newEntry.FileName = file_short(OutputFileFull);
 newEntry.Comment  = Comment;
+newEntry.Variant  = '';
+if isfield(EigenMat, 'Variant'); newEntry.Variant = EigenMat.Variant; end
 sSubject.Surface(iSurface).Eigen(end+1) = newEntry;
 iEigen = numel(sSubject.Surface(iSurface).Eigen);
 

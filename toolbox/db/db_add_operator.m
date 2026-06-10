@@ -89,6 +89,8 @@ end
 % Append a child entry to the parent surface's Operator list
 newEntry.FileName = file_short(OutputFileFull);
 newEntry.Comment  = Comment;
+newEntry.Variant  = '';
+if isfield(OperatorMat, 'Variant'); newEntry.Variant = OperatorMat.Variant; end
 sSubject.Surface(iSurface).Operator(end+1) = newEntry;
 iOperator = numel(sSubject.Surface(iSurface).Operator);
 

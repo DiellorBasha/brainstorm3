@@ -152,6 +152,7 @@ function test_connection_shapes_and_ortho(tc)
     cleanup = onCleanup(@() local_cleanup_operators(SurfaceFile, 'Connection Laplacian')); %#ok<NASGU>
 
     verifyEqual(tc, EM.Variant, 'Connection Laplacian');
+    verifyEqual(tc, EM.Provenance.Ortho, 'Rayleigh-Ritz', 'Connection Ortho provenance');
     verifyEqual(tc, size(EM.Phi),    [1 2], 'Phi should be 1x2');
     verifyEqual(tc, size(EM.Lambda), [1 2], 'Lambda should be 1x2');
 
@@ -226,9 +227,9 @@ function test_find_or_create_operator(tc)
     % First call: must create exactly one operator node of the variant.
     EM1 = tess_eigen(SurfaceFile, Variant, 'K',K, 'NoSave',1, 'ForceRecompute',1);
     [n1, files1] = local_count_operator_variant(SurfaceFile, Variant);
-    verifyEqual(tc, n1, 1, 'First tess_eigen should create one operator node');
     createdOp = files1{1};
     cleanup = onCleanup(@() local_delete_operator(createdOp)); %#ok<NASGU>
+    verifyEqual(tc, n1, 1, 'First tess_eigen should create one operator node');
     verifyEqual(tc, file_short(EM1.OperatorFile), file_short(createdOp), ...
         'EigenMat.OperatorFile should reference the created operator');
 
