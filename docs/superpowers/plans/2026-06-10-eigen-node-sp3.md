@@ -99,12 +99,12 @@ db_reload_database('current'); disp('T2 OK');
     - `nVh` from `size(A,1)` (LBO/Connection `nVh`; Dirac `4*nVh`).
     - Dirac multiplet handling: round `K` to a multiple of 4 and over-fetch (reuse the `nRequest = min(K + max(8, ceil(0.3*K)), <cap>)` logic from `tess_dirac_eigenmodes`); LBO/Connection: `nRequest = min(K+8, size(A,1)-2)`.
     - `[V, D] = eigs(A, B, nRequest, 'smallestabs');` `lam = real(diag(D));` sort ascending.
-    - **B-orthonormalize.** Dirac → `V = local_ritz_basis(A, B, V);` (nested fn, see Step 1b). LBO/Connection → standard B-orthonormalization (`V = V ./ sqrt(diag(V' * B * V)).'` with a small rank guard). Keep the first `K` columns; `Phi{hh}=V(:,1:K); Lambda{hh}=lam(1:K);`
+    - **B-orthonormalize.** Dirac AND Connection → `V = local_ritz_basis(A, B, V);` (nested fn, see Step 1b) — BOTH have degenerate multiplets, so plain normalization leaves the set B-non-orthonormal (Connection residual ~0.16 observed). LBO → standard B-orthonormalization (`V = V ./ sqrt(real(diag(V' * B * V))).'` with a small rank guard). Keep the first `K` columns; `Phi{hh}=V(:,1:K); Lambda{hh}=lam(1:K);`
     - `GlobalVertices{hh} = gv;`
   - Assemble `EigenMat = db_template('eigenmat')` with the 1×2 cells, `OperatorFile`, `Variant`, `ParentSurface=SurfaceFile`, `K`, and `Provenance` (Backend='nxr', NxrVersion from `nxr_compute('version')`, Variant, K, Tau when Dirac, Ortho='Rayleigh-Ritz' for Dirac else 'B-orthonormal', ComputeDate=`datestr(now,'yyyy-mm-dd HH:MM:SS')`).
   - `db_add_eigen(iSubject, SurfaceFile, EigenMat, sprintf('%s eigenmodes (K=%d)', Variant, K))` unless `NoSave`. Return `EigenMat`. License header.
 
-- [ ] **Step 1b: `local_ritz_basis` nested function** — copy the Rayleigh–Ritz B-orthonormalization from `tess_dirac_eigenmodes.m` verbatim into `tess_eigen.m` as a `local_`-prefixed nested/subfunction (rank-revealing B-orthonormalization + Rayleigh–Ritz; throws `:rankDeficient` if the fetched set is too small). Do NOT create a standalone shared file.
+- [ ] **Step 1b: `local_ritz_basis` nested function** — adapt the Rayleigh–Ritz B-orthonormalization from `tess_dirac_eigenmodes.m` into `tess_eigen.m` as a `local_`-prefixed nested/subfunction (rank-revealing B-orthonormalization + Rayleigh–Ritz; throws `:rankDeficient` if the fetched set is too small). Must be **complex-safe** (use `'` Hermitian transpose, not `.'`) since the Connection variant is complex Hermitian. Do NOT create a standalone shared file; do NOT modify `tess_dirac_eigenmodes.m`.
 
 - [ ] **Step 2: Test `dev/tests/test_tess_eigen.m`** (real 20484 cortex via `bst_canonical_cortex(20484)` — NEVER a hand-built mesh; backup/restore via `onCleanup`):
   - Use a small `K` (e.g. `K=12`, Dirac rounds to 12) to keep eigs fast.

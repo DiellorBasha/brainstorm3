@@ -14,7 +14,7 @@ Add the third derived-anatomy node type — **`eigen_`**, a surface child holdin
 - **Scope = eigen node only.** Migrating the eigenmode leadfield/inverse consumers and retiring the old TessMat eigenmode fields is deferred to SP4.
 - **Find-or-create operator.** `tess_eigen(SurfaceFile, OperatorName, ...)` reuses an existing operator node of the matching `Variant` on the surface, or builds one via `tess_operators` if absent, then eigensolves it and stores the resulting `OperatorFile` reference.
 - **Variant labels mirror the operator names** — `'Laplace-Beltrami'` | `'Connection Laplacian'` | `'Dirac'` (the eigenvector field dimensionality follows from the variant).
-- **Rayleigh–Ritz for Dirac** degenerate multiplets, included as a `local_`-prefixed **nested function inside `tess_eigen.m`** (Brainstorm convention — no standalone shared helper; the existing copy in `tess_dirac_eigenmodes.m` stays as-is). LBO/Connection use plain B-orthonormalization.
+- **Rayleigh–Ritz for Dirac AND Connection** degenerate multiplets, included as a `local_`-prefixed **nested function inside `tess_eigen.m`** (Brainstorm convention — no standalone shared helper; the existing copy in `tess_dirac_eigenmodes.m` stays as-is). The nested copy is **complex-safe** (Hermitian transpose) for the complex Connection operator. Only LBO uses plain B-orthonormalization.
 - **Per-hemisphere**, atlas split via `tess_hemisplit` (never `conncomp`) — consistent with SP2.
 - **Canonical Mesh Rule** applies: any `nxr_compute('create')` reached transitively (via `tess_operators` find-or-create) goes through `nxr_safe_create` on a `bst_canonical_cortex` mesh; tests never hand-build meshes.
 
@@ -52,7 +52,7 @@ Provenance      % Backend='nxr', NxrVersion, Variant, K, Tau (Dirac), Ortho='Ray
 - Map `OperatorName` → `Variant` (case-insensitive; clear error on unknown).
 - Guards: nxr-compute installed; Structures L/R atlas (needed by the find-or-create path → `tess_operators` → `tess_hemisplit`).
 - **Find-or-create operator:** scan `sSubject.Surface(iSurface).Operator` for an entry with matching `Variant`; if found, resolve its file; else `tess_operators(SurfaceFile, OperatorName [, 'Tau',Tau])`. Load the operator node's per-hemi `(Operator A, Mass B)` cells and its `GlobalVertices`.
-- **Per hemisphere:** `nModes = K` (Dirac: round to a multiple of 4 and over-fetch for the 4-fold multiplets, reusing the cap logic from `tess_dirac_eigenmodes`); `[V, D] = eigs(A, B, nRequest, 'smallestabs')`; B-orthonormalize. **Dirac → `local_ritz_basis`** (nested function) for the degenerate multiplets; LBO/Connection → plain B-orthonormalization. Keep the first `K` modes; `Phi{hh}=V`, `Lambda{hh}=diag(D)`.
+- **Per hemisphere:** `nModes = K` (Dirac: round to a multiple of 4 and over-fetch for the 4-fold multiplets, reusing the cap logic from `tess_dirac_eigenmodes`); `[V, D] = eigs(A, B, nRequest, 'smallestabs')`; B-orthonormalize. **Dirac and Connection → `local_ritz_basis`** (nested function) for their degenerate multiplets; LBO → plain B-orthonormalization. Keep the first `K` modes; `Phi{hh}=V`, `Lambda{hh}=diag(D)`.
 - Assemble `EigenMat = db_template('eigenmat')` (1×2 `Phi`/`Lambda`/`GlobalVertices`, `OperatorFile`, `Variant`, `ParentSurface`, `Provenance`). `db_add_eigen` unless `NoSave`. Comment e.g. `sprintf('%s eigenmodes (K=%d)', Variant, K)`. Return `EigenMat`.
 - Options: `K` (default **400**), `Tau` (0.5, forwarded to operator creation for Dirac), `NoSave`, `ForceRecompute`. License header.
 
