@@ -1266,6 +1266,61 @@ switch contextName
             end
         end
 
+%% ==== OPERATOR FILE ====
+    % Usage : [sSubject, iSubject, iSurface, iOperator] = bst_get('OperatorFile', OperatorFile)
+    case 'OperatorFile'
+        % No protocol in database
+        if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
+            return;
+        end
+        % Get list of current protocol subjects
+        ProtocolSubjects = GlobalData.DataBase.ProtocolSubjects(GlobalData.DataBase.iProtocol);
+        if isempty(ProtocolSubjects)
+            return
+        end
+
+        % Parse inputs
+        if (nargin == 2)
+            OperatorFile = varargin{2};
+        else
+            error('Invalid call to bst_get().');
+        end
+
+        % Remove SUBJECTS path from OperatorFile
+        OperatorFile = file_short(OperatorFile);
+        % Look for operator file in DefaultSubject
+        if ~isempty(ProtocolSubjects.DefaultSubject)
+            for iSurf = 1:length(ProtocolSubjects.DefaultSubject.Surface)
+                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Operator') && ...
+                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Operator)
+                    iOperator = find(file_compare(OperatorFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Operator.FileName}), 1);
+                    if ~isempty(iOperator)
+                        argout1 = ProtocolSubjects.DefaultSubject;
+                        argout2 = 0;
+                        argout3 = iSurf;
+                        argout4 = iOperator;
+                        return
+                    end
+                end
+            end
+        end
+        % Look for operator file in all subjects
+        for iSubj = 1:length(ProtocolSubjects.Subject)
+            for iSurf = 1:length(ProtocolSubjects.Subject(iSubj).Surface)
+                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Operator') && ...
+                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Operator)
+                    iOperator = find(file_compare(OperatorFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Operator.FileName}), 1);
+                    if ~isempty(iOperator)
+                        argout1 = ProtocolSubjects.Subject(iSubj);
+                        argout2 = iSubj;
+                        argout3 = iSurf;
+                        argout4 = iOperator;
+                        return
+                    end
+                end
+            end
+        end
+
 %% ==== SURFACE FILE BY TYPE ====
     % Usage : [sSurface, iSurface] = bst_get('SurfaceFileByType', iSubject,    SurfaceType)
     %         [sSurface, iSurface] = bst_get('SurfaceFileByType', SubjectFile, SurfaceType)
@@ -2291,17 +2346,10 @@ switch contextName
                     sItem = sStudy.Surface(iSurf).Manifold(iItem);
                 end
             case 'operator'
-                % Operator child node: resolve via OperatorFile.
-                % bst_get('OperatorFile') is added in Task 2 (db_add_operator).
-                % Guard with try/catch so AnyFile returns empty (not an error) until T2 lands.
-                sStudy = []; iStudy = 0; iItem = 0;
-                try
-                    [sStudy, iStudy, iSurf, iItem] = bst_get('OperatorFile', FileName);
-                    if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
-                        sItem = sStudy.Surface(iSurf).Operator(iItem);
-                    end
-                catch
-                    % OperatorFile not yet registered — return empty (safe fallback)
+                % Operator child node: resolve via OperatorFile
+                [sStudy, iStudy, iSurf, iItem] = bst_get('OperatorFile', FileName);
+                if (nargout >= 5) && ~isempty(sStudy) && ~isempty(iSurf) && ~isempty(iItem)
+                    sItem = sStudy.Surface(iSurf).Operator(iItem);
                 end
             otherwise
                 error('File type is not recognized.');
