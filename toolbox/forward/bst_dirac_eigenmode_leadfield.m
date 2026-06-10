@@ -56,6 +56,11 @@ function CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, varargin)
         error('bst_dirac_eigenmode_leadfield:badBasis', ...
             'DiracEigen must be a 1x2 per-hemisphere struct array (from tess_dirac_eigenmodes).');
     end
+    if DiracEigen(1).Tau ~= DiracEigen(2).Tau
+        error('bst_dirac_eigenmode_leadfield:tauMismatch', ...
+            'Hemispheres have different Tau (%.3g vs %.3g); recompute DiracEigen with a single Tau.', ...
+            DiracEigen(1).Tau, DiracEigen(2).Tau);
+    end
 
     Kfull = min([DiracEigen.nModes]);
     if isempty(nModes) || nModes <= 0
@@ -72,6 +77,10 @@ function CompHM = bst_dirac_eigenmode_leadfield(HeadModel, DiracEigen, varargin)
         if size(Phi,1) ~= 4*nVh
             error('bst_dirac_eigenmode_leadfield:shapeMismatch', ...
                 'Hemisphere %d: Vectors has %d rows, expected 4*nV=%d.', hh, size(Phi,1), 4*nVh);
+        end
+        if size(Phi,2) < K
+            error('bst_dirac_eigenmode_leadfield:shapeMismatch', ...
+                'Hemisphere %d: Vectors has %d columns, fewer than K=%d.', hh, size(Phi,2), K);
         end
         Phi  = Phi(:, 1:K);
         Vals = double(DiracEigen(hh).Values(:)); Vals = Vals(1:K);

@@ -42,7 +42,7 @@ Proj = eye(nCh);                 % no SSP
 Kernel = bst_inverse_eigenmodes('SolvePure', CompHM.Gain, CompHM.Eigenvalues, ...
     iW, Proj, 'mne', 'log', 1, 3, false);
 
-assert(isequal(size(Kernel), [CompHM.nModes, nCh]), 'Kernel must be [2K x nChannels].');
+assert(isequal(size(Kernel), [CompHM.nModes, nCh]), 'Kernel must be [nModes x nChannels].');
 assert(all(isfinite(Kernel(:))), 'Kernel must be finite.');
 
 disp('ALL TESTS PASSED');
