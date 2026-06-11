@@ -2962,6 +2962,38 @@ function hGrid = PlotGrid(hFig, GridLoc, GridValues, GridInd, DataAlpha, DataLim
     end
 end
 
+%% ===== COMPUTE SOURCE VECTOR GLYPHS =====
+% Build quiver3 glyph geometry for an ambient (Cartesian) source vector field.
+%   P         [nVert x 3] anchor positions (displayed surface vertices, meters)
+%   Nrm       [nVert x 3] surface vertex normals (~unit; for lifting arrows off
+%             the surface). A degenerate zero-length normal yields no lift.
+%   V3        [nVert x 3] per-vertex source 3-vector (ambient SCS components)
+%   idx       [k x 1] vertex indices to draw ([] = all)
+%   ScaleLen  scalar arrow length in meters (unit direction is scaled by this)
+%   OffsetLen scalar lift in meters along the normal (avoids depth-buffer occlusion)
+% Returns struct G with column vectors X,Y,Z (arrow bases) and U,V,W (arrow vectors).
+% Direction is unit-normalized with an eps-guard; below-eps vectors get zero arrows.
+function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen) %#ok<DEFNU>
+    if isempty(idx)
+        idx = (1:size(P,1))';
+    end
+    idx = idx(:);
+    Pi = P(idx,:);   Ni = Nrm(idx,:);   Vi = V3(idx,:);
+    % Unit normals (guard against zero-length)
+    nN = sqrt(sum(Ni.^2,2));   nN(nN < eps) = 1;
+    Ni = Ni ./ nN;
+    % Arrow bases lifted along the normal
+    Base = Pi + OffsetLen * Ni;
+    % Unit-normalized directions (eps-guard -> zero arrow)
+    mag = sqrt(sum(Vi.^2,2));
+    good = mag > eps;
+    Dir = zeros(size(Vi));
+    Dir(good,:) = Vi(good,:) ./ mag(good);
+    Vec = ScaleLen * Dir;
+    G = struct('X', Base(:,1), 'Y', Base(:,2), 'Z', Base(:,3), ...
+               'U', Vec(:,1),  'V', Vec(:,2),  'W', Vec(:,3));
+end
+
 %% ===== PLOT 3D ELECTRODES =====
 function [hElectrodeGrid, ChanLoc] = PlotSensors3D(iDS, iFig, Channel, ChanLoc, TopoType) %#ok<DEFNU>
     global GlobalData;
