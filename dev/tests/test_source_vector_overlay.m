@@ -80,6 +80,14 @@ function test_source_vector_overlay()
     nMore = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
     [nPass,nFail] = chk('] increases arrow count', nMore > nLess, nPass,nFail);
 
+    % --- color keys: 'b' blue, 'k' black, and the color survives a redraw ---
+    figure_3d('SetSourceVectorColor', hFig, [0 0 1]);
+    [nPass,nFail] = chk('b -> blue arrows', isequal(get(findobj(hFig,'Tag','SourceVectors'),'Color'), [0 0 1]), nPass,nFail);
+    panel_time('SetCurrentTime', 22.0); drawnow;   % redraw must preserve color
+    [nPass,nFail] = chk('color persists across time step', isequal(get(findobj(hFig,'Tag','SourceVectors'),'Color'), [0 0 1]), nPass,nFail);
+    figure_3d('SetSourceVectorColor', hFig, [0 0 0]);
+    [nPass,nFail] = chk('k -> black arrows', isequal(get(findobj(hFig,'Tag','SourceVectors'),'Color'), [0 0 0]), nPass,nFail);
+
     % --- toggle OFF: the quiver must be removed ---
     figure_3d('SetShowSourceVectors', hFig, iTess, false); drawnow;
     [nPass,nFail] = chk('overlay removed on toggle off', isempty(findobj(hFig,'Tag','SourceVectors')), nPass,nFail);

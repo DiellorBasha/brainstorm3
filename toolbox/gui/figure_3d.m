@@ -1063,6 +1063,11 @@ function FigureKeyPressedCallback(hFig, keyEvent)
             AdjustSourceVectorDensity(hFig, 1/1.5);
         case ']'
             AdjustSourceVectorDensity(hFig, 1.5);
+        % === SOURCE-VECTOR ARROW COLOR ('b' blue, 'k' black) ===
+        case 'b'
+            SetSourceVectorColor(hFig, [0 0 1]);
+        case 'k'
+            SetSourceVectorColor(hFig, [0 0 0]);
 
         otherwise
             % ===== PROCESS BY KEYS =====
@@ -3101,6 +3106,12 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
     end
     OffsetLen = 0.0015;                     % ~1.5 mm lift to clear the depth buffer
     G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen);
+    % Arrow color (default black; 'b'/'k' keys recolor via SetSourceVectorColor)
+    if isfield(sTess,'SourceVectorColor') && ~isempty(sTess.SourceVectorColor)
+        arrowColor = sTess.SourceVectorColor;
+    else
+        arrowColor = [0 0 0];
+    end
     % Create or update the quiver object
     if isempty(hQuiver)
         % quiver3 is a HIGH-LEVEL plot call: on the Brainstorm 3D axes
@@ -3110,7 +3121,7 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
         npPrev = get(hAxes, 'NextPlot');
         set(hAxes, 'NextPlot', 'add');
         hQuiver = quiver3(G.X, G.Y, G.Z, G.U, G.V, G.W, 0, ...
-            'Parent', hAxes, 'Color', [0 0 0], 'LineWidth', 1, ...
+            'Parent', hAxes, 'Color', arrowColor, 'LineWidth', 1, ...
             'MaxHeadSize', 0.5, 'AutoScale', 'off', 'Tag', QuiverTag);
         set(hAxes, 'NextPlot', npPrev);
     else
@@ -3154,6 +3165,22 @@ function AdjustSourceVectorDensity(hFig, factor)
     TessInfo(iTess).SourceVectorMaxArrows = max(50, round(drawn * factor));
     setappdata(hFig, 'Surface', TessInfo);
     PlotSourceVectors(hFig, iTess);
+end
+
+%% ===== SET SOURCE VECTOR COLOR =====
+% Recolor the source-vector arrows ('b' blue / 'k' black). No-op unless a source
+% surface currently has the overlay on. Stores the color so it survives redraws.
+function SetSourceVectorColor(hFig, color)
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo), return; end
+    iTess = find(arrayfun(@(t) isfield(t,'ShowSourceVectors') && ~isempty(t.ShowSourceVectors) ...
+        && t.ShowSourceVectors && ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
+    if isempty(iTess), return; end   % overlay not active -> let the key pass through
+    TessInfo(iTess).SourceVectorColor = color;
+    setappdata(hFig, 'Surface', TessInfo);
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    hQ    = findobj(hAxes, 'Tag', 'SourceVectors');
+    if ~isempty(hQ), set(hQ, 'Color', color); end
 end
 
 %% ===== PLOT 3D ELECTRODES =====
