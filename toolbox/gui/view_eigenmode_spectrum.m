@@ -221,7 +221,8 @@ function hFig = ViewFigure(ResultsFile)
         setappdata(hFig, 'TsInfo', TsInfo);
         % Let bst_figures('ReloadFigures') redraw us (butterfly<->column toggle).
         setappdata(hFig, 'ReloadCall', {'view_eigenmode_spectrum', 'UpdateFigurePlot', hFig, 0});
-        % First plot + show + select.
+        % First plot + show + select. (Controls are (re)created inside UpdateFigurePlot,
+        % since figure_timeseries('PlotFigure') wipes figure-level uicontrols each redraw.)
         UpdateFigurePlot(hFig, 0);
         set(hFig, 'Visible', 'on');
         bst_figures('SetCurrentFigure', hFig, '2D');
@@ -248,7 +249,53 @@ end
 function ResizeCallback(hFig, ev)
     figure_timeseries('ResizeCallback', hFig, ev);
     AdjustAxesMargins(hFig);
+    PositionControls(hFig);
 end
+
+
+%% ===== GUI: on-figure controls (visible source + axis toggles, time readout) =====
+function AddControls(hFig)
+    if ~isempty(getappdata(hFig, 'hCtrlSource')) && ishandle(getappdata(hFig, 'hCtrlSource'))
+        return;
+    end
+    src = getappdata(hFig, 'SpectrumSource'); if isempty(src), src = 'mode'; end
+    ax  = getappdata(hFig, 'AxisMode');       if isempty(ax),  ax  = 'eigenvalue'; end
+    hS = uicontrol(hFig, 'Style', 'popupmenu', 'String', {'Source: Amplitude', 'Source: dSPM'}, ...
+        'Value', SrcToVal(src), 'Units', 'pixels', 'FontSize', 9, 'BackgroundColor', [1 1 1], ...
+        'Tag', 'EigenSrcCtrl', ...
+        'TooltipString', 'Spectrum source: amplitude mode coefficients, or the dSPM vertex map projected onto the Dirac modes', ...
+        'Callback', @(h,e)SetSpectrumSource(hFig, ValToSrc(get(h, 'Value'))));
+    hA = uicontrol(hFig, 'Style', 'popupmenu', 'String', {'Axis: Eigenvalue', 'Axis: Mode index', 'Axis: Wavelength'}, ...
+        'Value', AxisToVal(ax), 'Units', 'pixels', 'FontSize', 9, 'BackgroundColor', [1 1 1], ...
+        'Tag', 'EigenAxisCtrl', ...
+        'TooltipString', 'Spectrum x-axis (all derived from the canonical Dirac eigenvalue)', ...
+        'Callback', @(h,e)SetAxisMode(hFig, ValToAxis(get(h, 'Value'))));
+    hT = uicontrol(hFig, 'Style', 'text', 'String', 't = n/a', 'Units', 'pixels', 'FontSize', 9, ...
+        'BackgroundColor', get(hFig, 'Color'), 'ForegroundColor', [0 0 0], ...
+        'HorizontalAlignment', 'right', 'Tag', 'EigenTimeCtrl');
+    setappdata(hFig, 'hCtrlSource', hS);
+    setappdata(hFig, 'hCtrlAxis',   hA);
+    setappdata(hFig, 'hCtrlTime',   hT);
+    PositionControls(hFig);
+end
+
+function PositionControls(hFig)
+    hS = getappdata(hFig, 'hCtrlSource');
+    hA = getappdata(hFig, 'hCtrlAxis');
+    hT = getappdata(hFig, 'hCtrlTime');
+    if isempty(hS) || ~ishandle(hS), return; end
+    p = get(hFig, 'Position');  W = p(3);  H = p(4);
+    y = H - 22;
+    set(hS, 'Position', [6,   y, 150, 20]);
+    set(hA, 'Position', [160, y, 150, 20]);
+    if ~isempty(hT) && ishandle(hT), set(hT, 'Position', [max(W-130,316), y, 122, 16]); end
+end
+
+% source/axis <-> popup value
+function v = SrcToVal(s),   if strcmpi(s, 'vertex'), v = 2; else, v = 1; end, end
+function s = ValToSrc(v),   if v == 2, s = 'vertex'; else, s = 'mode'; end, end
+function v = AxisToVal(a),  switch lower(a), case 'index', v = 2; case 'wavelength', v = 3; otherwise, v = 1; end, end
+function a = ValToAxis(v),  switch v, case 2, a = 'index'; case 3, a = 'wavelength'; otherwise, a = 'eigenvalue'; end, end
 
 function AdjustAxesMargins(hFig)
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
@@ -362,22 +409,21 @@ function UpdateFigurePlot(hFig, isFastUpdate)
             set(get(get(h, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
         end
     end
-    % Title: current time + source + axis-key hints.
+    % (Re)create the on-figure toggles -- PlotFigure above wipes figure-level
+    % uicontrols, so they must be rebuilt on every redraw (like the engine's buttons).
+    AddControls(hFig);
+    % Time readout in the top-right control (no axes title -> no overlap with the toggles).
     if ~isempty(GlobalData.UserTimeWindow.CurrentTime)
         tStr = sprintf('%1.3f s', GlobalData.UserTimeWindow.CurrentTime);
     else
         tStr = 'n/a';
     end
-    if ~isempty(hAxes)
-        ytop = zeros(1, numel(hAxes));
-        for k = 1:numel(hAxes)
-            pp = get(hAxes(k), 'Position');  ytop(k) = pp(2);
-        end
-        [~, iTop] = max(ytop);
-        title(hAxes(iTop), sprintf('Dirac eigenspectrum  |  t = %s  |  source: %s  (a=amplitude d=dSPM)  |  axis: e=\\lambda k=index w=wavelength', tStr, srcTag), ...
-              'Interpreter', 'tex');
+    hT = getappdata(hFig, 'hCtrlTime');
+    if ~isempty(hT) && ishandle(hT)
+        set(hT, 'String', ['t = ' tStr]);
     end
     AdjustAxesMargins(hFig);
+    PositionControls(hFig);
     % Restore the user's zoom on a time-step: X always; Y unless autoscale is on.
     if keepZoom && ~isempty(xlimOld)
         hAxNew = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
@@ -396,6 +442,8 @@ end
 %% ===== GUI: x-axis mode (eigenvalue/index/wavelength) =====
 function SetAxisMode(hFig, mode)
     setappdata(hFig, 'AxisMode', mode);
+    hA = getappdata(hFig, 'hCtrlAxis');
+    if ~isempty(hA) && ishandle(hA), set(hA, 'Value', AxisToVal(mode)); end
     UpdateFigurePlot(hFig, 0);
 end
 
@@ -403,6 +451,8 @@ end
 %% ===== GUI: spectrum source (mode=amplitude / vertex=dSPM) =====
 function SetSpectrumSource(hFig, src)
     setappdata(hFig, 'SpectrumSource', src);
+    hS = getappdata(hFig, 'hCtrlSource');
+    if ~isempty(hS) && ishandle(hS), set(hS, 'Value', SrcToVal(src)); end
     UpdateFigurePlot(hFig, 0);
 end
 
