@@ -3009,6 +3009,82 @@ function idx = SelectSourceVectorIdx(mag, MaxArrows) %#ok<DEFNU>
     end
 end
 
+%% ===== PLOT SOURCE VECTORS =====
+% Find-or-create the ambient source-vector quiver overlay for surface iTess.
+% Reads the un-oriented 3-vector at the current time and draws unit-normalized
+% direction arrows over the amplitude colormap. Mirrors PlotGrid's find-or-create.
+function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
+    QuiverTag = 'SourceVectors';
+    hAxes   = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    hQuiver = findobj(hAxes, 'Tag', QuiverTag);
+    % Get surfaces
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (iTess > numel(TessInfo))
+        return;
+    end
+    sTess = TessInfo(iTess);
+    % Off / not a source surface -> remove any existing quiver and stop
+    showVec = isfield(sTess,'ShowSourceVectors') && ~isempty(sTess.ShowSourceVectors) && sTess.ShowSourceVectors;
+    isSrc   = ~isempty(sTess.DataSource) && strcmpi(sTess.DataSource.Type, 'Source') && ~isempty(sTess.DataSource.FileName);
+    if ~showVec || ~isSrc
+        if ~isempty(hQuiver), delete(hQuiver); end
+        hQuiver = [];
+        return;
+    end
+    % Resolve dataset / result / un-oriented 3-vector at the current time
+    [tmp__, iFig, iDS] = bst_figures('GetFigure', hFig); %#ok<ASGLU>
+    if isempty(iDS), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
+    iResult = bst_memory('GetResultInDataSet', iDS, sTess.DataSource.FileName);
+    if isempty(iResult), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
+    % Trailing 0 is ApplyOrient=0: keep the raw 3-vector (no RMS orientation collapse)
+    [V3col, nComponents] = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex', 0);
+    if (nComponents ~= 3) || isempty(V3col)   % only unconstrained fields carry ambient vectors
+        if ~isempty(hQuiver), delete(hQuiver); end
+        hQuiver = [];
+        return;
+    end
+    V3 = reshape(V3col, 3, [])';            % [nVert x 3] ambient components
+    % Anchors + normals from the DISPLAYED patch (matches inflation/smoothing)
+    hPatch = sTess.hPatch;
+    if isempty(hPatch) || ~any(ishandle(hPatch))
+        if ~isempty(hQuiver), delete(hQuiver); end
+        hQuiver = [];
+        return;
+    end
+    P   = get(hPatch, 'Vertices');
+    Nrm = get(hPatch, 'VertexNormals');
+    if isempty(Nrm) || (size(Nrm,1) ~= size(P,1))
+        Nrm = repmat([0 0 1], size(P,1), 1);
+    end
+    % Source space and displayed surface must agree (guards volume/grid mismatch)
+    if (size(V3,1) ~= size(P,1))
+        if ~isempty(hQuiver), delete(hQuiver); end
+        hQuiver = [];
+        return;
+    end
+    % Decimation ("threshold the quiver number"); default = entire field
+    if isfield(sTess,'SourceVectorMaxArrows'), MaxArrows = sTess.SourceVectorMaxArrows; else, MaxArrows = []; end
+    mag = sqrt(sum(V3.^2,2));
+    idx = SelectSourceVectorIdx(mag, MaxArrows);
+    % Arrow length + surface lift (meters)
+    if isfield(sTess,'SourceVectorScale') && ~isempty(sTess.SourceVectorScale)
+        ScaleLen = sTess.SourceVectorScale;
+    else
+        ScaleLen = 0.004;
+    end
+    OffsetLen = 0.0015;                     % ~1.5 mm lift to clear the depth buffer
+    G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen);
+    % Create or update the quiver object
+    if isempty(hQuiver)
+        hQuiver = quiver3(G.X, G.Y, G.Z, G.U, G.V, G.W, 0, ...
+            'Parent', hAxes, 'Color', [0 0 0], 'LineWidth', 1, ...
+            'MaxHeadSize', 0.5, 'AutoScale', 'off', 'Tag', QuiverTag);
+    else
+        set(hQuiver, 'XData', G.X, 'YData', G.Y, 'ZData', G.Z, ...
+                     'UData', G.U, 'VData', G.V, 'WData', G.W);
+    end
+end
+
 %% ===== PLOT 3D ELECTRODES =====
 function [hElectrodeGrid, ChanLoc] = PlotSensors3D(iDS, iFig, Channel, ChanLoc, TopoType) %#ok<DEFNU>
     global GlobalData;
