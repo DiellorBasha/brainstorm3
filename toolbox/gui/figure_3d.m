@@ -3086,9 +3086,16 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
     G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen);
     % Create or update the quiver object
     if isempty(hQuiver)
+        % quiver3 is a HIGH-LEVEL plot call: on the Brainstorm 3D axes
+        % (NextPlot='replace') it runs newplot and RESETS the axes -- wiping the
+        % 'Axes3D' tag and deleting the cortex patch. Hold the axes across the
+        % create so newplot only adds (PlotGrid avoids this by using patch()).
+        npPrev = get(hAxes, 'NextPlot');
+        set(hAxes, 'NextPlot', 'add');
         hQuiver = quiver3(G.X, G.Y, G.Z, G.U, G.V, G.W, 0, ...
             'Parent', hAxes, 'Color', [0 0 0], 'LineWidth', 1, ...
             'MaxHeadSize', 0.5, 'AutoScale', 'off', 'Tag', QuiverTag);
+        set(hAxes, 'NextPlot', npPrev);
     else
         set(hQuiver, 'XData', G.X, 'YData', G.Y, 'ZData', G.Z, ...
                      'UData', G.U, 'VData', G.V, 'WData', G.W);
