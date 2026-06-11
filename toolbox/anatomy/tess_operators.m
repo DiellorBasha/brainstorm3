@@ -193,18 +193,22 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     A = nxr_compute('operators', h, 'laplacian', 'connection');
                     B = nxr_compute('operators', h, 'mass', 'galerkin');
                 case 'Dirac'
-                    % Co-normalized relative-Dirac family. The intrinsic block
-                    % (cotanL ⊗ I4) is dimensionless while the extrinsic curvature
-                    % block E carries 1/length^2, so a raw (1-Tau)*cotanL + Tau*E mixes
-                    % blocks whose generalized spectra scale as 1/s^2 vs 1/s^4 -- Tau is
-                    % then unit-dependent (in meters, Tau=0.5 is ~99.999% extrinsic).
-                    % Normalize each block to unit largest generalized eigenvalue vs the
-                    % mass B so Tau is a true dimensionless dial: Tau=0.5 == equal spectral
-                    % weight, portable across mesh size / units. (Single-scalar block
-                    % normalization is eigenvector-safe within each block; it only sets
-                    % their relative weighting in the combination.)
-                    L4 = nxr_compute('operators', h, 'dirac', 0);         % (cotanL ⊗ I4), intrinsic
-                    E  = nxr_compute('operators', h, 'dirac', 1);         % extrinsic curvature block
+                    % Full frame-transport Dirac operator ("f and N together"):
+                    % (1-Tau)*D_int^2 + Tau*E. BOTH blocks couple the quaternion
+                    % components (the rotating cortical frame), so neither presupposes a
+                    % tangent/normal split:
+                    %   D_int^2 -- INTRINSIC Dirac squared (built from the immersion f,
+                    %     edge vectors): the spin-connection / tangent-frame transport
+                    %     (its scalar part is the cotan Laplacian, plus a genuine
+                    %     quaternionic coupling that cotanL(x)I4 alone discards).
+                    %   E       -- EXTRINSIC (relative) Dirac squared (built from the
+                    %     Gauss map N): the shape operator / normal tilt.
+                    % Each carries 1/length^k with different k, so normalize each to unit
+                    % largest generalized eigenvalue vs the mass B; Tau is then a true
+                    % dimensionless dial (Tau=0.5 == equal intrinsic/extrinsic frame
+                    % weight), portable across mesh size / units.
+                    L4 = local_dirac_intrinsic_sq(Vloc, Floc);            % intrinsic Dirac^2 (immersion f)
+                    E  = nxr_compute('operators', h, 'dirac', 1);         % extrinsic Dirac^2 (Gauss map N)
                     Mg = nxr_compute('operators', h, 'mass', 'galerkin'); % [nVh x nVh]
                     B  = kron(Mg, speye(4));                              % [4nVh x 4nVh]
                     sL = local_lambda_max(L4, B);
@@ -226,6 +230,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     % Record the Dirac block co-normalization (makes Tau dimensionless / portable and
     % lets a consumer recover the unnormalized scale of the stored eigenvalues).
     if strcmpi(Variant, 'Dirac')
+        prov.Blocks        = '(1-Tau)*intrinsic_Dirac^2 (f) + Tau*extrinsic_Dirac^2 (N)';
         prov.Normalization = 'lambda_max-vs-B (per-block, co-normalized)';
         prov.DiracScale    = diracScales;   % 1x2 cell, [sL sE] per hemisphere
     end
@@ -266,4 +271,32 @@ function lmax = local_lambda_max(A, B)
         error('tess_operators:badBlockScale', ...
             'Could not estimate a positive largest eigenvalue for Dirac block normalization.');
     end
+end
+
+% ----------------------------------------------------------------------------
+function L = local_dirac_intrinsic_sq(V, F)
+% Intrinsic (immersion/edge-based) quaternionic Dirac operator squared,
+% L = D_int' * MF * D_int  [4nV x 4nV], where MF is the face-area 2-form mass.
+% Ported verbatim from gptoolbox dirac_operator.m (Crane et al., "Spin
+% Transformations of Discrete Surfaces"): each 4x4 block is the quaternion
+% left-multiplication by the opposite EDGE VECTOR (the immersion f) over twice the
+% area. Unlike cotanL(x)I4, its square couples the quaternion components -- it
+% carries the intrinsic spin-connection (tangent-frame transport); its scalar part
+% equals the cotan Laplacian. Pairs with the extrinsic (Gauss-map) Dirac to give
+% the full rotating-frame operator.
+    nF = size(F, 1);  nV = size(V, 1);
+    e1 = V(F(:,2),:) - V(F(:,1),:);
+    e2 = V(F(:,3),:) - V(F(:,1),:);
+    dblA = sqrt(sum(cross(e1, e2, 2).^2, 2));               % doublearea [nF x 1]
+    EV = [zeros(numel(F),1), V(F(:,[2 3 1]),:) - V(F(:,[3 1 2]),:)];   % edge vectors (Im quaternion)
+    Q = [1 0 0 0;0 -1  0 0;0 0 -1  0;0  0 0 -1; ...
+         0 1 0 0;1  0  0 0;0 0  0 -1;0  0 1  0; ...
+         0 0 1 0;0  0  0 1;1 0  0  0;0 -1 0  0; ...
+         0 0 0 1;0  0 -1 0;0 1  0  0;1  0 0  0]';
+    II = repmat(repmat((0:nF-1)'*4 + (1:4), 1, 4), 3, 1);
+    JJ = (repmat(F(:),1,16)-1)*4 + reshape(repmat(1:4,4,1),1,[]);
+    D  = sparse(II, JJ, -EV*Q ./ [dblA;dblA;dblA], 4*nF, 4*nV);
+    MF = kron(spdiags(dblA/2, 0, nF, nF), speye(4));        % face-area 2-form mass
+    L  = D' * MF * D;
+    L  = (L + L') / 2;                                      % symmetrize (1e-16 noise)
 end
