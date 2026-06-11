@@ -1,25 +1,39 @@
-function hFig = view_eigen_timeseries(ResultsFile, hFigIn)
-% VIEW_EIGEN_TIMESERIES: Dirac eigenmode-coefficient time series of a source result.
+function hFig = view_eigen_timeseries(ResultsFile, hFigIn, DisplayKind)
+% VIEW_EIGEN_TIMESERIES: Dirac eigenmode-coefficient view of a source result.
 %
-% USAGE:  hFig = view_eigen_timeseries(ResultsFile)
+% USAGE:  hFig = view_eigen_timeseries(ResultsFile)                       % image (default)
+%         hFig = view_eigen_timeseries(ResultsFile, [], 'image')          % (lambda x time) image
+%         hFig = view_eigen_timeseries(ResultsFile, [], 'trace')          % stacked time series
+%         hFig = view_eigen_timeseries(ResultsFile, hFig, DisplayKind)    % re-use a figure
 %
 % DESCRIPTION:
 %     Displays the inverse source estimate expressed in the Dirac eigenbasis --
 %     the mode-coefficient time series  c(t) = ImagingKernelMode * M(GoodChannel,t)
-%     -- as a standard time-series figure (rows = Dirac modes, ordered by
-%     eigenvalue lambda). This is the intermediate spectral view that sits between
-%     the sensor time series and the cortical reconstruction.
+%     -- as the intermediate spectral view between the sensor time series and the
+%     cortical reconstruction. Two display kinds:
 %
-%     It is PURELY a time series (no 3D map is opened): the rows replace sensor
-%     channels and everything else (time stepping, zoom, the global time cursor)
-%     behaves exactly like the sensor viewer, via view_timeseries_matrix. Opening
-%     the cortical source map ("View sources") separately, the single global time
-%     cursor advances both figures together.
+%       'image' (default): a (lambda x time) pixel field via view_image_reg /
+%               figure_image -- the continuum-honest view. The eigenvalue axis is
+%               a true scale continuum (one pixel row per mode), so dynamic
+%               signatures are directly visible: traveling waves as tilted stripes,
+%               diffusion as a downward drift of the energy centroid.
+%       'trace': stacked mode-coefficient traces (column mode), one row per mode.
+%
+%     Both are PURELY a coefficient view (no 3D map is opened): the global time
+%     cursor advances the cortical source map separately.
+%
+%     PER-HEMISPHERE ORDER. Dirac modes are per-hemisphere objects (the operator
+%     and eigensolve are block-diagonal by hemisphere; each mode is supported on
+%     one hemisphere only). The kernel stacks them [L block ; R block], each
+%     ascending in lambda. This view preserves that block order (it does NOT
+%     globally interleave the two hemispheres), so a hemisphere-local pattern
+%     stays a contiguous band. Rows 1..nL are left, nL+1..end are right, with a
+%     divider drawn between them.
 %
 %     Requires a Dirac source result with the persisted eigenmode kernel
 %     (ImagingKernelMode + Eigenvalues), produced by process_inverse_dirac.
 %
-% SEE ALSO: bst_inverse_dirac, process_inverse_dirac, view_timeseries_matrix
+% SEE ALSO: bst_inverse_dirac, process_inverse_dirac, view_image_reg, view_timeseries_matrix
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -42,7 +56,9 @@ function hFig = view_eigen_timeseries(ResultsFile, hFigIn)
 % Authors: Diellor Basha, 2026
 
     if (nargin < 2), hFigIn = []; end
-    isFirst = isempty(hFigIn);          % force default column layout only on first open
+    if (nargin < 3) || isempty(DisplayKind), DisplayKind = 'image'; end
+    DisplayKind = lower(DisplayKind);
+    isFirst = isempty(hFigIn);          % force default column layout only on first trace open
     hFig = [];
     bst_progress('start', 'Dirac modes', 'Computing eigenmode coefficients...');
     try
@@ -66,73 +82,140 @@ function hFig = view_eigen_timeseries(ResultsFile, hFigIn)
         DataMat = in_bst_data(DataFile, 'F', 'Time');
         gc = R.GoodChannel; if isempty(gc), gc = 1:size(DataMat.F,1); end
         c  = double(R.ImagingKernelMode) * double(DataMat.F(gc, :));    % [nMode x nTime]
+        Time = DataMat.Time;
 
-        % --- order modes by eigenvalue (ascending = coarse -> fine spatial scale) ---
-        lam = double(R.Eigenvalues(:));
-        [lamS, ord] = sort(lam, 'ascend');
-        c = c(ord, :);
-        hemi = ones(numel(ord),1); if ~isempty(R.ModeHemisphere), hemi = R.ModeHemisphere(ord); end
-        labels = cell(numel(lamS), 1);
-        for i = 1:numel(lamS)
-            tag = 'L'; if hemi(i) == 2, tag = 'R'; end
-            labels{i} = sprintf('%s \\lambda=%.2g', tag, lamS(i));
+        % --- PER-HEMISPHERE order: L block (asc lambda), then R block (asc lambda) ---
+        % Mirrors the kernel's native [L;R] stacking; does NOT globally interleave.
+        lam  = double(R.Eigenvalues(:));
+        hemi = ones(numel(lam),1);
+        if ~isempty(R.ModeHemisphere), hemi = double(R.ModeHemisphere(:)); end
+        ordL = find(hemi == 1); [~, sL] = sort(lam(ordL), 'ascend'); ordL = ordL(sL);
+        ordR = find(hemi == 2); [~, sR] = sort(lam(ordR), 'ascend'); ordR = ordR(sR);
+        ord  = [ordL; ordR];
+        c    = c(ord, :);
+        lamS = lam(ord);
+        hemiS= hemi(ord);
+        nL   = numel(ordL);
+
+        switch DisplayKind
+            case 'trace'
+                hFig = local_plot_trace(ResultsFile, c, Time, lamS, hemiS, nL, hFigIn, isFirst);
+            otherwise   % 'image'
+                hFig = local_plot_image(ResultsFile, c, Time, lamS, nL, hFigIn);
         end
-
-        % --- display via the standard time-series engine (decoupled; global-cursor linked) ---
-        % Units: these are amplitude-min-norm mode coefficients in the B-orthonormal
-        % (mass-weighted) eigenbasis -- a signed amplitude in arbitrary units, NOT a
-        % calibrated source unit (pA.m); labelled 'a.u.'.
-        [hFig, iDS, iFig] = view_timeseries_matrix(ResultsFile, {c}, DataMat.Time, [], ...
-            {'Dirac mode coefficients (\lambda \uparrow)'}, labels, [], hFigIn, [], 'a.u.');
         if isempty(hFig), bst_progress('stop'); return; end
-        set(hFig, 'Name', 'Dirac eigenmode time series');
-        % Reload-safe: on a display toggle (butterfly<->column) Brainstorm calls
-        % ReloadFigures, which without a ReloadCall reloads the whole recording. Point
-        % it back here so the toggle just recomputes c(t) (a cheap matrix product) and
-        % re-plots into the same figure.
-        setappdata(hFig, 'ReloadCall', {'view_eigen_timeseries', ResultsFile, hFig});
-        % Default to COLUMN display (rows ordered by lambda) on first open only;
-        % preserve the user's choice on later toggles/reloads.
-        if isFirst
-            TsInfo = getappdata(hFig, 'TsInfo');
-            TsInfo.DisplayMode = 'column';
-            setappdata(hFig, 'TsInfo', TsInfo);
-            figure_timeseries('PlotFigure', iDS, iFig, {c}, DataMat.Time, 0, []);
-        end
-        % In column mode the eigenvalue axis is a true CONTINUUM, not categorical
-        % channels: replace the 800 per-row "lambda=..." labels with sparse ticks
-        % (eigenvalue values) and a single axis title. (Butterfly keeps the a.u.
-        % amplitude axis.)
-        TsInfo = getappdata(hFig, 'TsInfo');
-        if strcmpi(TsInfo.DisplayMode, 'column')
-            local_eigen_axis(hFig, iDS, iFig, lamS);
-        end
+        % Reload-safe: re-render into the SAME figure (recomputes c(t), a cheap
+        % matrix product) instead of reloading the whole recording.
+        setappdata(hFig, 'ReloadCall', {'view_eigen_timeseries', ResultsFile, hFig, DisplayKind});
     catch ME
         bst_progress('stop');
-        bst_error(['Could not open the Dirac eigenmode time series:' 10 ME.message], 'Dirac modes', 0);
+        bst_error(['Could not open the Dirac eigenmode view:' 10 ME.message], 'Dirac modes', 0);
         return;
     end
     bst_progress('stop');
 end
 
 
-%% ===== continuous EIGENVALUE y-axis (sparse ticks + one title) for column mode =====
-function local_eigen_axis(hFig, iDS, iFig, lamS)
+%% ===== (lambda x time) IMAGE via figure_image =====
+function hFig = local_plot_image(ResultsFile, c, Time, lamS, nL, hFigIn)
+    nMode = size(c, 1);
+    % Image volume [N1 x N2 x Ntime x Nfreq]: rows = modes, columns(time) on dim 3.
+    F = reshape(c, [nMode, 1, numel(Time), 1]);
+    Labels = cell(1, 4);
+    Labels{1} = lamS(:);            % numeric -> continuous lambda Y axis (figure_image)
+    Labels{2} = [];
+    Labels{3} = Time(:)';
+    Labels{4} = [];
+    lamChar = char(955);            % literal Greek lambda (figure_image uses interpreter 'none')
+    % Signed/symmetric diverging colormap ('stat2' = mandrill, isAbsoluteValues=0).
+    [hFig, ~, ~] = view_image_reg(F, Labels, [1, 3], ...
+        {['Eigenvalue (' lamChar ')'], 'Time (s)'}, ResultsFile, hFigIn, 'stat2', 1, [], 'a.u.');
+    if isempty(hFig), return; end
+    set(hFig, 'Name', 'Dirac eigenmode image');
+    local_hemi_decor_image(hFig, nL, nMode, numel(Time));
+end
+
+
+%% ===== stacked TRACE view via figure_timeseries =====
+function hFig = local_plot_trace(ResultsFile, c, Time, lamS, hemiS, nL, hFigIn, isFirst)
+    labels = cell(numel(lamS), 1);
+    for i = 1:numel(lamS)
+        tag = 'L'; if hemiS(i) == 2, tag = 'R'; end
+        labels{i} = sprintf('%s \\lambda=%.2g', tag, lamS(i));
+    end
+    % Units: amplitude-min-norm mode coefficients in the B-orthonormal (mass-weighted)
+    % eigenbasis -- a signed amplitude in arbitrary units, NOT a calibrated source unit.
+    [hFig, iDS, iFig] = view_timeseries_matrix(ResultsFile, {c}, Time, [], ...
+        {'Dirac mode coefficients (\lambda \uparrow, L|R)'}, labels, [], hFigIn, [], 'a.u.');
+    if isempty(hFig), return; end
+    set(hFig, 'Name', 'Dirac eigenmode time series');
+    % Default to COLUMN display on first open only; preserve the user's later choice.
+    if isFirst
+        TsInfo = getappdata(hFig, 'TsInfo');
+        TsInfo.DisplayMode = 'column';
+        setappdata(hFig, 'TsInfo', TsInfo);
+        figure_timeseries('PlotFigure', iDS, iFig, {c}, Time, 0, []);
+    end
+    TsInfo = getappdata(hFig, 'TsInfo');
+    if strcmpi(TsInfo.DisplayMode, 'column')
+        local_eigen_axis_trace(hFig, iDS, iFig, lamS, nL);
+    end
+end
+
+
+%% ===== hemisphere divider + L/R labels on the image (persist across redraws) =====
+function local_hemi_decor_image(hFig, nL, nMode, nTime)
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesImage');
+    if isempty(hAxes), return; end
+    hAxes = hAxes(1);
+    % figure_image's UpdateFigurePlot deletes only ImageSurf/*Marker tags on redraw,
+    % so these (different tags) survive a time-cursor refresh. Clear stale ones first.
+    delete(findobj(hAxes, 'Tag', 'EigenHemiDiv'));
+    delete(findobj(hAxes, 'Tag', 'EigenHemiLbl'));
+    if nL < 1 || nL >= nMode, return; end    % single hemisphere -> no divider
+    yB = nL + 1;                              % grid boundary between L (1..nL) and R (nL+1..)
+    line([1, nTime+1], [yB yB], [2 2], 'Color', [0 0 0], 'LineWidth', 1.5, ...
+        'Parent', hAxes, 'Tag', 'EigenHemiDiv', 'Clipping', 'on');
+    xT = 1 + 0.012 * nTime;
+    text(xT, 1 + 0.5*nL,        2, 'L', 'Parent', hAxes, 'Color', [0 0 0], 'FontWeight', 'bold', ...
+        'VerticalAlignment', 'middle', 'Tag', 'EigenHemiLbl', 'Clipping', 'on');
+    text(xT, yB + 0.5*(nMode-nL), 2, 'R', 'Parent', hAxes, 'Color', [0 0 0], 'FontWeight', 'bold', ...
+        'VerticalAlignment', 'middle', 'Tag', 'EigenHemiLbl', 'Clipping', 'on');
+end
+
+
+%% ===== continuous EIGENVALUE y-axis (sparse per-hemisphere ticks + divider) for column trace =====
+function local_eigen_axis_trace(hFig, iDS, iFig, lamS, nL)
     global GlobalData;
     try
         H = GlobalData.DataSet(iDS).Figure(iFig).Handles(1);
         if ~isfield(H, 'ChannelOffsets') || isempty(H.ChannelOffsets), return; end
-        off = H.ChannelOffsets(:);                 % row k (lambda-sorted) sits at off(k)
+        off = H.ChannelOffsets(:);                 % row k (per-hemi order) sits at off(k)
         n = numel(off);
         if n < 2, return; end
-        ti  = unique(round(linspace(1, n, min(8, n))));   % ~8 ticks across the spectrum
-        yt  = off(ti);
-        ytl = arrayfun(@(i) sprintf('%.2g', lamS(i)), ti(:), 'UniformOutput', 0);
-        [yt, oo] = sort(yt(:));  ytl = ytl(oo);    % YTick must be ascending
         hAx = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
         if isempty(hAx), return; end
-        set(hAx(1), 'YTickMode', 'manual', 'YTickLabelMode', 'manual', 'YTick', yt, 'YTickLabel', ytl);
-        ylabel(hAx(1), 'Eigenvalue (\lambda)');
+        hAx = hAx(1);
+        % ~4 sparse lambda ticks PER hemisphere block (so the L|R reset is honest)
+        blocks = {1:min(nL, n)};
+        if nL < n, blocks{end+1} = (nL+1):n; end
+        yt = []; ytl = {};
+        for b = 1:numel(blocks)
+            idx = blocks{b};
+            ti  = unique(round(linspace(idx(1), idx(end), min(4, numel(idx)))));
+            yt  = [yt; off(ti)];                                                       %#ok<AGROW>
+            ytl = [ytl; arrayfun(@(i) sprintf('%.2g', lamS(i)), ti(:), 'UniformOutput', 0)]; %#ok<AGROW>
+        end
+        [yt, oo] = sort(yt(:));  ytl = ytl(oo);    % YTick must be ascending
+        set(hAx, 'YTickMode', 'manual', 'YTickLabelMode', 'manual', 'YTick', yt, 'YTickLabel', ytl);
+        ylabel(hAx, 'Eigenvalue (\lambda)');
+        % L|R divider
+        delete(findobj(hAx, 'Tag', 'EigenHemiDiv'));
+        if (nL >= 1) && (nL < n)
+            yBnd = mean(off([nL, nL+1]));
+            xl = get(hAx, 'XLim');
+            line(xl, [yBnd yBnd], 'Color', [.4 .4 .4], 'LineStyle', '--', 'Parent', hAx, 'Tag', 'EigenHemiDiv');
+        end
     catch
         % non-fatal: leave the default axis if the figure internals differ
     end

@@ -928,6 +928,17 @@ function UpdateFigurePlot(hFig, isResetMax)
                    'YTickLabelMode', 'manual', ...
                    'YTick',          YTick, ...
                    'YTickLabel',     cellstr(YTickLabel));
+    elseif ShowLabels && ~isempty(Labels) && isnumeric(Labels{1}) && (numel(Labels{1}) == size(FigData,1))
+        % Continuous NON-TIME numeric row axis (e.g. Dirac eigenvalue lambda):
+        % sparse, ROW-POSITIONED ticks labeled with the value at that row. Unlike a
+        % value-interpolated axis this is robust to a non-uniform / non-monotonic
+        % axis -- e.g. per-hemisphere stacked spectra that reset at the L|R boundary.
+        nRow  = size(FigData,1);
+        iTick = unique(round(linspace(1, nRow, min(9, nRow))));
+        set(hAxes, 'YTickMode',      'manual', ...
+                   'YTickLabelMode', 'manual', ...
+                   'YTick',          iTick + 0.5, ...
+                   'YTickLabel',     arrayfun(@(v) sprintf('%.2g', v), Labels{1}(iTick), 'UniformOutput', 0));
     elseif ShowLabels && ~isempty(Labels)
         if ShortLabels && iscellstr(Labels{1})
             % Remove all the common parts of the labels

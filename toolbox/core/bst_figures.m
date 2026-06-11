@@ -509,7 +509,7 @@ function UpdateFigureName(hFig)
                             imageFile = ['/' sStudy.Data(iFile).Comment];
                         case {'results', 'link'}
                             figureName = ['Sources: ' figureName];
-                            imageFile = ['/' sStudy.Results(iFile).Comment];
+                            imageFile = ['/' sStudy.Result(iFile).Comment];
                         case {'timefreq'}
                             if isequal(FigureId.SubType, 'trialimage')
                                 figureName = ['Image: ' figureName];

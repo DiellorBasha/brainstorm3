@@ -1887,12 +1887,14 @@ switch (lower(action))
                 % === VIEW SCOUTS ===
                 fcnPopupScoutTimeSeries(jMenuActivations, 1);
 
-                % === VIEW DIRAC EIGENMODE TIME SERIES ===
+                % === VIEW DIRAC EIGENMODE COEFFICIENTS ===
                 % Source estimate expressed in the Dirac eigenbasis (mode-coefficient
-                % time series), for Dirac source results that persist the mode kernel.
+                % view), for Dirac source results that persist the mode kernel.
+                % Image = (lambda x time) continuum (default); trace = stacked series.
                 if (length(bstNodes) == 1) && strcmpi(sStudy.Result(iResult).HeadModelType, 'surface') && ...
                         ~isempty(sStudy.Result(iResult).Comment) && ~isempty(strfind(lower(sStudy.Result(iResult).Comment), 'dirac'))
-                    gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative));
+                    gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue image', IconLoader.ICON_IMAGE, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'image'));
+                    gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'trace'));
                 end
 
                 % === MENU: SIMULATE DATA ===
