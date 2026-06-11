@@ -132,6 +132,9 @@ function hFig = local_plot_image(ResultsFile, c, Time, lamS, nL, hFigIn)
         {['Eigenvalue (' lamChar ')'], 'Time (s)'}, ResultsFile, hFigIn, 'stat2', 1, [], 'a.u.');
     if isempty(hFig), return; end
     set(hFig, 'Name', 'Dirac eigenmode image');
+    % Keep the user's time/lambda zoom across redraws (selecting a point fires a
+    % time-cursor redraw that would otherwise snap back to the full range).
+    setappdata(hFig, 'KeepZoomOnUpdate', 1);
     local_hemi_decor_image(hFig, nL, nMode, numel(Time));
 end
 

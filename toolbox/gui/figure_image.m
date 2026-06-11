@@ -854,11 +854,25 @@ function UpdateFigurePlot(hFig, isResetMax)
             'Parent',           hAxes);
     
     % ===== CONFIGURE AXES =====
+    % Full data ranges (also the ResetView / centering target stored below).
+    Xfull = [X(1), X(end)];
+    Yfull = [Y(1), Y(end)];
+    % Preserve the user's current zoom across a content redraw (e.g. a time-cursor
+    % move that re-enters UpdateFigurePlot) instead of snapping back to full range.
+    % Opt-in via the 'KeepZoomOnUpdate' appdata flag (set by callers such as
+    % view_eigen_timeseries); when the flag is absent the behaviour is unchanged
+    % for every other image figure (connectivity, erpimage, timefreq pages, ...).
+    XLimSet = Xfull;
+    YLimSet = Yfull;
+    if isequal(getappdata(hFig, 'KeepZoomOnUpdate'), 1) && ~isempty(getappdata(hFig, 'XLimInit'))
+        if IsZoomSubRange(get(hAxes, 'XLim'), Xfull), XLimSet = get(hAxes, 'XLim'); end
+        if IsZoomSubRange(get(hAxes, 'YLim'), Yfull), YLimSet = get(hAxes, 'YLim'); end
+    end
     % Set properties
-    set(hAxes, 'YGrid',      'off', ... 
+    set(hAxes, 'YGrid',      'off', ...
                'XGrid',      'off', 'XMinorGrid', 'off', ...
-               'XLim',       [X(1), X(end)], ...
-               'YLim',       [Y(1), Y(end)], ...
+               'XLim',       XLimSet, ...
+               'YLim',       YLimSet, ...
                'CLim',       MinMaxVal, ...
                'Box',        'on', ...
                'FontName',   'Default', ...
@@ -967,9 +981,10 @@ function UpdateFigurePlot(hFig, isResetMax)
     end
     % Set Y Legend
     ylabel(hAxes, strLabelY);
-    % Store initial XLim and YLim
-    setappdata(hFig, 'XLimInit', get(hAxes, 'XLim'));
-    setappdata(hFig, 'YLimInit', get(hAxes, 'YLim'));
+    % Store initial (full) XLim and YLim -- the ResetView / centering target.
+    % Always the FULL range, independent of any preserved zoom set above.
+    setappdata(hFig, 'XLimInit', Xfull);
+    setappdata(hFig, 'YLimInit', Yfull);
 
     % ===== COLORBAR =====
     % Update colorbar font size
@@ -986,6 +1001,21 @@ function UpdateFigurePlot(hFig, isResetMax)
     bst_colormaps('SetColorbarVisible', hFig, sColormap.DisplayColorbar);
     % Display only one colorbar (preferentially the results colorbar)
     bst_colormaps('ConfigureColorbar', hFig, ColormapInfo.Type, 'image', ColormapInfo.DisplayUnits);
+end
+
+
+%% ===== IS A REAL ZOOM-IN SUB-RANGE =====
+function tf = IsZoomSubRange(cur, full)
+    % True if 'cur' is a valid strict sub-range of 'full' (i.e. a real zoom-in),
+    % so it is worth preserving across a redraw. A range equal to (or wider than)
+    % full is treated as "not zoomed" -> caller snaps back to the full range.
+    if (numel(cur) ~= 2) || any(~isfinite(cur)) || (cur(2) <= cur(1))
+        tf = false;
+        return;
+    end
+    tol = 1e-6 * (full(2) - full(1));
+    tf = (cur(1) >= full(1) - tol) && (cur(2) <= full(2) + tol) && ...
+         ((cur(2) - cur(1)) < (full(2) - full(1)) - tol);
 end
 
 
