@@ -1,15 +1,28 @@
 function varargout = view_eigenmode_spectrum(varargin)
-% VIEW_EIGENMODE_SPECTRUM: Modal power spectrum of a source map's activations.
+% VIEW_EIGENMODE_SPECTRUM: Modal spectrum of a Dirac source map at the current time.
 %
 % USAGE:  hFig = view_eigenmode_spectrum(ResultsFile)
-%         pw   = view_eigenmode_spectrum('ComputeModalPower', ThetaCol, Component)
-%         ax   = view_eigenmode_spectrum('GetSpectrumAxis', Values, mode)
-%         avg  = view_eigenmode_spectrum('GetWindowAverage', Theta, iWin)
+%         spec = view_eigenmode_spectrum('BuildModeSpectrum', Info, ThetaCol, xmode, powerMode)
 %
-% Projects the realized vertex source map onto the surface LBO eigenmodes and
-% displays power per mode (Left/Right hemisphere curves) vs eigenvalue (or
-% spatial wavelength). The figure is registered in the source map's dataset and
-% is driven by Brainstorm's global time cursor (see bst_figures FireCurrentTimeChanged).
+% A modular eigenspectrum viewer for the canonical Dirac eigenbasis. It shows the
+% SAME mode-coefficient object as view_eigen_timeseries -- c(t) = ImagingKernelMode
+% * M(GoodChannel,t) -- but as a SINGLE time point: modal power |c_k|^2 per Dirac
+% eigenvalue lambda, split into Left/Right hemisphere curves, advancing with the
+% global time cursor. It opens NO 3D figure (it is not conflated with the cortex
+% map; the cursor is shared globally).
+%
+% SOURCE TOGGLE (key 'a' / 'd'):
+%   'mode'   (amplitude) -- c = ImagingKernelMode * M : the kernel-native mode
+%            coefficients, identical to view_eigen_timeseries. Purely spectral.
+%   'vertex' (dSPM/etc)  -- J = ImagingKernel * M (the per-vertex reconstruction
+%            for the result's measure, e.g. dSPM), then projected back onto the
+%            Dirac eigenbasis ( c_k = <J, phi_k>_B ). Because dSPM normalizes per
+%            vertex, this spectrum differs from the amplitude one.
+%
+% X-AXIS (key 'e' / 'k' / 'w'): eigenvalue lambda (default) / mode index / spatial
+% wavelength 2*pi/sqrt(lambda) -- all derived from the canonical Dirac lambda.
+%
+% SEE ALSO: view_eigen_timeseries, bst_inverse_dirac, bst_dirac, tess_eigen
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -31,23 +44,14 @@ function varargout = view_eigenmode_spectrum(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-methodNames = {'ComputeModalPower', 'GetSpectrumAxis', 'GetWindowAverage', 'BuildModeSpectrum', ...
+methodNames = {'BuildModeSpectrum', 'GetSpectrumAxis', ...
                'CreateFigure', 'UpdateFigurePlot', 'CurrentTimeChangedCallback', ...
-               'SetAxisMode', 'SetPowerMode'};
+               'SetAxisMode', 'SetSpectrumSource'};
 if (nargin >= 1) && ischar(varargin{1}) && ismember(varargin{1}, methodNames)
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
 [varargout{1:nargout}] = ViewFigure(varargin{:});
-end
-
-
-%% ===== PURE: |theta|^2 split by hemisphere component =====
-function pw = ComputeModalPower(ThetaCol, Component)
-    p = abs(ThetaCol(:)) .^ 2;
-    Component = Component(:);
-    pw.left  = p(Component == 1);
-    pw.right = p(Component == 2);
 end
 
 
@@ -70,24 +74,14 @@ function ax = GetSpectrumAxis(Values, mode)
 end
 
 
-%% ===== PURE: mean modal power over a sample window =====
-function avg = GetWindowAverage(Theta, iWin)
-    if isempty(iWin)
-        iWin = 1:size(Theta, 2);
-    end
-    avg = mean(abs(Theta(:, iWin)) .^ 2, 2);
-end
-
-
 %% ===== PURE: build the [2 x K] L/R power matrix + shared x-vector for an axis mode =====
-% Maps the per-mode coefficients to a 2-signal (Left/Right) x K-rank layout that the
-% figure_timeseries engine can plot. The x-vector is shared by both hemispheres:
+% Maps per-mode coefficients to a 2-signal (Left/Right) x K-rank layout for the
+% figure_timeseries engine. The x-vector is shared by both hemispheres:
 %   'index'      -> within-hemisphere rank k (exact)
 %   'eigenvalue' -> per-rank eigenvalue (averaged across hemispheres present)
 %   'wavelength' -> 2*pi/sqrt(eigenvalue)
-% Missing (hemisphere lacks a given rank) entries are NaN so the line skips them.
-% powerMode selects the amplitude shown: 'power' (|theta|^2), 'magnitude' (|theta|),
-% or 'log' (10*log10 power, dB). Default 'power'.
+% Missing entries are NaN so the line skips them. powerMode: 'power' (|c|^2),
+% 'magnitude' (|c|), or 'log' (10*log10 power, dB). Default 'power'.
 function spec = BuildModeSpectrum(Info, ThetaCol, xmode, powerMode)
     if (nargin < 4) || isempty(powerMode)
         powerMode = 'power';
@@ -98,9 +92,9 @@ function spec = BuildModeSpectrum(Info, ThetaCol, xmode, powerMode)
     a    = abs(ThetaCol(:));
     switch lower(powerMode)
         case 'power'
-            p = a .^ 2;            spec.ylabel = 'Modal power |\theta_k|^2';
+            p = a .^ 2;            spec.ylabel = 'Modal power |c_k|^2';
         case 'magnitude'
-            p = a;                 spec.ylabel = 'Modal magnitude |\theta_k|';
+            p = a;                 spec.ylabel = 'Modal magnitude |c_k|';
         case 'log'
             pw = a .^ 2; pw(pw <= 0) = eps;
             p = 10 * log10(pw);    spec.ylabel = 'Modal power (dB)';
@@ -134,9 +128,8 @@ function spec = BuildModeSpectrum(Info, ThetaCol, xmode, powerMode)
         otherwise
             error('Unknown x-axis mode: %s', xmode);
     end
-    % figure_timeseries requires a finite, ASCENDING x-vector (it sets XLim from the
-    % ends). Drop unusable modes (e.g. wavelength of lambda<=0 -> NaN) and sort
-    % ascending, reordering the power columns to match (wavelength is descending in rank).
+    % figure_timeseries requires a finite, ASCENDING x-vector. Drop unusable modes
+    % (e.g. wavelength of lambda<=0 -> NaN) and sort ascending, reordering columns.
     xv    = spec.x(:)';
     valid = ~isnan(xv) & ~isinf(xv);
     xv    = xv(valid);
@@ -148,74 +141,49 @@ function spec = BuildModeSpectrum(Info, ThetaCol, xmode, powerMode)
 end
 
 
-%% ===== GUI: open the spectrum figure registered in the source map's dataset =====
+%% ===== GUI: open the spectrum figure (no 3D map) =====
 function hFig = ViewFigure(ResultsFile)
-    global GlobalData;
     hFig = [];
-    bst_progress('start', 'Eigenspectrum', 'Loading source activations...');
+    bst_progress('start', 'Eigenspectrum', 'Computing eigenmode coefficients...');
     try
-        % --- Surface + eigenmodes first (metadata only; does NOT load recordings) ---
-        ResHdr = in_bst_results(ResultsFile, 0, 'SurfaceFile');
-        if ~isfield(ResHdr, 'SurfaceFile') || isempty(ResHdr.SurfaceFile)
+        % --- resolve the result + its recording (same path as view_eigen_timeseries) ---
+        [~, DataFile] = file_resolve_link(ResultsFile);
+        if isempty(DataFile)
             bst_progress('stop');
-            bst_error('This source file has no associated surface.', 'Eigenspectrum', 0);
+            bst_error(['No recording is associated with this result.' 10 ...
+                'Open the Dirac source link on a data block (a recordings node).'], 'Eigenspectrum', 0);
             return;
         end
-        SurfaceFile = ResHdr.SurfaceFile;
-        [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
-        if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors)
+        R = in_bst_results(ResultsFile, 0, 'ImagingKernelMode', 'Eigenvalues', 'ModeHemisphere', ...
+                           'GoodChannel', 'ImagingKernel', 'DiracEigenFile', 'SurfaceFile', 'Function');
+        if ~isfield(R, 'ImagingKernelMode') || isempty(R.ImagingKernelMode)
             bst_progress('stop');
-            bst_error(['No eigenmodes found on this surface.' 10 ...
-                       'Right-click the cortex and run "Compute eigenmodes" first.'], 'Eigenspectrum', 0);
+            bst_error(['This source file has no persisted Dirac eigenmode kernel.' 10 ...
+                'Recompute with "Compute sources: Dirac eigenmodes".'], 'Eigenspectrum', 0);
             return;
         end
-        % Older eigenmode files may not store MassType; default to barycentric.
-        if ~isfield(Eig, 'MassType') || isempty(Eig.MassType)
-            Eig.MassType = 'barycentric';
-        end
-        % --- Run the standard "cortical activations" machinery ---
-        % Opening the cortex figure sets up the dataset (raw paging/navigation, kernel,
-        % time-stepping), so the eigenspectrum reads the SAME per-page source map the cortex
-        % colormap uses, on the fly -- no full-recording load, correct page advance.
-        hFig3d = view_surface_data(SurfaceFile, ResultsFile);
-        if isempty(hFig3d)
-            bst_progress('stop');
-            return;
-        end
-        % Dataset/result indices the cortex figure just set up (returns existing, no reload).
+        % --- mode-coefficient time series c(t) = Kmode * M(GoodChannel,:) (== view_eigen_timeseries) ---
+        DataMat = in_bst_data(DataFile, 'F', 'Time');
+        gc = R.GoodChannel; if isempty(gc), gc = 1:size(DataMat.F,1); end
+        M    = double(DataMat.F(gc, :));                 % [nCh x nTime]
+        Camp = double(R.ImagingKernelMode) * M;          % [nMode x nTime] amplitude mode coeffs
+        Time = DataMat.Time;
+        % --- dataset binding for the GLOBAL time cursor (loads no figure) ---
         [iDS, iResult] = bst_memory('LoadResultsFile', ResultsFile);
         if isempty(iDS)
             bst_progress('stop');
             return;
         end
-        % Reject head models we cannot project (e.g. mixed, nComponents==0).
-        nComp = GlobalData.DataSet(iDS).Results(iResult).nComponents;
-        if ~ismember(nComp, [1 2 3])
-            bst_progress('stop');
-            bst_error(['Eigenspectrum supports surface source models with 1 or 3' 10 ...
-                       'orientations per vertex (not mixed head models).'], 'Eigenspectrum', 0);
-            return;
+        % --- within-hemisphere rank (kernel order is ascending lambda per hemi) ---
+        hemi = double(R.ModeHemisphere(:));
+        CompRank = zeros(numel(hemi), 1);
+        for hh = 1:2
+            idx = find(hemi == hh);
+            CompRank(idx) = 1:numel(idx);
         end
-        % Mass matrix: reuse the one stored with the eigenmodes (computed once at
-        % "Compute eigenmodes"); fall back to building it for older files without it.
-        nVert = size(Eig.Vectors, 1);
-        if isfield(Eig, 'MassMatrix') && ~isempty(Eig.MassMatrix) && isequal(size(Eig.MassMatrix), [nVert, nVert])
-            M = Eig.MassMatrix;
-        else
-            sSurf = in_tess_bst(SurfaceFile);
-            [~, M] = tess_laplacian(sSurf.Vertices, sSurf.Faces, 'MassType', Eig.MassType);
-        end
-        % Probe the current time: confirm the source grid matches the eigenmode surface.
-        Sprobe = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');
-        if isempty(Sprobe) || (size(Sprobe, 1) ~= nVert)
-            bst_progress('stop');
-            bst_error(['The source grid does not match the eigenmode surface' 10 ...
-                       '(expected ' num2str(nVert) ' vertices).'], 'Eigenspectrum', 0);
-            return;
-        end
-        % Static if the result has <= 2 time samples.
-        TimeVector = bst_memory('GetTimeVector', iDS, iResult, 'UserTimeWindow');
-        % Create a managed figure of our type, always a fresh one.
+        Info = struct('Values', double(R.Eigenvalues(:)), 'Component', hemi, 'CompRank', CompRank);
+
+        % --- create a managed figure of our type (no 3D map) ---
         FigureId = db_template('FigureId');
         FigureId.Type     = 'EigenSpectrum';
         FigureId.SubType  = '';
@@ -225,33 +193,33 @@ function hFig = ViewFigure(ResultsFile)
             bst_progress('stop');
             return;
         end
-        % Stash what the lazy redraw needs (no precomputed all-time matrix).
-        setappdata(hFig, 'iDS',         iDS);
-        setappdata(hFig, 'iResult',     iResult);
-        setappdata(hFig, 'Eig',         Eig);
-        setappdata(hFig, 'MassMatrix',  M);
-        setappdata(hFig, 'SpecInfo',    struct('Values', Eig.Values(:), ...
-                                               'Component', Eig.Component(:), ...
-                                               'CompRank', Eig.CompRank(:), ...
-                                               'SurfaceFile', SurfaceFile));
-        setappdata(hFig, 'ResultsFile', ResultsFile);
-        setappdata(hFig, 'AxisMode',    'index');      % default x-axis: mode index k
-        setappdata(hFig, 'PowerMode',   'power');
-        setappdata(hFig, 'isStatic',    numel(TimeVector) <= 2);
-        % figure_timeseries display state: its engine provides butterfly/column,
-        % log/linear scales, gain and zoom buttons; we drive the plotting with our
-        % per-time modal data over a mode x-axis.
+        % --- stash what the per-time redraw needs ---
+        setappdata(hFig, 'iDS',           iDS);
+        setappdata(hFig, 'iResult',       iResult);
+        setappdata(hFig, 'Camp',          Camp);                 % [nMode x nTime] amplitude coeffs
+        setappdata(hFig, 'SensorData',    M);                    % [nCh   x nTime] (for the dSPM projection)
+        setappdata(hFig, 'Time',          Time(:)');
+        setappdata(hFig, 'Info',          Info);
+        setappdata(hFig, 'Kernel',        struct('ImagingKernel', double(R.ImagingKernel), ...
+                                                  'DiracEigenFile', R.DiracEigenFile, ...
+                                                  'Function', R.Function));
+        setappdata(hFig, 'Basis',         []);                   % lazily loaded on first dSPM use
+        setappdata(hFig, 'ResultsFile',   ResultsFile);
+        setappdata(hFig, 'AxisMode',      'eigenvalue');         % canonical Dirac lambda axis
+        setappdata(hFig, 'SpectrumSource','mode');               % 'mode' (amplitude) | 'vertex' (dSPM)
+        setappdata(hFig, 'isStatic',      numel(Time) <= 2);
+        % figure_timeseries display state (butterfly/column, scales, gain, zoom).
         TsInfo = db_template('TsInfo');
         TsInfo.DisplayMode   = 'butterfly';
         TsInfo.LinesLabels   = {'Left', 'Right'};
-        TsInfo.LinesColor    = {[0.85 0.2 0.2; 0.2 0.3 0.85]};   % 1 x nAxes cell of [nLines x 3]
+        TsInfo.LinesColor    = {[0.85 0.2 0.2; 0.2 0.3 0.85]};
         TsInfo.ShowEvents    = 0;
-        TsInfo.AutoScaleY    = 0;     % fixed Y by default (comparable amplitudes); AS button toggles
+        TsInfo.AutoScaleY    = 1;     % spectra span orders of magnitude -> autoscale by default
         TsInfo.DefaultFactor = 1;
         TsInfo.XScale        = 'linear';
         TsInfo.YScale        = 'linear';
         setappdata(hFig, 'TsInfo', TsInfo);
-        % Let bst_figures('ReloadFigures') redraw us (e.g. butterfly<->column toggle).
+        % Let bst_figures('ReloadFigures') redraw us (butterfly<->column toggle).
         setappdata(hFig, 'ReloadCall', {'view_eigenmode_spectrum', 'UpdateFigurePlot', hFig, 0});
         % First plot + show + select.
         UpdateFigurePlot(hFig, 0);
@@ -267,38 +235,32 @@ end
 
 
 %% ===== GUI: build the figure (called by bst_figures CreateFigure) =====
-% Build it THROUGH figure_timeseries so it inherits all the appdata
-% (isPlotEditToolbar, GraphSelection, Colormap, ...) and callbacks (resize,
-% mouse, scroll, display-config menu) the reused engine relies on. Then we just
-% rename it and point keys at our handler (x-axis modes), delegating the rest.
+% Build THROUGH figure_timeseries so it inherits the engine's appdata and callbacks
+% (resize, mouse, scroll, display config); then rename + point keys at our handler.
 function hFig = CreateFigure(FigureId)
     hFig = figure_timeseries('CreateFigure', FigureId);
     set(hFig, 'Name', 'Eigenspectrum', 'KeyPressFcn', @FigureKeyPressedCallback);
-    % Wrap the engine resize: it lays the axes out full-height (its ShowEvents=0
-    % path leaves no room for our x-tick labels/title); we then carve margins.
     set(hFig, bst_get('ResizeFunction'), @(h,ev)ResizeCallback(h, ev));
 end
 
 
 %% ===== GUI: resize = engine layout + margins for the mode x-axis label/title =====
 function ResizeCallback(hFig, ev)
-    figure_timeseries('ResizeCallback', hFig, ev);   % buttons + axes (full height)
+    figure_timeseries('ResizeCallback', hFig, ev);
     AdjustAxesMargins(hFig);
 end
 
 function AdjustAxesMargins(hFig)
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
-    % Only the single-axes (butterfly) layout needs fixing; the multi-axes (split)
-    % layout is already stacked with proper margins by the engine.
     if numel(hAxes) ~= 1 || ~ishandle(hAxes)
-        return;
+        return;   % multi-axes (split) layout is already stacked with proper margins
     end
     Scaling = bst_get('InterfaceScaling') / 100;
-    marginBottom = 45 * Scaling;   % room for x-tick labels + axis label
-    marginTop    = 30 * Scaling;   % room for the title
+    marginBottom = 45 * Scaling;
+    marginTop    = 30 * Scaling;
     figPos = get(hFig, 'Position');
     set(hAxes, 'Units', 'pixels');
-    p = get(hAxes, 'Position');    % keep engine's left/width (legend + button column)
+    p = get(hAxes, 'Position');
     p(2) = marginBottom;
     p(4) = max(figPos(4) - marginBottom - marginTop, 1);
     set(hAxes, 'Position', p);
@@ -306,56 +268,63 @@ end
 
 
 %% ===== GUI: redraw the eigenspectrum at the current global time =====
-% Mirrors "Display on cortex": project the SINGLE current-time per-vertex scalar
-% field onto the eigenmodes, then render through the figure_timeseries engine so
-% the standard buttons (butterfly/column, log/linear scales, gain, zoom) all apply.
-% isFastUpdate=1 just refreshes the line data (fast time-stepping); =0 full replot.
+% Single-time-point view of the SAME coefficients view_eigen_timeseries shows.
+% isFastUpdate=1 keeps the current zoom (fast time-stepping); =0 full replot.
 function UpdateFigurePlot(hFig, isFastUpdate)
     global GlobalData;
     if (nargin < 2) || isempty(isFastUpdate)
         isFastUpdate = 0;
     end
     iDS      = getappdata(hFig, 'iDS');
-    iResult  = getappdata(hFig, 'iResult');
-    Eig      = getappdata(hFig, 'Eig');
-    M        = getappdata(hFig, 'MassMatrix');
-    Info     = getappdata(hFig, 'SpecInfo');
+    Info     = getappdata(hFig, 'Info');
     AxisMode = getappdata(hFig, 'AxisMode');
-    if isempty(iDS) || isempty(Eig)
+    Source   = getappdata(hFig, 'SpectrumSource');
+    Time     = getappdata(hFig, 'Time');
+    if isempty(iDS) || isempty(Info) || isempty(Time)
         return;
     end
     [~, iFig] = bst_figures('GetFigure', hFig);
     if isempty(iFig)
         return;
     end
-    % Current cortical activation (single time index) -> eigenmode coefficients.
-    S = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex');   % [nVert x 1]
-    if isempty(S)
-        return;
+    % --- current time index into our stored coefficient/data matrices ---
+    ct = GlobalData.UserTimeWindow.CurrentTime;
+    if isempty(ct)
+        it = 1;
+    else
+        [~, it] = min(abs(Time - ct));
     end
-    PowerMode = getappdata(hFig, 'PowerMode');
-    if isempty(PowerMode), PowerMode = 'power'; end
-    ThetaCol = bst_eigenmodes_project(Eig, S, M);              % [nModes x 1]
-    spec = BuildModeSpectrum(Info, ThetaCol, AxisMode, PowerMode);   % .F [2 x K], .x [1 x K], .label, .ylabel
-    % The shared x-vector is the mode axis (NOT seconds); store it for figure_timeseries callbacks.
-    setappdata(hFig, 'TimeVector', spec.x);
-    % Layout from the menu's display mode:
-    %   'butterfly' -> both hemispheres overlaid in one axes
-    %   'column'    -> split into two stacked axes, each autoscaled to fill
+    % --- modal coefficients at this time: amplitude (mode) or dSPM (vertex->mode) ---
+    if strcmpi(Source, 'vertex')
+        K = getappdata(hFig, 'Kernel');
+        basis = LoadBasis(hFig);
+        Mt = getappdata(hFig, 'SensorData');
+        J  = K.ImagingKernel * Mt(:, it);                 % [3*nVert x 1] vertex field (measure = Function)
+        ThetaCol = ProjectField(J, basis);                % [nMode x 1] Dirac modal coeffs
+        srcTag = sprintf('vertex %s', K.Function);
+    else
+        Camp = getappdata(hFig, 'Camp');
+        ThetaCol = Camp(:, it);                           % [nMode x 1] amplitude mode coeffs
+        srcTag = 'mode (amplitude)';
+    end
+    spec = BuildModeSpectrum(Info, ThetaCol, AxisMode, 'power');
+    setappdata(hFig, 'TimeVector', spec.x);   % the x-axis is the mode axis (NOT seconds)
+
+    % --- layout from the display mode (butterfly=overlaid, column=split L/R) ---
     TsInfo  = getappdata(hFig, 'TsInfo');
     isSplit = strcmpi(TsInfo.DisplayMode, 'column');
     if isSplit
-        F = {spec.F(1, :), spec.F(2, :)};                 % 2 axes (Left, Right)
+        F = {spec.F(1, :), spec.F(2, :)};
         TsInfo.LinesColor  = {[0.85 0.2 0.2], [0.2 0.3 0.85]};
         TsInfo.LinesLabels = {'Left', 'Right'};
         TsInfo.AxesLabels  = {'Left', 'Right'};
     else
-        F = {spec.F};                                     % 1 axes, 2 overlaid lines
+        F = {spec.F};
         TsInfo.LinesColor  = {[0.85 0.2 0.2; 0.2 0.3 0.85]};
         TsInfo.LinesLabels = {'Left', 'Right'};
         TsInfo.AxesLabels  = {};
     end
-    % On a time-step (fast update) capture the current zoom so it isn't reset every frame.
+    % Capture zoom on a fast time-step so it isn't reset every frame.
     keepZoom = isFastUpdate;
     xlimOld = {}; ylimOld = {};
     if keepZoom
@@ -365,8 +334,7 @@ function UpdateFigurePlot(hFig, isFastUpdate)
             ylimOld = get(hAxOld, 'YLim');  if ~iscell(ylimOld), ylimOld = {ylimOld}; end
         end
     end
-    % Render each axes as butterfly (autoscale-fill); restore the menu-facing display
-    % mode afterwards so the butterfly/column radio stays in sync.
+    % Render each axes as butterfly (autoscale-fill); restore the menu-facing mode after.
     menuMode = TsInfo.DisplayMode;
     TsInfo.DisplayMode = 'butterfly';
     setappdata(hFig, 'TsInfo', TsInfo);
@@ -374,50 +342,43 @@ function UpdateFigurePlot(hFig, isFastUpdate)
     TsInfo = getappdata(hFig, 'TsInfo');
     TsInfo.DisplayMode = menuMode;
     setappdata(hFig, 'TsInfo', TsInfo);
-    % Adapt the time-series defaults to a modal spectrum: x-axis label + Y label.
+    % Axis labels: mode x-axis + modal-power y-axis (annotated with the source).
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+    yl = [spec.ylabel '  [' srcTag ']'];
     for k = 1:numel(hAxes)
         xlabel(hAxes(k), spec.label, 'Interpreter', 'tex');
-        ylabel(hAxes(k), spec.ylabel, 'Interpreter', 'tex');
+        ylabel(hAxes(k), yl, 'Interpreter', 'tex');
     end
-    % Hide the vertical "current time" cursor: it is positioned in seconds and is
-    % meaningless on a mode/eigenvalue axis.
-    % Hide the seconds time-cursor on every axes (Handles is a struct array in split mode).
+    % Hide the seconds time-cursor (meaningless on a mode/eigenvalue axis).
     Handles = GlobalData.DataSet(iDS).Figure(iFig).Handles;
     if isfield(Handles, 'hCursor')
         hc = [Handles.hCursor];
         hc = hc(ishandle(hc));
-        if ~isempty(hc)
-            set(hc, 'Visible', 'off');
-        end
+        if ~isempty(hc), set(hc, 'Visible', 'off'); end
     end
-    % Keep only the Left/Right data lines in the legend (exclude cursor/baseline).
+    % Keep only the Left/Right data lines in the legend.
     for h = findobj(hAxes, 'Type', 'line')'
         if ~strcmp(get(h, 'Tag'), 'DataLine')
             set(get(get(h, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
         end
     end
-    % Title with the current time + key hints.
+    % Title: current time + source + axis-key hints.
     if ~isempty(GlobalData.UserTimeWindow.CurrentTime)
         tStr = sprintf('%1.3f s', GlobalData.UserTimeWindow.CurrentTime);
     else
         tStr = 'n/a';
     end
     if ~isempty(hAxes)
-        % Title on the topmost axes (split mode has two stacked axes).
         ytop = zeros(1, numel(hAxes));
         for k = 1:numel(hAxes)
-            pp = get(hAxes(k), 'Position');
-            ytop(k) = pp(2);
+            pp = get(hAxes(k), 'Position');  ytop(k) = pp(2);
         end
         [~, iTop] = max(ytop);
-        title(hAxes(iTop), sprintf('Eigenspectrum  |  t = %s  |  x-axis: e=\\lambda  k=index  w=wavelength', tStr), ...
+        title(hAxes(iTop), sprintf('Dirac eigenspectrum  |  t = %s  |  source: %s  (a=amplitude d=dSPM)  |  axis: e=\\lambda k=index w=wavelength', tStr, srcTag), ...
               'Interpreter', 'tex');
     end
-    % Single-axes (butterfly): the engine lays it out full-height -> carve margins.
-    % Multi-axes (split): the engine already stacks them with proper margins.
     AdjustAxesMargins(hFig);
-    % Restore the user's zoom on a time-step: X always; Y unless autoscale is enabled.
+    % Restore the user's zoom on a time-step: X always; Y unless autoscale is on.
     if keepZoom && ~isempty(xlimOld)
         hAxNew = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
         ts = getappdata(hFig, 'TsInfo');
@@ -425,49 +386,91 @@ function UpdateFigurePlot(hFig, isFastUpdate)
         if numel(hAxNew) == numel(xlimOld)
             for k = 1:numel(hAxNew)
                 set(hAxNew(k), 'XLim', xlimOld{k});
-                if keepY
-                    set(hAxNew(k), 'YLim', ylimOld{k});
-                end
+                if keepY, set(hAxNew(k), 'YLim', ylimOld{k}); end
             end
         end
     end
 end
 
 
-%% ===== GUI: x-axis mode (eigenvalue/index/wavelength) — from menu or e/k/w keys =====
+%% ===== GUI: x-axis mode (eigenvalue/index/wavelength) =====
 function SetAxisMode(hFig, mode)
     setappdata(hFig, 'AxisMode', mode);
     UpdateFigurePlot(hFig, 0);
 end
 
 
-%% ===== GUI: amplitude mode (power/magnitude/log) — from the Amplitude menu =====
-function SetPowerMode(hFig, mode)
-    setappdata(hFig, 'PowerMode', mode);
+%% ===== GUI: spectrum source (mode=amplitude / vertex=dSPM) =====
+function SetSpectrumSource(hFig, src)
+    setappdata(hFig, 'SpectrumSource', src);
     UpdateFigurePlot(hFig, 0);
 end
 
 
-%% ===== GUI: global time cursor moved (called by bst_figures FireCurrentTimeChanged) =====
+%% ===== GUI: global time cursor moved =====
 function CurrentTimeChangedCallback(hFig)
     if getappdata(hFig, 'isStatic')
         return;
     end
-    UpdateFigurePlot(hFig, 1);   % fast update: refresh line data only
+    UpdateFigurePlot(hFig, 1);   % fast update
 end
 
 
-%% ===== GUI: keys — e/k/w switch x-axis; everything else -> figure_timeseries =====
+%% ===== GUI: keys — e/k/w x-axis; a/d source; else -> figure_timeseries =====
 function FigureKeyPressedCallback(hFig, ev)
     switch (ev.Key)
-        case 'e'
-            SetAxisMode(hFig, 'eigenvalue');
-        case 'k'
-            SetAxisMode(hFig, 'index');
-        case 'w'
-            SetAxisMode(hFig, 'wavelength');
+        case 'e', SetAxisMode(hFig, 'eigenvalue');
+        case 'k', SetAxisMode(hFig, 'index');
+        case 'w', SetAxisMode(hFig, 'wavelength');
+        case 'a', SetSpectrumSource(hFig, 'mode');     % amplitude mode coefficients
+        case 'd', SetSpectrumSource(hFig, 'vertex');   % dSPM (vertex) -> Dirac modes
         otherwise
-            % Standard shortcuts (arrows = step time, gain, etc.).
             figure_timeseries('FigureKeyPressedCallback', hFig, ev);
     end
+end
+
+
+%% ===== load the Dirac eigenbasis (Phi) + operator mass (B), cached =====
+function basis = LoadBasis(hFig)
+    basis = getappdata(hFig, 'Basis');
+    if ~isempty(basis), return; end
+    K = getappdata(hFig, 'Kernel');
+    if ~isfield(K, 'DiracEigenFile') || isempty(K.DiracEigenFile)
+        error(['This result does not reference a Dirac eigenbasis (DiracEigenFile);' 10 ...
+               'the dSPM (vertex) spectrum needs it. Recompute the Dirac sources.']);
+    end
+    E = load(file_fullpath(K.DiracEigenFile));
+    if ~isfield(E, 'Phi') || isempty(E.Phi) || ~isfield(E, 'OperatorFile')
+        error('Dirac eigen node is missing Phi/OperatorFile.');
+    end
+    O = load(file_fullpath(E.OperatorFile));
+    if ~isfield(O, 'Mass') || numel(O.Mass) ~= 2
+        error('Dirac operator node is missing the 1x2 Mass (B).');
+    end
+    basis.Phi = E.Phi;                 % {1x2} [4Vh x K]
+    basis.gv  = E.GlobalVertices;      % {1x2} global vertex indices
+    basis.B   = O.Mass;                % {1x2} [4Vh x 4Vh] = kron(Mass_h, I4)
+    setappdata(hFig, 'Basis', basis);
+end
+
+
+%% ===== project a per-vertex 3-vector field onto the Dirac eigenbasis =====
+% c_k = <J, phi_k>_B with J embedded as a pure-imaginary quaternion field
+% (psi = [0, Jx, Jy, Jz]); stacked [L block; R block] to match ModeHemisphere.
+function col = ProjectField(J, basis)
+    nVert = numel(J) / 3;
+    Jr = reshape(J, 3, nVert);                 % rows x/y/z, cols vertices
+    col = [];
+    for h = 1:2
+        vH  = basis.gv{h}(:);
+        Phi = double(basis.Phi{h});
+        B   = basis.B{h};
+        nVh = numel(vH);
+        psi = zeros(4 * nVh, 1);
+        psi(2:4:end) = Jr(1, vH);
+        psi(3:4:end) = Jr(2, vH);
+        psi(4:4:end) = Jr(3, vH);
+        col = [col; Phi' * (B * psi)];         %#ok<AGROW>
+    end
+    col = real(col);   % the relative-Dirac operator is real-symmetric -> real coeffs
 end

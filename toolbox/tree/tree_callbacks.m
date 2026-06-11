@@ -1854,10 +1854,6 @@ switch (lower(action))
                             gui_component('MenuItem', jMenuActivations, [], 'No cortex available', IconLoader.ICON_WARNING, [], []);
                         end
                     end
-                    % === VIEW EIGENSPECTRUM ===
-                    if ismember(sStudy.Result(iResult).HeadModelType, {'surface'}) && ~isempty(sSubject) && ~isempty(sSubject.iCortex)
-                        gui_component('MenuItem', jMenuActivations, [], 'View eigenspectrum', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
-                    end
                     % === DISPLAY ON MRI ===
                     % Find anatomy volumes (exclude atlases)
                     if ~isempty(sSubject.Anatomy)
@@ -1895,6 +1891,7 @@ switch (lower(action))
                         ~isempty(sStudy.Result(iResult).Comment) && ~isempty(strfind(lower(sStudy.Result(iResult).Comment), 'dirac'))
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue image', IconLoader.ICON_IMAGE, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'image'));
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'trace'));
+                    gui_component('MenuItem', jMenuActivations, [], 'Eigenspectrum (single time)', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
                 end
 
                 % === MENU: SIMULATE DATA ===
