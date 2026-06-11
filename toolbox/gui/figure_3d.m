@@ -2212,6 +2212,14 @@ function DisplayFigurePopup(hFig)
     jMenuFigure.addSeparator();
     gui_component('MenuItem', jMenuFigure, [], 'Clone figure', [], [], @(h,ev)bst_figures('CloneFigure', hFig));
 
+    % ==== Source vectors (ambient quiver overlay) ====
+    iSrcTess = find(arrayfun(@(t) ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source') && ~isempty(t.DataSource.FileName), TessInfo), 1);
+    if ~isempty(iSrcTess)
+        isShowVec = isfield(TessInfo(iSrcTess),'ShowSourceVectors') && ~isempty(TessInfo(iSrcTess).ShowSourceVectors) && TessInfo(iSrcTess).ShowSourceVectors;
+        jItem = gui_component('CheckBoxMenuItem', jPopup, [], 'Show source vectors (quiver)', [], [], @(h,ev)SetShowSourceVectors(hFig, iSrcTess, ~isShowVec));
+        jItem.setSelected(isShowVec);
+    end
+
     % ==== Display menu ====
     gui_popup(jPopup, hFig);
 end
@@ -3084,6 +3092,23 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
     else
         set(hQuiver, 'XData', G.X, 'YData', G.Y, 'ZData', G.Z, ...
                      'UData', G.U, 'VData', G.V, 'WData', G.W);
+    end
+end
+
+%% ===== SET SHOW SOURCE VECTORS =====
+% Toggle the ambient source-vector quiver overlay for surface iTess.
+function SetShowSourceVectors(hFig, iTess, isShow) %#ok<DEFNU>
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (iTess > numel(TessInfo))
+        return;
+    end
+    TessInfo(iTess).ShowSourceVectors = isShow;
+    setappdata(hFig, 'Surface', TessInfo);
+    if isShow
+        PlotSourceVectors(hFig, iTess);
+    else
+        hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+        delete(findobj(hAxes, 'Tag', 'SourceVectors'));
     end
 end
 
