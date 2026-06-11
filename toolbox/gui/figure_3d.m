@@ -2994,6 +2994,21 @@ function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen) %#o
                'U', Vec(:,1),  'V', Vec(:,2),  'W', Vec(:,3));
 end
 
+%% ===== SELECT SOURCE VECTOR INDICES =====
+% Choose which vertices get an arrow. Default: all vertices. With MaxArrows set,
+% decimate by a stable step so arrows keep fixed anchors across time frames.
+%   mag       [nVert x 1] per-vertex magnitude (reserved for future threshold gating)
+%   MaxArrows scalar cap ([] / non-finite / >= nVert -> all vertices)
+function idx = SelectSourceVectorIdx(mag, MaxArrows) %#ok<DEFNU>
+    nVert = numel(mag);
+    if isempty(MaxArrows) || ~isfinite(MaxArrows) || (MaxArrows >= nVert)
+        idx = (1:nVert)';
+    else
+        step = ceil(nVert / max(MaxArrows,1));
+        idx  = (1:step:nVert)';
+    end
+end
+
 %% ===== PLOT 3D ELECTRODES =====
 function [hElectrodeGrid, ChanLoc] = PlotSensors3D(iDS, iFig, Channel, ChanLoc, TopoType) %#ok<DEFNU>
     global GlobalData;

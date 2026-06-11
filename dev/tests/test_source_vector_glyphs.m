@@ -19,6 +19,14 @@ function test_source_vector_glyphs()
     Gz = figure_3d('ComputeSourceVectorGlyphs', [5 6 7], [0 0 0], [1 0 0], [], 1, 0.1);
     [nPass,nFail] = chk('glyph zero normal -> no offset', abs(Gz.X-5)<1e-12 && abs(Gz.Y-6)<1e-12 && abs(Gz.Z-7)<1e-12, nPass,nFail);
 
+    % ===== SelectSourceVectorIdx =====
+    mag = (1:100)';
+    [nPass,nFail] = chk('select all when MaxArrows empty', numel(figure_3d('SelectSourceVectorIdx', mag, []))==100, nPass,nFail);
+    idxDec = figure_3d('SelectSourceVectorIdx', mag, 10);
+    [nPass,nFail] = chk('select decimates to <=MaxArrows', numel(idxDec) <= 10, nPass,nFail);
+    [nPass,nFail] = chk('select decimation is a stable step', isequal(idxDec, (1:ceil(100/10):100)'), nPass,nFail);
+    [nPass,nFail] = chk('select all when MaxArrows>=nVert', numel(figure_3d('SelectSourceVectorIdx', mag, 1000))==100, nPass,nFail);
+
     fprintf('\n==== test_source_vector_glyphs: %d passed, %d failed ====\n', nPass, nFail);
     if nFail > 0, error('test_source_vector_glyphs: %d test(s) FAILED.', nFail); end
 end
