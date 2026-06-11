@@ -163,6 +163,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     Operator       = cell(1, 2);
     Mass           = cell(1, 2);
     GlobalVertices = cell(1, 2);
+    diracScales    = cell(1, 2);   % [sL sE] per hemisphere (Dirac co-normalization)
 
     for hh = 1:2
         vH = hemis{hh};
@@ -192,9 +193,24 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     A = nxr_compute('operators', h, 'laplacian', 'connection');
                     B = nxr_compute('operators', h, 'mass', 'galerkin');
                 case 'Dirac'
-                    A  = nxr_compute('operators', h, 'dirac', Tau);     % [4nVh x 4nVh]
+                    % Co-normalized relative-Dirac family. The intrinsic block
+                    % (cotanL ⊗ I4) is dimensionless while the extrinsic curvature
+                    % block E carries 1/length^2, so a raw (1-Tau)*cotanL + Tau*E mixes
+                    % blocks whose generalized spectra scale as 1/s^2 vs 1/s^4 -- Tau is
+                    % then unit-dependent (in meters, Tau=0.5 is ~99.999% extrinsic).
+                    % Normalize each block to unit largest generalized eigenvalue vs the
+                    % mass B so Tau is a true dimensionless dial: Tau=0.5 == equal spectral
+                    % weight, portable across mesh size / units. (Single-scalar block
+                    % normalization is eigenvector-safe within each block; it only sets
+                    % their relative weighting in the combination.)
+                    L4 = nxr_compute('operators', h, 'dirac', 0);         % (cotanL ⊗ I4), intrinsic
+                    E  = nxr_compute('operators', h, 'dirac', 1);         % extrinsic curvature block
                     Mg = nxr_compute('operators', h, 'mass', 'galerkin'); % [nVh x nVh]
                     B  = kron(Mg, speye(4));                              % [4nVh x 4nVh]
+                    sL = local_lambda_max(L4, B);
+                    sE = local_lambda_max(E,  B);
+                    A  = (1 - Tau) * (L4 / sL) + Tau * (E / sE);          % [4nVh x 4nVh]
+                    diracScales{hh} = [sL, sE];   % record for provenance / eigenvalue scale
             end
         catch ME
             nxr_compute('destroy', h);
@@ -205,6 +221,13 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         Operator{hh}       = A;
         Mass{hh}           = B;
         GlobalVertices{hh} = vH;
+    end
+
+    % Record the Dirac block co-normalization (makes Tau dimensionless / portable and
+    % lets a consumer recover the unnormalized scale of the stored eigenvalues).
+    if strcmpi(Variant, 'Dirac')
+        prov.Normalization = 'lambda_max-vs-B (per-block, co-normalized)';
+        prov.DiracScale    = diracScales;   % 1x2 cell, [sL sE] per hemisphere
     end
 
     % --- assemble OperatorMat ---
@@ -225,5 +248,22 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         end
         Comment = sprintf('%s operator', Variant);
         db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, Comment);
+    end
+end
+
+% ----------------------------------------------------------------------------
+function lmax = local_lambda_max(A, B)
+% Largest generalized eigenvalue of a symmetric/PSD pencil (A, B), B SPD. Used to
+% co-normalize the Dirac blocks. Factorization-free: 'largestabs' forms B^{-1}A and
+% factorizes only the well-conditioned mass B (never the possibly-singular A), so it
+% cannot trip the ill-conditioning warning. A coarse tolerance suffices -- only the
+% scale (one figure) matters for the normalization.
+    A = (A + A') / 2;
+    B = (B + B') / 2;
+    opts = struct('tol', 1e-4, 'maxit', 300, 'disp', 0);
+    lmax = abs(eigs(A, B, 1, 'largestabs', opts));
+    if ~isfinite(lmax) || (lmax <= 0)
+        error('tess_operators:badBlockScale', ...
+            'Could not estimate a positive largest eigenvalue for Dirac block normalization.');
     end
 end
