@@ -1058,7 +1058,12 @@ function FigureKeyPressedCallback(hFig, keyEvent)
             %panel_scout('EditScoutsSize', 'Shrink1');
             event.VerticalScrollCount = 2;
             FigureMouseWheelCallback(hFig, event, 'amplitude');
-            
+        % === SOURCE-VECTOR ARROW DENSITY ('[' fewer, ']' more) ===
+        case '['
+            AdjustSourceVectorDensity(hFig, 1/1.5);
+        case ']'
+            AdjustSourceVectorDensity(hFig, 1.5);
+
         otherwise
             % ===== PROCESS BY KEYS =====
             switch (keyEvent.Key)
@@ -3005,17 +3010,21 @@ function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen) %#o
 end
 
 %% ===== SELECT SOURCE VECTOR INDICES =====
-% Choose which vertices get an arrow. Default: all vertices. With MaxArrows set,
-% decimate by a stable step so arrows keep fixed anchors across time frames.
-%   mag       [nVert x 1] per-vertex magnitude (reserved for future threshold gating)
-%   MaxArrows scalar cap ([] / non-finite / >= nVert -> all vertices)
-function idx = SelectSourceVectorIdx(mag, MaxArrows) %#ok<DEFNU>
-    nVert = numel(mag);
-    if isempty(MaxArrows) || ~isfinite(MaxArrows) || (MaxArrows >= nVert)
-        idx = (1:nVert)';
+% Choose which vertices get an arrow: keep those at/above the colormap threshold,
+% then decimate by a stable step so arrows keep fixed anchors across time frames.
+%   mag       [nVert x 1] per-vertex magnitude (same norm the colormap maps)
+%   MaxArrows scalar cap ([] / non-finite / >= #kept -> all kept vertices)
+%   ThreshVal scalar amplitude threshold (default 0); vertices with mag < ThreshVal
+%             are dropped so the quiver matches the thresholded colormap
+function idx = SelectSourceVectorIdx(mag, MaxArrows, ThreshVal) %#ok<DEFNU>
+    if (nargin < 3) || isempty(ThreshVal), ThreshVal = 0; end
+    active = find(mag >= ThreshVal);                 % above the colormap threshold
+    n = numel(active);
+    if isempty(MaxArrows) || ~isfinite(MaxArrows) || (MaxArrows >= n)
+        idx = active;
     else
-        step = ceil(nVert / max(MaxArrows,1));
-        idx  = (1:step:nVert)';
+        step = ceil(n / max(MaxArrows,1));
+        idx  = active(1:step:end);
     end
 end
 
@@ -3072,10 +3081,18 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
         hQuiver = [];
         return;
     end
-    % Decimation ("threshold the quiver number"); default = entire field
+    % Match the colormap threshold: the per-vertex norm IS the scalar the
+    % colormap maps, so gate arrows at the same value the colormap uses
+    % (DataLimit(1) + range*DataThreshold). Then decimate to MaxArrows.
     if isfield(sTess,'SourceVectorMaxArrows'), MaxArrows = sTess.SourceVectorMaxArrows; else, MaxArrows = []; end
     mag = sqrt(sum(V3.^2,2));
-    idx = SelectSourceVectorIdx(mag, MaxArrows);
+    ThreshVal = 0;
+    if isfield(sTess,'DataLimitValue') && ~isempty(sTess.DataLimitValue) ...
+            && isfield(sTess,'DataThreshold') && ~isempty(sTess.DataThreshold)
+        dl = sTess.DataLimitValue;
+        ThreshVal = dl(1) + (dl(2) - dl(1)) * sTess.DataThreshold;
+    end
+    idx = SelectSourceVectorIdx(mag, MaxArrows, ThreshVal);
     % Arrow length + surface lift (meters)
     if isfield(sTess,'SourceVectorScale') && ~isempty(sTess.SourceVectorScale)
         ScaleLen = sTess.SourceVectorScale;
@@ -3117,6 +3134,26 @@ function SetShowSourceVectors(hFig, iTess, isShow) %#ok<DEFNU>
         hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
         delete(findobj(hAxes, 'Tag', 'SourceVectors'));
     end
+end
+
+%% ===== ADJUST SOURCE VECTOR DENSITY =====
+% Scale the source-vector arrow count by 'factor' (']' more / '[' fewer). No-op
+% unless a source surface currently has the overlay on. Bases the new cap on the
+% number of arrows currently drawn, so it self-corrects against the active set.
+function AdjustSourceVectorDensity(hFig, factor)
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo), return; end
+    iTess = find(arrayfun(@(t) isfield(t,'ShowSourceVectors') && ~isempty(t.ShowSourceVectors) ...
+        && t.ShowSourceVectors && ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
+    if isempty(iTess), return; end   % overlay not active -> let the key pass through
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    hQ    = findobj(hAxes, 'Tag', 'SourceVectors');
+    if isempty(hQ), return; end
+    drawn = numel(get(hQ(1),'UData'));
+    if drawn < 1, return; end
+    TessInfo(iTess).SourceVectorMaxArrows = max(50, round(drawn * factor));
+    setappdata(hFig, 'Surface', TessInfo);
+    PlotSourceVectors(hFig, iTess);
 end
 
 %% ===== PLOT 3D ELECTRODES =====

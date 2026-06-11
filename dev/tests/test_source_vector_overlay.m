@@ -54,6 +54,32 @@ function test_source_vector_overlay()
     panel_time('SetCurrentTime', 23.0); drawnow; U2 = get(findobj(hFig,'Tag','SourceVectors'),'UData');
     [nPass,nFail] = chk('overlay updates on time step', ~isequal(U1, U2), nPass,nFail);
 
+    % --- threshold matches the colormap: gating uses DataLimitValue+DataThreshold,
+    %     the SAME pair the colormap thresholds. Drive a data-scaled limit directly
+    %     (independent of the session's shared colormap max) and redraw the overlay. ---
+    panel_time('SetCurrentTime', 22.6); drawnow;
+    TI2 = getappdata(hFig,'Surface');
+    TI2(iTess).DataLimitValue = TI2(iTess).DataMinMax;   % real data range, not a custom max
+    TI2(iTess).DataThreshold  = 0;
+    setappdata(hFig,'Surface',TI2);
+    figure_3d('PlotSourceVectors', hFig, iTess); drawnow;
+    nFull = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    TI2 = getappdata(hFig,'Surface'); TI2(iTess).DataThreshold = 0.5; setappdata(hFig,'Surface',TI2);
+    figure_3d('PlotSourceVectors', hFig, iTess); drawnow;
+    nThr = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    [nPass,nFail] = chk('threshold reduces arrows (colormap match)', nThr < nFull && nThr > 0, nPass,nFail);
+    TI2 = getappdata(hFig,'Surface'); TI2(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI2);
+    figure_3d('PlotSourceVectors', hFig, iTess); drawnow;
+
+    % --- density keys: '[' fewer, ']' more (the AdjustSourceVectorDensity hook) ---
+    nA = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    figure_3d('AdjustSourceVectorDensity', hFig, 1/3);
+    nLess = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    [nPass,nFail] = chk('[ reduces arrow count', nLess < nA, nPass,nFail);
+    figure_3d('AdjustSourceVectorDensity', hFig, 3);
+    nMore = numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    [nPass,nFail] = chk('] increases arrow count', nMore > nLess, nPass,nFail);
+
     % --- toggle OFF: the quiver must be removed ---
     figure_3d('SetShowSourceVectors', hFig, iTess, false); drawnow;
     [nPass,nFail] = chk('overlay removed on toggle off', isempty(findobj(hFig,'Tag','SourceVectors')), nPass,nFail);

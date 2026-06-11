@@ -27,6 +27,13 @@ function test_source_vector_glyphs()
     [nPass,nFail] = chk('select decimation is a stable step', isequal(idxDec, (1:ceil(100/10):100)'), nPass,nFail);
     [nPass,nFail] = chk('select all when MaxArrows>=nVert', numel(figure_3d('SelectSourceVectorIdx', mag, 1000))==100, nPass,nFail);
 
+    % ===== SelectSourceVectorIdx threshold gating (3rd arg) =====
+    magT = [0.1 0.5 0.9 0.2 0.8]';
+    [nPass,nFail] = chk('select threshold keeps >= thresh', isequal(figure_3d('SelectSourceVectorIdx', magT, [], 0.5), [2;3;5]), nPass,nFail);
+    [nPass,nFail] = chk('select threshold=0 keeps all',     numel(figure_3d('SelectSourceVectorIdx', magT, [], 0))==5, nPass,nFail);
+    [nPass,nFail] = chk('select threshold then decimate',   numel(figure_3d('SelectSourceVectorIdx', magT, 2, 0.5))<=2, nPass,nFail);
+    [nPass,nFail] = chk('select threshold above all -> empty', isempty(figure_3d('SelectSourceVectorIdx', magT, [], 1.0)), nPass,nFail);
+
     fprintf('\n==== test_source_vector_glyphs: %d passed, %d failed ====\n', nPass, nFail);
     if nFail > 0, error('test_source_vector_glyphs: %d test(s) FAILED.', nFail); end
 end
