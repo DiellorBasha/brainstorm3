@@ -92,6 +92,71 @@ function R = bench_sensor_dirac(base)
     sgtitle('EXPERIMENTAL: MEG sensor-helmet geometric eigenmodes + diagnostics','FontWeight','bold');
     print(f,[OUTDIR '/bench_sensor_dirac.png'],'-dpng','-r110'); close(f);
     fprintf('Saved %s/bench_sensor_dirac.png\n', OUTDIR);
+
+    % =====================================================================
+    % EXTENSION: 3D VSH internal/external (true SSS separation)
+    %   The shell Laplacian above measures spatial frequency, not internal vs
+    %   external ORIGIN. Build the multipole bases (B = -grad V, sensor reads
+    %   B.n = -dV/dn, computed numerically): internal V_lm = Y_lm/r^(l+1)
+    %   (brain, inside the shell) and external V_lm = Y_lm*r^l (noise, outside).
+    %   Diagnostics: leadfield should be ~fully INTERNAL; how much NOISE is
+    %   external (= SSS-removable)?
+    % =====================================================================
+    Lin=8; Lext=3; rscale=mean(sqrt(sum((pos-c).^2,2)));
+    P0=(pos-c)/rscale;                                   % origin-centered, unit-ish radius
+    Sin=buildVSH(P0,ornt,Lin,'in'); Sext=buildVSH(P0,ornt,Lext,'out');
+    % ORTHOGONAL subspace bases (robust to partial-helmet conditioning; true rank)
+    Qin=orth(Sin); Qext=orth(Sext); nIn=size(Qin,2); nExt=size(Qext,2);
+    pang=acosd(min(1,max(-1,svd(Qin'*Qext))));           % principal angles internal vs external (deg)
+    fracGin = norm(Qin'*G,'fro')^2 / norm(G,'fro')^2;    % leadfield energy in internal subspace (<=1)
+    Sep=Sext-Qin*(Qin'*Sext); Qe=orth(Sep);              % external part ORTHOGONAL to internal (removable)
+    noiseRemoved = trace(Qe'*Cn*Qe)/trace(Cn);           % noise variance SSS can remove without touching signal
+    [Un,Dn2]=eig(Cn); dn2=real(diag(Dn2)); [dn2,kx]=sort(dn2,'descend'); Un=Un(:,kx);
+    intFrac = sum((Qin'*Un).^2,1)';                      % internal-subspace fraction per noise mode (0..1)
+    R.nIn=nIn; R.nExt=nExt; R.minPrincAngle=min(pang); R.leadfieldInternalFrac=fracGin; R.noiseExternalRemoved=noiseRemoved;
+    fprintf('\n=== 3D VSH internal/external (SSS): Lin=%d, Lext=%d ; subspace rank int=%d ext=%d ===\n', Lin,Lext,nIn,nExt);
+    fprintf('  separability: min principal angle(internal,external) = %.0f deg (small => overlap, ill-posed)\n', min(pang));
+    fprintf('  leadfield internal fraction = %.2f  (energy of leadfield in internal subspace, <=1)\n', fracGin);
+    fprintf('  NOISE removable as pure-external = %.0f%%  (variance in external\\internal subspace)\n', 100*noiseRemoved);
+
+    f2=figure('Color','w','Position',[60 60 1400 460],'Visible','off');
+    subplot(1,3,1); scatter(x2,y2,55,Sin(:,4),'filled'); axis equal off; title('internal VSH mode (example)');
+    subplot(1,3,2);
+    semilogx(intFrac, dn2,'.','Color',[.6 .2 .2]); hold on; set(gca,'YScale','log');
+    xlabel('internal fraction of noise mode'); ylabel('noise variance'); grid on; xlim([0 1]);
+    title(sprintf('noise modes: internal vs external (%.0f%% removed)',100*noiseRemoved));
+    subplot(1,3,3); bar([fracGin, noiseRemoved]); set(gca,'XTickLabel',{'leadfield internal','noise removable (ext)'});
+    ylabel('fraction'); ylim([0 1]); grid on; title(sprintf('SSS summary (min angle %.0f\\circ)',min(pang)));
+    sgtitle('EXTENSION: 3D VSH internal/external (SSS) separation','FontWeight','bold');
+    print(f2,[OUTDIR '/bench_sensor_dirac_vsh.png'],'-dpng','-r110'); close(f2);
+    fprintf('Saved %s/bench_sensor_dirac_vsh.png\n', OUTDIR);
+end
+
+% ---- vector-spherical-harmonic sensor basis: S(i,lm) = -dV/dn (numerical) ----
+function S = buildVSH(P, N, L, kind)
+    eps0=1e-3; Np=P+eps0*N; Nm=P-eps0*N; S=[];
+    for l=1:L
+        Vp=potblock(Np,l,kind); Vm=potblock(Nm,l,kind);
+        S=[S, -(Vp-Vm)/(2*eps0)]; %#ok<AGROW>
+    end
+end
+function V = potblock(pts,l,kind)
+    r=sqrt(sum(pts.^2,2)); dir=pts./r; Y=realSH(l,dir);
+    if strcmpi(kind,'in'), V=Y./(r.^(l+1)); else, V=Y.*(r.^l); end
+end
+function Y = realSH(l,dir)
+    th=acos(min(1,max(-1,dir(:,3)))); ph=atan2(dir(:,2),dir(:,1));
+    Pl=legendre(l,cos(th));                 % [(l+1) x n], rows m=0..l
+    nN=numel(th); Y=zeros(nN,2*l+1); col=1;
+    for m=0:l
+        Plm=Pl(m+1,:)'; Nlm=sqrt((2*l+1)/(4*pi)*factorial(l-m)/factorial(l+m));
+        if m==0
+            Y(:,col)=Nlm*Plm; col=col+1;
+        else
+            Y(:,col)=sqrt(2)*Nlm*Plm.*cos(m*ph); col=col+1;
+            Y(:,col)=sqrt(2)*Nlm*Plm.*sin(m*ph); col=col+1;
+        end
+    end
 end
 
 % ===== helpers =====
