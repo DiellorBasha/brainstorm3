@@ -48,7 +48,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
 % per-hemisphere submesh and the connection Laplacian uses the intrinsic
 % Levi-Civita connection (no trivial gauge / FS-pole singularities).
 %
-% SEE ALSO: tess_manifold, tess_dirac_eigenmodes, tess_hemisplit, db_add_operator
+% SEE ALSO: tess_manifold, tess_eigen, tess_hemisplit, db_add_operator
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

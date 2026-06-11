@@ -47,7 +47,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %
 % Requires the nxr-compute plugin (transitively, via tess_operators).
 %
-% SEE ALSO: tess_operators, tess_dirac_eigenmodes, db_add_eigen
+% SEE ALSO: tess_operators, bst_dirac, db_add_eigen
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -317,7 +317,7 @@ function [Phi, mu] = local_ritz_basis(L, B, U, K)
 % build a B-orthonormal basis W of span(U), then diagonalize the small Lr = W'LW
 % so every output column is a true eigenvector with its matched Ritz value.
 % Complex-safe (conjugate transpose throughout): preserves the complex connection
-% modes. Adapted from tess_dirac_eigenmodes' local_ritz_basis (which is real).
+% modes (a real-valued Rayleigh-Ritz routine would collapse them).
     G = U' * (B * U); G = (G + G')/2;
     [Vg, Dg] = eig(full(G));
     dg = real(diag(Dg));
