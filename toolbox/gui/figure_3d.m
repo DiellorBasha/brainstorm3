@@ -2878,6 +2878,8 @@ function UpdateSurfaceColor(hFig, iTess)
             PlotGrid(hFig, GridLoc, GridValues, GridInd, TessInfo(iTess).DataAlpha, TessInfo(iTess).DataLimitValue, sColormap);
         end
     end
+    % Update the ambient source-vector quiver overlay (no-op unless enabled)
+    PlotSourceVectors(hFig, iTess);
 end
 
 
