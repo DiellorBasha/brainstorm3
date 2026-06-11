@@ -179,6 +179,13 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         ResultsMat.SurfaceFile   = file_short(HeadModel.SurfaceFile);
         ResultsMat.ChannelFlag   = ChannelFlag;
         ResultsMat.GoodChannel   = GoodChannel;
+        % Persist the eigenmode-domain (amplitude) kernel + Dirac eigenvalues so the
+        % Dirac mode-coefficient time-series viewer can compute c(t)=ImagingKernelMode*M
+        % without re-running the inverse (see view_eigen_timeseries).
+        ResultsMat.ImagingKernelMode = Rd.ImagingKernelMode;    % [nMode x nGoodChan]
+        ResultsMat.Eigenvalues       = Rd.Eigenvalues;          % [nMode x 1]
+        ResultsMat.ModeHemisphere    = Rd.ModeHemisphere;       % [nMode x 1]
+        if isfield(Rd,'DiracEigenFile'), ResultsMat.DiracEigenFile = Rd.DiracEigenFile; end
         ResultsMat.Time          = [];
         ResultsMat.DataFile      = '';                     % shared kernel
         ResultsMat.GridLoc       = [];

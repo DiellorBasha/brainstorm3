@@ -1887,6 +1887,14 @@ switch (lower(action))
                 % === VIEW SCOUTS ===
                 fcnPopupScoutTimeSeries(jMenuActivations, 1);
 
+                % === VIEW DIRAC EIGENMODE TIME SERIES ===
+                % Source estimate expressed in the Dirac eigenbasis (mode-coefficient
+                % time series), for Dirac source results that persist the mode kernel.
+                if (length(bstNodes) == 1) && strcmpi(sStudy.Result(iResult).HeadModelType, 'surface') && ...
+                        ~isempty(sStudy.Result(iResult).Comment) && ~isempty(strfind(lower(sStudy.Result(iResult).Comment), 'dirac'))
+                    gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative));
+                end
+
                 % === MENU: SIMULATE DATA ===
                 [tmp__, iDefStudy]   = bst_get('DefaultStudy', iSubject);
                 if ~bst_get('ReadOnly') && ~isRaw && ~ismember(iStudy, iDefStudy) && ~isStat    % && ~isempty(strfind(filenameRelative, '_wMNE')) && ~strcmpi(sStudy.Result(iResult).HeadModelType, 'mixed')
