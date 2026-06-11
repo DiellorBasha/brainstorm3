@@ -62,6 +62,16 @@ isMeg = ismember(Modality, {'MEG', 'MEG MAG', 'MEG GRAD'});
 % Load leadfield matrix
 HeadmodelMat = in_bst_headmodel(HeadmodelFile);
 GainMod = HeadmodelMat.Gain(iModChannels, :);
+% Dirac eigenmode leadfield: Gain is [nChan x 2K] eigencoefficients, not a
+% vertex-space [nChan x 3*nVert] leadfield. Reconstruct each channel's field to
+% vertex space (inverse spectral transform) so the standard per-vertex norm below
+% applies unchanged. Sensitivity is a forward-model property: no spectral filtering
+% / regularization is applied here (that is an inverse-problem prior, not a forward
+% quantity). The map is naturally smoother than the raw leadfield because the head
+% model is band-limited to K modes; it converges to the raw norm as K grows.
+if isfield(HeadmodelMat,'isDiracEigenmode') && ~isempty(HeadmodelMat.isDiracEigenmode) && HeadmodelMat.isDiracEigenmode
+    GainMod = bst_dirac(HeadmodelMat, 'Reconstruct', GainMod);
+end
 isVolumeGrid = ismember(HeadmodelMat.HeadModelType, {'volume', 'mixed'});
 % Get subject
 sSubject = bst_get('Subject', sStudy.BrainStormSubject);
