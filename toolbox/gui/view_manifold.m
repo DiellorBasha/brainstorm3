@@ -125,7 +125,7 @@ function hFig = ViewFigure(ManifoldFile)
     % --- state ---
     showScalar = true;          % scalar layer on by default
     colScalar  = [0.2 0.9 1];   % cyan point cloud
-    Vcache = []; Acache = []; inSync = false;
+    Vcache = []; Acache = []; EAcache = []; inSync = false;
 
     % Scalar layer: a point cloud that mirrors the cortex patch's live vertices.
     V0 = get(hPatch, 'Vertices');
@@ -152,27 +152,40 @@ function hFig = ViewFigure(ManifoldFile)
         end
         if ~showScalar
             set(hCloud, 'Visible', 'off');
-            Vcache = []; Acache = [];   % force a re-sync when turned back on
+            Vcache = []; Acache = []; EAcache = [];   % force a re-sync when turned back on
             return;
         end
-        V = get(hPatch, 'Vertices');
-        A = get(hPatch, 'FaceVertexAlphaData');
-        if ~force && isequal(V, Vcache) && isequal(A, Acache) && strcmpi(get(hCloud,'Visible'),'on')
+        V  = get(hPatch, 'Vertices');
+        A  = get(hPatch, 'FaceVertexAlphaData');
+        EA = get(hPatch, 'EdgeAlpha');     % 'flat'/'interp' (per-element) or scalar
+        if ~force && isequal(V,Vcache) && isequal(A,Acache) && isequal(EA,EAcache) ...
+                && strcmpi(get(hCloud,'Visible'),'on')
             return;
         end
         inSync = true;
-        Vcache = V; Acache = A;
+        Vcache = V; Acache = A; EAcache = EA;
         F  = get(hPatch, 'Faces');
         nV = size(V, 1);
-        % A vertex is visible if at least one of its incident faces is visible
-        % (per-face alpha > 0). With no per-face alpha, everything is visible.
-        if isempty(A) || numel(A) ~= size(F, 1)
-            vis = true(nV, 1);
+        % A vertex hides only when the wireframe hides it. Brainstorm hides a
+        % hemisphere by switching the edge alpha to per-element ('flat'/'interp')
+        % with zeroed FaceVertexAlphaData; toggling the resect off restores a
+        % SCALAR edge alpha (leaving FaceVertexAlphaData stale). So gate on the
+        % alpha MODE, not the (possibly stale) per-face data.
+        if ischar(EA) && ~isempty(A)
+            if numel(A) == size(F,1)        % per-face ('flat')
+                vis = false(nV,1);
+                vis(unique(F(A > 0, :))) = true;
+            elseif numel(A) == nV           % per-vertex ('interp')
+                vis = A(:) > 0;
+            else
+                vis = true(nV,1);
+            end
+        elseif isnumeric(EA) && isscalar(EA) && EA <= 0
+            vis = false(nV,1);              % uniformly transparent
         else
-            vis = false(nV, 1);
-            vis(unique(F(A > 0, :))) = true;
+            vis = true(nV,1);              % scalar opaque edges -> all visible
         end
-        Vd = V; Vd(~vis, :) = NaN;     % hidden-hemisphere points drop out
+        Vd = V; Vd(~vis, :) = NaN;          % hidden-hemisphere points drop out
         set(hCloud, 'XData', Vd(:,1), 'YData', Vd(:,2), 'ZData', Vd(:,3), 'Visible', 'on');
         inSync = false;
     end

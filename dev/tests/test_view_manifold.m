@@ -41,15 +41,15 @@ function test_view_manifold()
     [nPass,nFail] = chk('cloud follows Smooth', ~isequal(V,Vs) && isequal(Cxs(:), Vs(:,1)), nPass,nFail);
     panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0); drawnow; drawnow;
 
-    % left/right Resect hides one hemisphere: the cloud drops exactly the dots of
-    % the hidden faces (one hemisphere = nVert/2), mirroring the patch alpha.
-    TI = getappdata(hFig,'Surface'); TI(1).Resect = {[0 0 0], 'right'}; setappdata(hFig,'Surface',TI);
-    figure_3d('UpdateSurfaceAlpha', hFig, 1); drawnow; drawnow;
+    % left/right Resect (real toggle path) hides one hemisphere's dots, and
+    % toggling it back off restores them all (the reported round-trip bug).
+    bst_figures('SetCurrentFigure', hFig, '3D');
+    panel_surface('SelectHemispheres', 'right'); drawnow; drawnow;
     Cxr = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
-    A   = get(hP, 'FaceVertexAlphaData'); F = get(hP, 'Faces');
-    nVisExpected = numel(unique(F(A>0,:)));
-    [nPass,nFail] = chk('Resect hides one hemisphere''s dots', nnz(~isnan(Cxr))==nVert/2, nPass,nFail);
-    [nPass,nFail] = chk('cloud visibility mirrors patch alpha', nnz(~isnan(Cxr))==nVisExpected, nPass,nFail);
+    [nPass,nFail] = chk('Resect right hides one hemisphere''s dots', nnz(~isnan(Cxr))==nVert/2, nPass,nFail);
+    panel_surface('SelectHemispheres', 'none'); drawnow; drawnow;
+    Cxn = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
+    [nPass,nFail] = chk('Resect toggle-off restores all dots', nnz(~isnan(Cxn))==nVert, nPass,nFail);
 
     % D toggles the layer off then on
     KeyOnFig(hFig, 'd'); drawnow;
