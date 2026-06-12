@@ -1,15 +1,19 @@
 function varargout = view_eigenmodes(varargin)
-% VIEW_EIGENMODES: Browse Laplace-Beltrami eigenmodes on a surface.
+% VIEW_EIGENMODES: Standalone vector-field viewer for Dirac eigenmodes.
 %
-% USAGE:  hFig = view_eigenmodes(SurfaceFile)
-%         [Grid, K, Info] = view_eigenmodes('BuildPairedGrid', Eigenmodes)
-%         col  = view_eigenmodes('SynthColumn', PairedGrid, W)
-%         view_eigenmodes('ModesChangedCallback', hFig)
+% USAGE:  hFig = view_eigenmodes(EigenFile)
+%         V3   = view_eigenmodes('ReconstructModeField', EigenMat, k, nVert)
 %
-% The viewer initialises the eigenmode lever (panel_eigenmodes) for the
-% surface's K_paired modes and registers a single-frame Source result whose
-% ImageGridAmp is re-synthesised live whenever the lever changes via
-% bst_figures('FireModesChanged') -> ModesChangedCallback.
+% Loads an eigen_ DB node (db_template('eigenmat')) and renders each Dirac
+% eigenvector as an ambient 3D quiver field on the parent cortex. Cycle modes
+% with the keyboard (Left/Right = -/+1, PgUp/PgDn = +/-10), like
+% view_leadfield_vectors cycles sensor channels.
+%
+% Only the Dirac variant is implemented; LBO / Connection Laplacian raise a
+% bst_error (added later as variant branches). Dirac eigenvectors are real
+% [4*nVh x K] quaternion fields; the per-vertex 3-vector is the quaternion
+% vector part (rows 2:4 of each 4-block; the w slot 1:4:end is dropped) --
+% exactly as bst_dirac/local_reconstruct extracts the ambient field.
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -31,7 +35,7 @@ function varargout = view_eigenmodes(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'BuildPairedGrid','SynthColumn','ModesChangedCallback'}))
+if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'ReconstructModeField'}))
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -39,183 +43,189 @@ end
 end
 
 
-%% ===== PURE: paired display grid (column k = each component's CompRank==k mode) =====
-function [Grid, K, Info] = BuildPairedGrid(Eig)
-    nV = size(Eig.Vectors, 1);
-    nK = size(Eig.Vectors, 2);
-    if isfield(Eig, 'CompRank') && ~isempty(Eig.CompRank)
-        CompRank  = Eig.CompRank(:);
-        Component = Eig.Component(:);
-    else
-        CompRank  = (1:nK)';
-        Component = ones(nK, 1);
+%% ===== PURE: per-vertex ambient 3-vector for Dirac eigenmode k =====
+function V3 = ReconstructModeField(EigenMat, k, nVert)
+% V3 [nVert x 3]: zeros off-support; quaternion vector part (i,j,k)->(x,y,z),
+% w slot dropped; scattered to global vertices via EigenMat.GlobalVertices.
+    if ~isfield(EigenMat,'Phi') || isempty(EigenMat.Phi) || numel(EigenMat.Phi) ~= 2
+        error('view_eigenmodes:badEigen', 'EigenMat.Phi must be a 1x2 per-hemisphere cell.');
     end
-    K = max(CompRank);
-    Grid = zeros(nV, K);
-    for k = 1:K
-        cols = find(CompRank == k);
-        if ~isempty(cols)
-            Grid(:, k) = sum(Eig.Vectors(:, cols), 2);   % disjoint support across components
+    V3 = zeros(nVert, 3);
+    for hh = 1:2
+        vH  = EigenMat.GlobalVertices{hh}(:);
+        Phi = EigenMat.Phi{hh};
+        if (k < 1) || (k > size(Phi,2))
+            error('view_eigenmodes:badMode', 'Mode index %d out of range 1..%d.', k, size(Phi,2));
         end
+        if size(Phi,1) ~= 4*numel(vH)
+            error('view_eigenmodes:shapeMismatch', ...
+                'Hemisphere %d: Phi has %d rows, expected 4*nV=%d.', hh, size(Phi,1), 4*numel(vH));
+        end
+        col = double(Phi(:, k));
+        V3(vH,1) = col(2:4:end);   % quaternion i -> x
+        V3(vH,2) = col(3:4:end);   % quaternion j -> y
+        V3(vH,3) = col(4:4:end);   % quaternion k -> z
     end
-    Info = struct('K', K, 'Component', Component, 'CompRank', CompRank, 'Values', Eig.Values(:));
 end
 
 
-%% ===== PURE: synthesized display column = PairedGrid * W(:) =====
-function col = SynthColumn(PairedGrid, W) %#ok<DEFNU>
-    W = W(:);
-    if (numel(W) ~= size(PairedGrid,2))
-        error('view_eigenmodes:SynthColumn: weight length (%d) must equal K_paired (%d).', numel(W), size(PairedGrid,2));
-    end
-    col = PairedGrid * W;
-end
-
-
-%% ===== GUI: display the paired modes as a transient registered Source result =====
-function hFig = ViewFigure(SurfaceFile, ~)
+%% ===== GUI: standalone quiver viewer =====
+function hFig = ViewFigure(EigenFile)
     hFig = [];
-    % Load eigenmodes
-    [Eig, isComputed] = in_tess_eigenmodes(SurfaceFile);
-    if ~isComputed || isempty(Eig) || ~isfield(Eig, 'Vectors') || isempty(Eig.Vectors) || ~isfield(Eig, 'Values')
-        bst_error(['No eigenmodes found on this surface.' 10 ...
-                   'Right-click the cortex and run "Compute eigenmodes" first.'], 'View eigenmodes', 0);
+    % --- load + validate eigen node ---
+    EigenFull = file_fullpath(EigenFile);
+    if ~file_exist(EigenFull)
+        bst_error('Eigen file not found.', 'View eigenmodes', 0);
         return;
     end
-    % Resolve subject + intra study
-    [sSubject, iSubject] = bst_get('SurfaceFile', SurfaceFile); %#ok<ASGLU>
-    [sStudy, iStudy] = bst_get('AnalysisIntraStudy', iSubject);
-    if isempty(iStudy)
-        bst_error('Could not find the intra-subject study.', 'View eigenmodes', 0);
+    EigenMat = load(EigenFull);
+    if ~isfield(EigenMat,'Variant') || isempty(EigenMat.Variant)
+        bst_error('Eigen file has no Variant field.', 'View eigenmodes', 0);
         return;
     end
-    % Build paired display grid (mode k shows every component's rank-k mode)
-    [Grid, Kp, Info] = BuildPairedGrid(Eig);
+    % --- variant dispatch (Dirac implemented; others deferred) ---
+    switch lower(EigenMat.Variant)
+        case 'dirac'
+            % implemented below
+        case {'laplace-beltrami','connection laplacian'}
+            bst_error(sprintf(['Vector viewer currently supports Dirac eigenmodes only.' 10 ...
+                'This is a "%s" node.'], EigenMat.Variant), 'View eigenmodes', 0);
+            return;
+        otherwise
+            bst_error(sprintf('Unknown eigen variant: %s', EigenMat.Variant), 'View eigenmodes', 0);
+            return;
+    end
+    if ~isfield(EigenMat,'Phi') || isempty(EigenMat.Phi) || numel(EigenMat.Phi) ~= 2 ...
+            || isempty(EigenMat.Phi{1}) || isempty(EigenMat.Phi{2})
+        bst_error('Dirac eigen node has empty Phi.', 'View eigenmodes', 0);
+        return;
+    end
 
-    % Initialise the lever for this surface and select mode 1
-    panel_eigenmodes('ResetState', SurfaceFile, Kp);
-    panel_eigenmodes('SetWindowShape', 'single');
-    panel_eigenmodes('SetCurrentMode', 1);
-    W0 = panel_eigenmodes('GetWeights');
+    Surface  = EigenMat.ParentSurface;
+    TessMat  = in_tess_bst(Surface);
+    Vertices = TessMat.Vertices;
+    nVert    = size(Vertices, 1);
+    K        = min(size(EigenMat.Phi{1},2), size(EigenMat.Phi{2},2));
+    Tau      = NaN;
+    if isfield(EigenMat,'Provenance') && isstruct(EigenMat.Provenance) ...
+            && isfield(EigenMat.Provenance,'Tau') && ~isempty(EigenMat.Provenance.Tau)
+        Tau = EigenMat.Provenance.Tau;
+    end
 
-    % Build a single-frame Source result (two-sample static — valid for source display)
-    col0 = SynthColumn(Grid, W0);
-    ResMat = db_template('resultsmat');
-    ResMat.ImageGridAmp  = [col0 col0];     % 2 samples => valid static result
-    ResMat.ImagingKernel = [];
-    ResMat.nComponents   = 1;
-    ResMat.Time          = [0 1];
-    ResMat.SurfaceFile   = SurfaceFile;
-    ResMat.HeadModelType = 'surface';
-    ResMat.nAvg          = 1;
-    ResMat.Leff          = 1;
-    ResMat.ColormapType  = 'stat2';   % diverging, non-absolute (signed +/- lobes) without touching 'source'
-    ResMat.Comment       = sprintf('Eigenmode viewer (%d modes/component)', Kp);
-    ResMat = bst_history('add', ResMat, 'eigenmodes_view', 'Transient eigenmode viewer result');
-
-    % Save to the intra study and register
-    StudyDir   = bst_fileparts(file_fullpath(sStudy.FileName));
-    OutputFile = bst_process('GetNewFilename', StudyDir, 'results_eigenview');
-    bst_save(OutputFile, ResMat, 'v6');
-    db_add_data(iStudy, OutputFile, ResMat);
-
-    % Display via the standard surface-data path (colormap UI works natively)
-    hFig = view_surface_data(SurfaceFile, file_short(OutputFile));
+    % --- display cortex (translucent gray) ---
+    hFig = view_surface(Surface, 0.5, [0.5 0.5 0.5], 'NewFigure');
     if isempty(hFig)
-        % Display failed: remove the transient result we just registered
-        try
-            file_delete(file_fullpath(OutputFile), 1);
-            db_reload_studies(iStudy);
-        catch
-            % Non-fatal
-        end
         bst_error('Could not open the surface figure.', 'View eigenmodes', 0);
         return;
     end
-    set(hFig, 'Name', ['Eigenmodes: ' SurfaceFile]);
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    % CRITICAL: hold the axes so quiver3 (high-level) does not run newplot and
+    % reset the 'Axes3D' axes (which would delete the cortex patch).
+    hold(hAxes, 'on');
+    figure_3d('SetStandardView', hFig, 'left');
+    set(hFig, 'Name', ['Eigenmodes: ' EigenMat.Variant ' | ' Surface]);
 
-    % Tag the figure so FireModesChanged can route to ModesChangedCallback
-    setappdata(hFig, 'EigenView', struct('SurfaceFile', SurfaceFile, 'PairedGrid', Grid, 'Info', Info, 'ResultsFile', file_short(OutputFile)));
+    % --- state (closure vars) ---
+    iMode              = 1;
+    quiverSize         = 1;
+    quiverWidth        = 1;
+    thresholdAmplitude = 1;     % fraction of cumulative norm kept (1 = all)
+    thresholdBalance   = 0;     % 0 = keep small (<=), 1 = keep large (>)
+    useNormalize       = false;
 
-    % Bottom-left legend (handle stored in EigenView so ModesChangedCallback can update it)
-    hLabel = uicontrol('Style', 'text', 'String', '...', 'Units', 'Pixels', ...
-        'Position', [6 0 560 20], 'HorizontalAlignment', 'left', ...
-        'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
-        'ForegroundColor', [.9 .9 .9], 'BackgroundColor', [0 0 0], 'Parent', hFig);
-    ev = getappdata(hFig, 'EigenView'); ev.LabelHandle = hLabel; setappdata(hFig, 'EigenView', ev);
-    % Custom keyboard stepping (drives the lever)
+    % --- legend ---
+    hLabel = uicontrol('Style','text','String','...','Units','Pixels', ...
+        'Position',[6 1 1600 35],'HorizontalAlignment','left', ...
+        'FontUnits','points','FontSize',bst_get('FigFont'), ...
+        'ForegroundColor',[.3 1 .3],'BackgroundColor',[0 0 0],'Parent',hFig);
+
+    % --- keyboard ---
     KeyPressFcn_bak = get(hFig, 'KeyPressFcn');
     set(hFig, 'KeyPressFcn', @KeyPress_Callback);
-    % Auto-remove the transient result when the figure is destroyed
-    set(hFig, 'DeleteFcn', @(h,e) CleanupResult());
-    % Show + populate the panel
-    gui_brainstorm('ShowToolTab', 'EigenModes');
-    panel_eigenmodes('UpdatePanel', hFig);
-    % Initial repaint + label (driven by ModesChangedCallback so it stays consistent)
-    ModesChangedCallback(hFig);
 
-    % ===== NESTED: keyboard navigation via the lever =====
-    function KeyPress_Callback(h, keyEvent)
-        cur = 1;
-        try
-            cur = panel_eigenmodes('GetCurrentMode');
-        catch
+    DrawArrows();
+
+    % ===== NESTED: draw the current mode's field =====
+    function DrawArrows()
+        delete(findobj(hAxes, '-depth', 1, 'Tag', 'eigArrows'));
+        V3 = ReconstructModeField(EigenMat, iMode, nVert);
+        if useNormalize
+            nv = sqrt(sum(V3.^2, 2));
+            nz = nv > eps;
+            V3(nz,:) = V3(nz,:) ./ nv(nz);
         end
+        % cumulative-norm amplitude gate (like view_leadfield_vectors)
+        normV = sqrt(sum(V3.^2, 2));
+        [sv, ind] = sort(normV, 'ascend');
+        cdf = cumsum(sv);
+        if cdf(end) > 0, cdf = cdf / cdf(end); end
+        if thresholdBalance == 0
+            keep = find(cdf <= thresholdAmplitude);
+        else
+            keep = find(cdf > thresholdAmplitude);
+        end
+        Vre = Vertices(ind, :);
+        Dre = zeros(numel(ind), 3);
+        Dre(keep, :) = V3(ind(keep), :);
+        quiver3(Vre(:,1), Vre(:,2), Vre(:,3), Dre(:,1), Dre(:,2), Dre(:,3), quiverSize, ...
+            'Parent', hAxes, 'LineWidth', quiverWidth, 'Color', [.3 1 .3], 'Tag', 'eigArrows');
+        % legend
+        lamL = EigenMat.Lambda{1}(iMode);
+        lamR = EigenMat.Lambda{2}(iMode);
+        tauStr = ''; if ~isnan(Tau), tauStr = sprintf(' | tau=%.3g', Tau); end
+        normStr = ''; if useNormalize, normStr = ' | unit'; end
+        set(hLabel, 'String', sprintf(['Mode %d / %d   |   lambdaL=%.4g, lambdaR=%.4g%s%s   ' ...
+            '[arrows: %d | H for help]'], iMode, K, lamL, lamR, tauStr, normStr, numel(keep)));
+    end
+
+    % ===== NESTED: keyboard navigation =====
+    function KeyPress_Callback(h, keyEvent)
         switch (keyEvent.Key)
-            case 'leftarrow',  panel_eigenmodes('SetCurrentMode', cur - 1);
-            case 'rightarrow', panel_eigenmodes('SetCurrentMode', cur + 1);
-            case 'pageup',     panel_eigenmodes('SetCurrentMode', cur + 10);
-            case 'pagedown',   panel_eigenmodes('SetCurrentMode', cur - 10);
+            case 'leftarrow'
+                if     ismember('shift',   keyEvent.Modifier), quiverSize  = quiverSize  / 1.2;
+                elseif ismember('control', keyEvent.Modifier), quiverWidth = quiverWidth / 1.2;
+                elseif ismember('alt',     keyEvent.Modifier), thresholdAmplitude = thresholdAmplitude - 0.01;
+                else,  iMode = iMode - 1; end
+            case 'rightarrow'
+                if     ismember('shift',   keyEvent.Modifier), quiverSize  = quiverSize  * 1.2;
+                elseif ismember('control', keyEvent.Modifier), quiverWidth = quiverWidth * 1.2;
+                elseif ismember('alt',     keyEvent.Modifier), thresholdAmplitude = thresholdAmplitude + 0.01;
+                else,  iMode = iMode + 1; end
+            case 'uparrow'
+                if     ismember('shift',   keyEvent.Modifier), quiverSize  = quiverSize  * 1.2;
+                elseif ismember('control', keyEvent.Modifier), quiverWidth = quiverWidth * 1.2;
+                elseif ismember('alt',     keyEvent.Modifier), thresholdAmplitude = thresholdAmplitude + 0.01;
+                else,  return; end
+            case 'downarrow'
+                if     ismember('shift',   keyEvent.Modifier), quiverSize  = quiverSize  / 1.2;
+                elseif ismember('control', keyEvent.Modifier), quiverWidth = quiverWidth / 1.2;
+                elseif ismember('alt',     keyEvent.Modifier), thresholdAmplitude = thresholdAmplitude - 0.01;
+                else,  return; end
+            case 'pageup',   iMode = iMode + 10;
+            case 'pagedown', iMode = iMode - 10;
+            case 'n',        useNormalize = ~useNormalize;
+            case 'return'
+                if ismember('alt', keyEvent.Modifier), thresholdBalance = ~thresholdBalance; else, return; end
             case 'h'
-                java_dialog('msgbox', ['Eigenmode viewer:' 10 '  Left/Right: step mode' 10 '  PgUp/PgDn: +/-10' 10 '  Use the "Spatial scale (eigenmodes)" panel to superpose a range.'], 'Eigenmode viewer');
+                java_dialog('msgbox', ['<HTML><TABLE>' ...
+                    '<TR><TD><B>Left/Right</B></TD><TD>Previous/next mode</TD></TR>' ...
+                    '<TR><TD><B>PgUp/PgDn</B></TD><TD>+/- 10 modes</TD></TR>' ...
+                    '<TR><TD><B>Shift+Left/Right</B></TD><TD>Arrow length -/+</TD></TR>' ...
+                    '<TR><TD><B>Control+Left/Right</B></TD><TD>Arrow width -/+</TD></TR>' ...
+                    '<TR><TD><B>Alt+Left/Right</B></TD><TD>Amplitude threshold -/+</TD></TR>' ...
+                    '<TR><TD><B>Alt+Enter</B></TD><TD>Toggle threshold direction</TD></TR>' ...
+                    '<TR><TD><B>N</B></TD><TD>Toggle unit-normalized arrows</TD></TR>' ...
+                    '<TR><TD><B>0-9</B></TD><TD>Change view</TD></TR>' ...
+                    '</TABLE>'], 'Keyboard shortcuts', [], 0);
+                return;
             otherwise
                 if ~isempty(KeyPressFcn_bak), KeyPressFcn_bak(h, keyEvent); end
+                return;
         end
-    end
-
-    % ===== NESTED: delete the transient result on figure close =====
-    function CleanupResult()
-        try
-            file_delete(file_fullpath(OutputFile), 1);
-            db_reload_studies(iStudy);
-        catch
-            % Non-fatal: leave the node if cleanup fails (user can delete it)
-        end
-    end
-end
-
-
-%% ===== Re-synthesize the viewer's displayed column on a lever change =====
-function ModesChangedCallback(hFig) %#ok<DEFNU>
-    global GlobalData;
-    ev = getappdata(hFig, 'EigenView');
-    if isempty(ev), return; end
-    W = panel_eigenmodes('GetWeights');
-    if isempty(W) || (numel(W) ~= size(ev.PairedGrid,2)), return; end
-    % The panel decides synthesis vs delta point-spread (and window vs kernel).
-    col = panel_eigenmodes('GetDisplayColumn', ev.SurfaceFile, ev.PairedGrid);
-    [iDS, iResult] = bst_memory('GetDataSetResult', ev.ResultsFile);
-    if isempty(iDS), return; end
-    GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp = [col col];
-    panel_surface('UpdateSurfaceData', hFig);
-    % Update bottom-left legend
-    if isfield(ev, 'LabelHandle') && ishandle(ev.LabelHandle)
-        K = size(ev.PairedGrid, 2);
-        nKeep = nnz(W > 1e-6);
-        lo = find(W > 1e-6, 1, 'first'); hi = find(W > 1e-6, 1, 'last');
-        cur = 1;
-        try, cur = panel_eigenmodes('GetCurrentMode'); catch, end
-        % Representative eigenvalue for the current paired rank
-        lamStr = '';
-        if isfield(ev, 'Info') && isfield(ev.Info, 'Values') && isfield(ev.Info, 'CompRank')
-            ik = find(ev.Info.CompRank(:) == cur, 1);
-            if ~isempty(ik), lamStr = sprintf('    lambda = %.4g', ev.Info.Values(ik)); end
-        end
-        if (nKeep <= 1)
-            str = sprintf('Mode %d / %d%s', cur, K, lamStr);
-        else
-            str = sprintf('Modes %d-%d / %d   (%d modes)', lo, hi, K, nKeep);
-        end
-        set(ev.LabelHandle, 'String', str);
+        if iMode < 1, iMode = K; end
+        if iMode > K, iMode = 1; end
+        if thresholdAmplitude < 0, thresholdAmplitude = 0; end
+        if thresholdAmplitude > 1, thresholdAmplitude = 1; end
+        DrawArrows();
     end
 end
