@@ -1,9 +1,10 @@
 function test_view_manifold()
 % TEST_VIEW_MANIFOLD  Live-figure regression for the manifold viewer.
 % Default view is a true light-grey wireframe (faces off) with the scalar layer
-% on, drawn as the cortex patch's own vertex markers so it follows Smooth/Resect.
-% 'D' toggles the scalar layer. Requires Brainstorm running with a registered
-% manifold node.
+% on (a point cloud kept in sync with the cortex patch). The cloud follows the
+% Smooth slider and the numeric Resect, and drops the hemisphere hidden by a
+% left/right Resect. 'D' toggles the layer. Requires Brainstorm running with a
+% registered manifold node.
 % Authors: Diellor Basha, 2026
     nPass = 0; nFail = 0;
 
@@ -18,31 +19,43 @@ function test_view_manifold()
     [nPass,nFail] = chk('viewer returns a figure', ~isempty(hFig) && ishandle(hFig), nPass,nFail);
 
     hAx3D  = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
-    hPatch = findobj(hAx3D, 'Type', 'patch');
+    hPatch = findobj(hAx3D, 'Type', 'patch'); hP = hPatch(1);
+    hCloud = findobj(hFig, 'Tag', 'manifoldScalar');
     [nPass,nFail] = chk('Axes3D exists', ~isempty(hAx3D), nPass,nFail);
     [nPass,nFail] = chk('cortex patch exists', ~isempty(hPatch), nPass,nFail);
-    hP = hPatch(1);
-    % default is a true wireframe: faces off (FaceColor 'none')
     fc = get(hP, 'FaceColor');
     [nPass,nFail] = chk('wireframe: FaceColor none', ischar(fc) && strcmpi(fc,'none'), nPass,nFail);
+    [nPass,nFail] = chk('patch markers off (separate cloud used)', strcmpi(get(hP,'Marker'),'none'), nPass,nFail);
 
-    % scalar layer on by default = patch vertex markers over all vertices
-    [nPass,nFail] = chk('scalar on: patch Marker = ''.''', strcmp(get(hP,'Marker'),'.'), nPass,nFail);
-    [nPass,nFail] = chk('markers cover all vertices', size(get(hP,'Vertices'),1)==nVert, nPass,nFail);
+    % scalar cloud on by default, one point per vertex, all visible
+    [nPass,nFail] = chk('scalar cloud exists', ~isempty(hCloud), nPass,nFail);
+    Cx = get(hCloud, 'XData');
+    [nPass,nFail] = chk('cloud has nVert points', numel(Cx)==nVert, nPass,nFail);
+    [nPass,nFail] = chk('all vertices visible by default', nnz(~isnan(Cx))==nVert, nPass,nFail);
+    V = get(hP, 'Vertices');
+    [nPass,nFail] = chk('cloud matches patch vertices', isequal(Cx(:), V(:,1)), nPass,nFail);
 
-    % D toggles the scalar layer off, then back on
+    % cloud follows Smooth: after smoothing, the cloud tracks the moved vertices
+    panel_surface('SetSurfaceSmooth', hFig, 1, 0.6, 0); drawnow; drawnow;
+    Vs = get(hP, 'Vertices'); Cxs = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
+    [nPass,nFail] = chk('cloud follows Smooth', ~isequal(V,Vs) && isequal(Cxs(:), Vs(:,1)), nPass,nFail);
+    panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0); drawnow; drawnow;
+
+    % left/right Resect hides one hemisphere: the cloud drops exactly the dots of
+    % the hidden faces (one hemisphere = nVert/2), mirroring the patch alpha.
+    TI = getappdata(hFig,'Surface'); TI(1).Resect = {[0 0 0], 'right'}; setappdata(hFig,'Surface',TI);
+    figure_3d('UpdateSurfaceAlpha', hFig, 1); drawnow; drawnow;
+    Cxr = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
+    A   = get(hP, 'FaceVertexAlphaData'); F = get(hP, 'Faces');
+    nVisExpected = numel(unique(F(A>0,:)));
+    [nPass,nFail] = chk('Resect hides one hemisphere''s dots', nnz(~isnan(Cxr))==nVert/2, nPass,nFail);
+    [nPass,nFail] = chk('cloud visibility mirrors patch alpha', nnz(~isnan(Cxr))==nVisExpected, nPass,nFail);
+
+    % D toggles the layer off then on
     KeyOnFig(hFig, 'd'); drawnow;
-    [nPass,nFail] = chk('D toggles scalar off (Marker none)', strcmpi(get(hP,'Marker'),'none'), nPass,nFail);
+    [nPass,nFail] = chk('D toggles scalar off', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'off'), nPass,nFail);
     KeyOnFig(hFig, 'd'); drawnow;
-    [nPass,nFail] = chk('D toggles scalar back on', strcmp(get(hP,'Marker'),'.'), nPass,nFail);
-
-    % markers follow Smooth: vertices move, the markers (being the vertices) stay on
-    V0 = get(hP, 'Vertices');
-    panel_surface('SetSurfaceSmooth', hFig, 1, 0.6, 0); drawnow;
-    V1 = get(hP, 'Vertices');
-    [nPass,nFail] = chk('scalar follows Smooth (verts move, markers stay)', ...
-        ~isequal(V0,V1) && strcmp(get(hP,'Marker'),'.'), nPass,nFail);
-    panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0); drawnow;
+    [nPass,nFail] = chk('D toggles scalar back on', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
 
     close(hFig);
     fprintf('\n==== test_view_manifold: %d passed, %d failed ====\n', nPass, nFail);
