@@ -25,7 +25,7 @@ function varargout = view_manifold(varargin)
 %   D   toggle the scalar data layer (vertex point cloud)
 %   H   help
 %
-% SEE ALSO: tess_manifold, tess_frame, view_manifold_registration, view_surface
+% SEE ALSO: tess_manifold, view_manifold_registration, view_surface
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -58,7 +58,7 @@ end
 %% ===== PURE: per-vertex frame from the manifold node =====
 function G = DeriveVertexFrame(Embedded, Gauge, nVert)
 % G: struct with P,U,V,N [nVert x 3] (zeros off-support) and Sing (global vtx ids).
-% U=real(grid.*rot), V=imag(grid.*rot), N=cross(U,V) per the tess_frame convention.
+% U=real(grid.*rot), V=imag(grid.*rot), N=cross(U,V) per the manifold gauge convention.
     if numel(Embedded) ~= 2 || numel(Gauge) ~= 2
         error('view_manifold:badNode', 'Embedded and Gauge must be 1x2 per-hemisphere structs.');
     end

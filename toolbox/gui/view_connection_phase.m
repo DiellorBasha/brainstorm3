@@ -16,11 +16,11 @@ function hFig = view_connection_phase(SurfaceFile, varargin)
 %               Left / Right  fewer / more glyphs;  other keys drive the
 %               standard Brainstorm view controls.
 %     Data pipeline: bst_conn_eigenmodes_ensure -> nxr vertexFrame ->
-%     tess_frame (manifold gauge frame) -> bst_conn_phase.
+%     manifold node gauge frame -> bst_conn_phase.
 %
 %     Requires the nxr-compute plugin and a FreeSurfer-registered cortex.
 %
-% SEE ALSO: bst_conn_phase, bst_conn_eigenmodes_ensure, tess_frame, view_eigenmodes
+% SEE ALSO: bst_conn_phase, bst_conn_eigenmodes_ensure, tess_manifold, view_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -72,7 +72,7 @@ Vtx = TessMat.Vertices;
 Fcs = double(TessMat.Faces);
 mctx   = nxr.manifold.context(Vtx, Fcs);
 vFrame = nxr.manifold.measure.vertexFrame(mctx);
-[Uv, Vv] = tess_frame(SurfaceFile);          % manifold gauge frame (vertex domain)
+[Uv, Vv] = GetManifoldFrame(SurfaceFile);    % manifold gauge frame (vertex domain)
 FsFrame  = struct('e1', Uv, 'e2', Vv);
 
 R = bst_conn_phase(ConnEig, vFrame, 'Rank', 1, 'FsFrame', FsFrame, 'nSing', 2);
@@ -295,6 +295,28 @@ function L = MeanEdgeLength(Vtx, Fcs)
     e2 = Vtx(Fcs(:,3),:) - Vtx(Fcs(:,2),:);
     e3 = Vtx(Fcs(:,1),:) - Vtx(Fcs(:,3),:);
     L = mean([sqrt(sum(e1.^2,2)); sqrt(sum(e2.^2,2)); sqrt(sum(e3.^2,2))]);
+end
+
+
+%% ===== MANIFOLD GAUGE FRAME (per vertex) =====
+% Per-vertex trivial-gauge frame (e1,e2) from the surface's manifold node:
+% U=real(grid.*rot), V=imag(grid.*rot), grid=Embedded.vertex.grid,
+% rot=Gauge.vertex.rotation. Creates the manifold node if the surface has none.
+function [U, V] = GetManifoldFrame(SurfaceFile)
+    [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
+    if ~isfield(sSubject.Surface(iSurface), 'Manifold') || isempty(sSubject.Surface(iSurface).Manifold)
+        tess_manifold(SurfaceFile);                                   % create the node
+        [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
+    end
+    M  = load(file_fullpath(sSubject.Surface(iSurface).Manifold(1).FileName));
+    nV = size(in_tess_bst(SurfaceFile).Vertices, 1);
+    U  = zeros(nV, 3);  V = zeros(nV, 3);
+    for hh = 1:2
+        vH = double(M.Embedded(hh).GlobalVertices(:));
+        cR = M.Embedded(hh).vertex.grid .* M.Gauge(hh).vertex.rotation(:);
+        U(vH,:) = real(cR);
+        V(vH,:) = imag(cR);
+    end
 end
 
 

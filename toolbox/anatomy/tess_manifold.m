@@ -38,7 +38,7 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
 % Requires the nxr-compute plugin.  The trivial gauge also needs a FreeSurfer
 % registration sphere (TessMat.Reg.Sphere.Vertices).
 %
-% SEE ALSO: tess_frame, tess_hemisplit, db_add_manifold, db_template
+% SEE ALSO: tess_hemisplit, db_add_manifold, db_template, view_manifold
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
