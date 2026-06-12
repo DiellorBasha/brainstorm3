@@ -887,9 +887,6 @@ function DeleteFigure(hFigure, varargin)
     if ishandle(hFigure) && isappdata(hFigure, 'Surface')
         % Signals the "Surfaces" and "Scouts" panel that a figure was closed
         panel_surface('UpdatePanel');
-        if gui_brainstorm('isTabVisible', 'EigenModes')
-            panel_eigenmodes('UpdatePanel');
-        end
         % Remove scouts references
         panel_scout('RemoveScoutsFromFigure', hFigure);
         % Reset "Coordinates" panel
@@ -986,50 +983,6 @@ function FireCurrentTimeChanged(ForceTime)
                     figure_image('CurrentTimeChangedCallback', sFig.hFigure);
                 case 'Video'
                     figure_video('CurrentTimeChangedCallback', sFig.hFigure);
-            end
-        end
-    end
-end
-
-
-%% ===== FIRE MODES CHANGED =====
-% Repaint visible 3D source figures after the eigenmode lever changes.
-function FireModesChanged() %#ok<DEFNU>
-    global GlobalData;
-    if ~isfield(GlobalData, 'UserModes') || isempty(GlobalData.UserModes) ...
-            || ~isfield(GlobalData.UserModes, 'SurfaceFile') || isempty(GlobalData.UserModes.SurfaceFile)
-        return;
-    end
-    if ~isfield(GlobalData, 'DataSet') || isempty(GlobalData.DataSet)
-        return;
-    end
-    SurfaceFile = GlobalData.UserModes.SurfaceFile;
-    for iDS = 1:length(GlobalData.DataSet)
-        for iFig = 1:length(GlobalData.DataSet(iDS).Figure)
-            sFig = GlobalData.DataSet(iDS).Figure(iFig);
-            if strcmpi(get(sFig.hFigure, 'Visible'), 'off')
-                continue;
-            end
-            if ~strcmpi(sFig.Id.Type, '3DViz')
-                continue;
-            end
-            % Only repaint figures showing the lever's surface
-            TessInfo = getappdata(sFig.hFigure, 'Surface');
-            isMatch = false;
-            for iTess = 1:numel(TessInfo)
-                if file_compare(TessInfo(iTess).SurfaceFile, SurfaceFile)
-                    isMatch = true; break;
-                end
-            end
-            if ~isMatch
-                continue;
-            end
-            % Eigenmode-view figures own their own synthesis path; all others
-            % go through the standard filter path.
-            if ~isempty(getappdata(sFig.hFigure, 'EigenView'))
-                view_eigenmodes('ModesChangedCallback', sFig.hFigure);
-            else
-                panel_surface('UpdateSurfaceData', sFig.hFigure);
             end
         end
     end
@@ -1159,9 +1112,6 @@ function SetCurrentFigure(hFig, Type)
                 end
                 if gui_brainstorm('isTabVisible', 'Cluster')
                     panel_cluster('CurrentFigureChanged_Callback', hFig);
-                end
-                if gui_brainstorm('isTabVisible', 'EigenModes')
-                    panel_eigenmodes('UpdatePanel', hFig);
                 end
             end
         case 'TypeTF'
