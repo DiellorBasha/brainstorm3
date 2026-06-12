@@ -106,6 +106,11 @@ function hFig = ViewFigure(EigenFile)
     Vertices = TessMat.Vertices;
     nVert    = size(Vertices, 1);
     K        = min(size(EigenMat.Phi{1},2), size(EigenMat.Phi{2},2));
+    if ~isfield(EigenMat,'Lambda') || numel(EigenMat.Lambda) ~= 2 ...
+            || numel(EigenMat.Lambda{1}) < K || numel(EigenMat.Lambda{2}) < K
+        bst_error('Dirac eigen node has missing or undersized Lambda.', 'View eigenmodes', 0);
+        return;
+    end
     Tau      = NaN;
     if isfield(EigenMat,'Provenance') && isstruct(EigenMat.Provenance) ...
             && isfield(EigenMat.Provenance,'Tau') && ~isempty(EigenMat.Provenance.Tau)
