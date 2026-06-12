@@ -118,19 +118,23 @@ function hFig = ViewFigure(ManifoldFile)
     hAxes  = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
     hPatch = findobj(hAxes, 'Type', 'patch');
     if numel(hPatch) > 1, hPatch = hPatch(1); end
-    % Light-grey wireframe that reads against the black background.
-    set(hPatch, 'FaceColor', 'none', 'EdgeColor', [0.7 0.7 0.7], 'EdgeAlpha', 1, 'Marker', 'none');
+    % Opaque surface render (faces on) with the mesh edges; overlays use a
+    % separate cloud, so the patch itself carries no markers.
+    set(hPatch, 'Marker', 'none');
     hold(hAxes, 'on');
 
     % --- state ---
     activeDim  = 'scalar';      % which data dimension is shown (tab-driven)
+    support    = 'vertex';      % data support: 'vertex' or 'face' (scalar only for now)
     showScalar = true;          % within the scalar dim, D toggles the cloud
     colScalar  = [0.2 0.9 1];   % cyan point cloud
     colTangent = [1 1 0];       % yellow U,V tangent frame
     colNormal  = [1 0 1];       % magenta normal
     Gframe     = [];            % cached per-vertex frame (DeriveVertexFrame)
     nFrames    = 2500;          % frame glyphs are decimated for readability
-    glyphLen   = 1.5 * MeanEdgeLength(get(hPatch,'Vertices'), get(hPatch,'Faces'));
+    meanEdge   = MeanEdgeLength(get(hPatch,'Vertices'), get(hPatch,'Faces'));
+    glyphLen   = 0.5 * meanEdge;   % frame glyph length (unit dirs scaled to this)
+    offLen     = 0.2 * meanEdge;   % lift overlays just off the opaque surface
     Vcache = []; Acache = []; EAcache = []; inSync = false;
 
     % Scalar layer: a point cloud that mirrors the cortex patch's live vertices.
@@ -159,6 +163,16 @@ function hFig = ViewFigure(ManifoldFile)
     uitab(hDimTabs, 'Title', 'Vector2');
     uitab(hDimTabs, 'Title', 'Vector3');
 
+    % --- support buttons (top-left): vertex vs face support (mutually exclusive) ---
+    hSupport = uibuttongroup('Parent', hFig, 'Units', 'normalized', ...
+        'Position', [0.005 0.90 0.165 0.095], 'Tag', 'manifoldSupport', ...
+        'Title', 'Support', 'ForegroundColor', [1 1 1], 'BackgroundColor', [0.15 0.15 0.15], ...
+        'HighlightColor', [.4 .4 .4], 'SelectionChangedFcn', @SupportChanged);
+    uicontrol(hSupport, 'Style', 'togglebutton', 'String', 'Vertex', 'Units', 'normalized', ...
+        'Position', [0.04 0.12 0.45 0.76], 'Value', 1);
+    uicontrol(hSupport, 'Style', 'togglebutton', 'String', 'Face', 'Units', 'normalized', ...
+        'Position', [0.51 0.12 0.45 0.76]);
+
     % ===== NESTED: keep the scalar cloud in sync with the cortex patch =====
     function SyncScalar(force)
         if inSync || isempty(hPatch) || ~ishandle(hPatch) || isempty(hCloud) || ~ishandle(hCloud)
@@ -180,27 +194,41 @@ function hFig = ViewFigure(ManifoldFile)
         Vcache = V; Acache = A; EAcache = EA;
         F  = get(hPatch, 'Faces');
         nV = size(V, 1);
-        % A vertex hides only when the wireframe hides it. Brainstorm hides a
-        % hemisphere by switching the edge alpha to per-element ('flat'/'interp')
-        % with zeroed FaceVertexAlphaData; toggling the resect off restores a
-        % SCALAR edge alpha (leaving FaceVertexAlphaData stale). So gate on the
-        % alpha MODE, not the (possibly stale) per-face data.
+        nF = size(F, 1);
+        % Per-face visibility from the alpha MODE. Brainstorm hides a hemisphere
+        % by switching the edge alpha to per-element ('flat'/'interp') with zeroed
+        % FaceVertexAlphaData; toggling off restores a SCALAR alpha but leaves the
+        % per-face data stale. So gate on the mode, not the (stale) per-face data.
         if ischar(EA) && ~isempty(A)
-            if numel(A) == size(F,1)        % per-face ('flat')
-                vis = false(nV,1);
-                vis(unique(F(A > 0, :))) = true;
+            if numel(A) == nF               % per-face ('flat')
+                faceVis = A > 0;
             elseif numel(A) == nV           % per-vertex ('interp')
-                vis = A(:) > 0;
+                vv = A(:) > 0; faceVis = all(vv(F), 2);
             else
-                vis = true(nV,1);
+                faceVis = true(nF, 1);
             end
         elseif isnumeric(EA) && isscalar(EA) && EA <= 0
-            vis = false(nV,1);              % uniformly transparent
+            faceVis = false(nF, 1);         % uniformly transparent
         else
-            vis = true(nV,1);              % scalar opaque edges -> all visible
+            faceVis = true(nF, 1);          % scalar opaque -> all visible
         end
-        Vd = V; Vd(~vis, :) = NaN;          % hidden-hemisphere points drop out
-        set(hCloud, 'XData', Vd(:,1), 'YData', Vd(:,2), 'ZData', Vd(:,3), 'Visible', 'on');
+        % Support: scalar data on vertices (default) or on faces (centroids).
+        if strcmpi(support, 'face')
+            P   = (V(F(:,1),:) + V(F(:,2),:) + V(F(:,3),:)) / 3;   % live face centroids
+            vis = faceVis;
+        else
+            P   = V;                                              % vertices
+            vis = false(nV, 1);
+            vis(unique(F(faceVis, :))) = true;                    % visible if any incident face is
+        end
+        % Lift the cloud just off the opaque surface, radially outward from the
+        % live centroid (always outward; follows Smooth / Resect motion).
+        ctr = mean(V, 1);
+        rad = P - ctr;
+        rad = rad ./ max(sqrt(sum(rad.^2, 2)), eps);
+        Pd = P + offLen * rad;
+        Pd(~vis, :) = NaN;                  % hidden support points drop out
+        set(hCloud, 'XData', Pd(:,1), 'YData', Pd(:,2), 'ZData', Pd(:,3), 'Visible', 'on');
         inSync = false;
     end
 
@@ -222,7 +250,7 @@ function hFig = ViewFigure(ManifoldFile)
         end
         nV  = size(Gframe.P, 1);
         idx = unique(round(linspace(1, nV, min(nFrames, nV))));   % decimate for readability
-        P = Gframe.P(idx, :);
+        P = Gframe.P(idx, :) + offLen * Gframe.N(idx, :);         % lift off the surface
         DrawQuiv(P, Gframe.U(idx,:), colTangent, 'manifoldVecU');
         DrawQuiv(P, Gframe.V(idx,:), colTangent, 'manifoldVecV');
         if strcmpi(activeDim, 'vector3')
@@ -244,7 +272,7 @@ function hFig = ViewFigure(ManifoldFile)
                 set(hLabel, 'String', 'Manifold  |  Vector3: full frame (U,V,N)   (H: help)');
             otherwise
                 if showScalar, st = 'on'; else, st = 'off'; end
-                set(hLabel, 'String', sprintf('Manifold  |  Scalar: %s   (D: toggle   H: help)', st));
+                set(hLabel, 'String', sprintf('Manifold  |  Scalar (%s): %s   (D: toggle   H: help)', support, st));
         end
     end
 
@@ -252,6 +280,13 @@ function hFig = ViewFigure(ManifoldFile)
     function DimTabChanged(~, ev)
         activeDim = lower(ev.NewValue.Title);
         ApplyDim();
+    end
+
+    % ===== NESTED: support switch (vertex / face) — scalar layer only for now =====
+    function SupportChanged(~, ev)
+        support = lower(ev.NewValue.String);
+        SyncScalar(true);
+        UpdateLabel();
     end
 
     % ===== NESTED: keyboard =====

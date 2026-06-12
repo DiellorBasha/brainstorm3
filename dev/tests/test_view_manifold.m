@@ -24,7 +24,7 @@ function test_view_manifold()
     [nPass,nFail] = chk('Axes3D exists', ~isempty(hAx3D), nPass,nFail);
     [nPass,nFail] = chk('cortex patch exists', ~isempty(hPatch), nPass,nFail);
     fc = get(hP, 'FaceColor');
-    [nPass,nFail] = chk('wireframe: FaceColor none', ischar(fc) && strcmpi(fc,'none'), nPass,nFail);
+    [nPass,nFail] = chk('surface render on (faces visible)', ~(ischar(fc) && strcmpi(fc,'none')), nPass,nFail);
     [nPass,nFail] = chk('patch markers off (separate cloud used)', strcmpi(get(hP,'Marker'),'none'), nPass,nFail);
 
     % scalar cloud on by default, one point per vertex, all visible
@@ -32,13 +32,18 @@ function test_view_manifold()
     Cx = get(hCloud, 'XData');
     [nPass,nFail] = chk('cloud has nVert points', numel(Cx)==nVert, nPass,nFail);
     [nPass,nFail] = chk('all vertices visible by default', nnz(~isnan(Cx))==nVert, nPass,nFail);
+    % cloud sits near the vertices (lifted slightly off the surface)
     V = get(hP, 'Vertices');
-    [nPass,nFail] = chk('cloud matches patch vertices', isequal(Cx(:), V(:,1)), nPass,nFail);
+    Ftest = double(get(hP, 'Faces'));
+    meTest = mean(sqrt(sum((V(Ftest(:,1),:) - V(Ftest(:,2),:)).^2, 2)));
+    Cxyz = [get(hCloud,'XData')', get(hCloud,'YData')', get(hCloud,'ZData')'];
+    [nPass,nFail] = chk('cloud near patch vertices (lifted)', max(sqrt(sum((Cxyz - V).^2,2))) < meTest, nPass,nFail);
 
-    % cloud follows Smooth: after smoothing, the cloud tracks the moved vertices
+    % cloud follows Smooth: after smoothing, the cloud moves with the vertices
+    Cx0 = get(hCloud, 'XData');
     panel_surface('SetSurfaceSmooth', hFig, 1, 0.6, 0); drawnow; drawnow;
-    Vs = get(hP, 'Vertices'); Cxs = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
-    [nPass,nFail] = chk('cloud follows Smooth', ~isequal(V,Vs) && isequal(Cxs(:), Vs(:,1)), nPass,nFail);
+    Cxs = get(findobj(hFig,'Tag','manifoldScalar'), 'XData');
+    [nPass,nFail] = chk('cloud follows Smooth (moves)', ~isequal(Cx0,Cxs) && nnz(~isnan(Cxs))==nVert, nPass,nFail);
     panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0); drawnow; drawnow;
 
     % left/right Resect (real toggle path) hides one hemisphere's dots, and
@@ -82,6 +87,24 @@ function test_view_manifold()
         cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec3)); drawnow;
         [nPass,nFail] = chk('Scalar: vectors cleared, scalar on', ...
             isempty(findobj(hFig,'Tag','manifoldVecU')) && strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
+    end
+
+    % support buttons: Vertex (nVert) <-> Face (nFace centroids), scalar layer
+    nFace = size(get(hP,'Faces'), 1);
+    hS = findobj(hFig, 'Tag', 'manifoldSupport');
+    [nPass,nFail] = chk('support buttons present', ~isempty(hS), nPass,nFail);
+    if ~isempty(hS)
+        cbS   = get(hS, 'SelectionChangedFcn');
+        tVert = findobj(hS, 'String', 'Vertex');
+        tFace = findobj(hS, 'String', 'Face');
+        [nPass,nFail] = chk('Vertex support: nVert cloud points', ...
+            numel(get(findobj(hFig,'Tag','manifoldScalar'),'XData'))==nVert, nPass,nFail);
+        cbS(hS, struct('NewValue', tFace, 'OldValue', tVert)); drawnow;
+        [nPass,nFail] = chk('Face support: nFace cloud points', ...
+            numel(get(findobj(hFig,'Tag','manifoldScalar'),'XData'))==nFace, nPass,nFail);
+        cbS(hS, struct('NewValue', tVert, 'OldValue', tFace)); drawnow;
+        [nPass,nFail] = chk('back to Vertex: nVert cloud points', ...
+            numel(get(findobj(hFig,'Tag','manifoldScalar'),'XData'))==nVert, nPass,nFail);
     end
 
     close(hFig);
