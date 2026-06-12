@@ -2539,6 +2539,8 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW MANIFOLD ===
                     gui_component('MenuItem', jPopup, [], 'View manifold', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@view_manifold, filenameFull));
+                    % === VIEW REGISTRATION SPHERE ===
+                    gui_component('MenuItem', jPopup, [], 'View registration sphere', IconLoader.ICON_SURFACE, [], @(h,ev)bst_call(@view_manifold_registration, filenameFull));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
