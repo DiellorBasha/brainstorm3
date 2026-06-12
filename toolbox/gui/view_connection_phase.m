@@ -16,11 +16,11 @@ function hFig = view_connection_phase(SurfaceFile, varargin)
 %               Left / Right  fewer / more glyphs;  other keys drive the
 %               standard Brainstorm view controls.
 %     Data pipeline: bst_conn_eigenmodes_ensure -> nxr vertexFrame ->
-%     bst_tangent_face2vertex (FS frame) -> bst_conn_phase.
+%     tess_frame (manifold gauge frame) -> bst_conn_phase.
 %
 %     Requires the nxr-compute plugin and a FreeSurfer-registered cortex.
 %
-% SEE ALSO: bst_conn_phase, bst_conn_eigenmodes_ensure, tess_tangents, view_eigenmodes
+% SEE ALSO: bst_conn_phase, bst_conn_eigenmodes_ensure, tess_frame, view_eigenmodes
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -70,12 +70,9 @@ ConnEig = bst_conn_eigenmodes_ensure(SurfaceFile, nModes);
 TessMat = in_tess_bst(SurfaceFile);
 Vtx = TessMat.Vertices;
 Fcs = double(TessMat.Faces);
-Nv  = TessMat.VertNormals;
-
 mctx   = nxr.manifold.context(Vtx, Fcs);
 vFrame = nxr.manifold.measure.vertexFrame(mctx);
-[Uf, ~]  = tess_tangents(SurfaceFile, 'NoSave', 1);
-[Uv, Vv] = bst_tangent_face2vertex(Fcs, Uf, Nv);
+[Uv, Vv] = tess_frame(SurfaceFile);          % manifold gauge frame (vertex domain)
 FsFrame  = struct('e1', Uv, 'e2', Vv);
 
 R = bst_conn_phase(ConnEig, vFrame, 'Rank', 1, 'FsFrame', FsFrame, 'nSing', 2);

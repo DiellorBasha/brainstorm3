@@ -1,6 +1,11 @@
 function [U, V] = tess_tangents(SurfaceFile, varargin)
 % TESS_TANGENTS: Globally consistent per-face tangent frame field.
 %
+% DEPRECATED: superseded by the manifold frame (view_manifold / tess_frame).
+%     Retained only for the per-face callers (bst_wavefront_track,
+%     tess_nxr_populate) until per-face manifold frames are available
+%     (nxr Gauge.face.rotation is currently deferred for the trivial gauge).
+%
 % USAGE:  [U, V] = tess_tangents(SurfaceFile)              % compute, store, return
 %         [U, V] = tess_tangents(SurfaceFile, 'NoSave', 1) % compute + return only
 %
