@@ -1182,7 +1182,6 @@ switch (lower(action))
                     if ~bst_get('ReadOnly')
                         gui_component('MenuItem', jPopup, [], 'Compute eigenmodes (legacy)', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@process_eigenmodes, 'ComputeInteractive', iSubject, filenameRelative));
                     end
-                    gui_component('MenuItem', jPopup, [], 'View eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_eigenmodes, filenameRelative));
                     gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_connection_phase, filenameRelative));
                 end
 
@@ -4079,26 +4078,11 @@ end
 
 %% ===== EIGEN: VIEW =====
 function EigenView_Callback(filenameFull)
-    % Minimal inspector for SP3: load and show field names + sizes
     if ~file_exist(filenameFull)
         bst_error('Eigen file not found.', 'View eigen', 0);
         return;
     end
-    m = load(filenameFull);
-    fnames = fieldnames(m);
-    fprintf('=== Eigen: %s ===\n', filenameFull);
-    for k = 1:numel(fnames)
-        val = m.(fnames{k});
-        if isnumeric(val) || islogical(val)
-            fprintf('  %s: [%s]\n', fnames{k}, num2str(size(val)));
-        elseif ischar(val)
-            fprintf('  %s: ''%s''\n', fnames{k}, val);
-        elseif isstruct(val)
-            fprintf('  %s: struct 1x%d, fields: {%s}\n', fnames{k}, numel(val), strjoin(fieldnames(val),', '));
-        else
-            fprintf('  %s: %s\n', fnames{k}, class(val));
-        end
-    end
+    view_eigenmodes(filenameFull);
 end
 
 %% ===== EIGEN: DELETE =====

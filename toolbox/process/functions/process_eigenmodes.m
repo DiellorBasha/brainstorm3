@@ -285,8 +285,6 @@ function ComputeInteractive(iSubject, SurfaceFile) %#ok<DEFNU>
     end
     % Reflect the new eigenmodes in the database
     db_reload_subjects(iSubject);
-    % Visual confirmation: open the viewer on the freshly-computed modes
-    view_eigenmodes(SurfaceFile);
 end
 
 
