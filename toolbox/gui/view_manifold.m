@@ -145,6 +145,14 @@ function hFig = ViewFigure(ManifoldFile)
     SyncScalar(true);
     UpdateLabel();
 
+    % --- dimension tabs (top-right): switch the active data-dimension view ---
+    hDimTabs = uitabgroup('Parent', hFig, 'Units', 'normalized', ...
+        'Position', [0.595 0.90 0.40 0.095], 'Tag', 'manifoldDimTabs', ...
+        'SelectionChangedFcn', @DimTabChanged);
+    uitab(hDimTabs, 'Title', 'Scalar');
+    uitab(hDimTabs, 'Title', 'Vector2');
+    uitab(hDimTabs, 'Title', 'Vector3');
+
     % ===== NESTED: keep the scalar cloud in sync with the cortex patch =====
     function SyncScalar(force)
         if inSync || isempty(hPatch) || ~ishandle(hPatch) || isempty(hCloud) || ~ishandle(hCloud)
@@ -194,6 +202,14 @@ function hFig = ViewFigure(ManifoldFile)
     function UpdateLabel()
         if showScalar, st = 'on'; else, st = 'off'; end
         set(hLabel, 'String', sprintf('Manifold  |  scalar layer: %s   (D: scalar   H: help)', st));
+    end
+
+    % ===== NESTED: dimension tab switch (Scalar / Vector2 / Vector3) =====
+    function DimTabChanged(~, ev)
+        % Only the scalar view is wired; vector2 / vector3 are added later.
+        showScalar = strcmpi(ev.NewValue.Title, 'Scalar');
+        SyncScalar(true);
+        UpdateLabel();
     end
 
     % ===== NESTED: keyboard =====

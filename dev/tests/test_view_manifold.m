@@ -57,6 +57,21 @@ function test_view_manifold()
     KeyOnFig(hFig, 'd'); drawnow;
     [nPass,nFail] = chk('D toggles scalar back on', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
 
+    % dimension tabs: 3 tabs; Vector2/Vector3 switch off the scalar view, Scalar back on
+    hT = findobj(hFig, 'Tag', 'manifoldDimTabs');
+    titles = {}; if ~isempty(hT), titles = arrayfun(@(t) char(t.Title), hT.Children, 'UniformOutput', 0); end
+    [nPass,nFail] = chk('3 dimension tabs (Scalar/Vector2/Vector3)', ...
+        isequal(sort(titles(:)'), {'Scalar','Vector2','Vector3'}), nPass,nFail);
+    if ~isempty(hT)
+        cbT = get(hT, 'SelectionChangedFcn');
+        tScalar = findobj(hT.Children, 'flat', 'Title', 'Scalar');
+        tVec2   = findobj(hT.Children, 'flat', 'Title', 'Vector2');
+        cbT(hT, struct('NewValue', tVec2,   'OldValue', tScalar)); drawnow;
+        [nPass,nFail] = chk('Vector2 tab switches scalar off', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'off'), nPass,nFail);
+        cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec2)); drawnow;
+        [nPass,nFail] = chk('Scalar tab switches scalar on', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
+    end
+
     close(hFig);
     fprintf('\n==== test_view_manifold: %d passed, %d failed ====\n', nPass, nFail);
     if nFail > 0, error('test_view_manifold: %d test(s) FAILED.', nFail); end
