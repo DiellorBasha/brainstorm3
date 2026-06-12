@@ -3,15 +3,26 @@ function varargout = view_manifold(varargin)
 %
 % USAGE:  hFig = view_manifold(ManifoldFile)
 %         G    = view_manifold('DeriveVertexFrame', Embedded, Gauge, nVert)
+%         G    = view_manifold('DeriveFaceFrame',   Embedded, Gauge, nFace)
 %
 % Reads a manifold_ DB node (db_template('manifoldmat')) and renders its parent
 % cortex as a true light-grey wireframe (edges only, no filled faces), onto which
 % the data dimensions of the manifold are revealed as keyboard-toggled layers:
 %     scalar  (vertices)        -> 'D' : a point cloud on every vertex
-%     vector2 (tangent frames)  -> (added later)
-%     vector3 (ambient frames)  -> (added later)
+%     vector2 (tangent frames)  -> the combed tangent frame (U,V)
+%     vector3 (ambient frames)  -> the combed full frame (U,V,N)
 % Each dimension's frame is the geometric object the data lives on: vertices for
 % scalar, tangent (U,V) frames for vector2, ambient (U,V,N) frames for vector3.
+%
+% The Support buttons switch every layer between vertex support and face support.
+% On vertices the combed field is real(Gauge.vertex.rotation .* Embedded.vertex.grid)
+% placed at vertex positions; on faces it is real(Gauge.face.rotation .*
+% Embedded.face.grid) placed at face centroids (the manifold's dual mesh).
+%
+% Frame glyphs are unit (orthonormal), so they carry no magnitude: each is sized
+% to its own mesh cell using the refinement-covariant local length sqrt(cell area)
+% (barycentric dual area on vertices, triangle area on faces). Glyphs therefore
+% scale with the tessellation and the figure reads the same at any mesh density.
 %
 % The scalar layer is a point cloud kept in sync with the cortex patch via its
 % MarkedClean event, so it follows the Surfaces-panel Smooth slider and numeric
@@ -47,7 +58,7 @@ function varargout = view_manifold(varargin)
 %
 % Authors: Diellor Basha, 2026
 
-if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'DeriveVertexFrame'}))
+if (nargin >= 1) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'DeriveVertexFrame','DeriveFaceFrame'}))
     [varargout{1:nargout}] = feval(varargin{:});
     return;
 end
@@ -88,6 +99,40 @@ function G = DeriveVertexFrame(Embedded, Gauge, nVert)
 end
 
 
+%% ===== PURE: per-face (dual-mesh) frame from the manifold node =====
+function G = DeriveFaceFrame(Embedded, Gauge, nFace)
+% G: struct with P,U,V,N [nFace x 3] (zeros off-support) and empty Sing.
+% P = face centroid; U=real(grid.*rot), V=imag(grid.*rot), N=cross(U,V) on faces,
+% using the per-face combed field (Embedded.face.grid, Gauge.face.rotation).
+    if numel(Embedded) ~= 2 || numel(Gauge) ~= 2
+        error('view_manifold:badNode', 'Embedded and Gauge must be 1x2 per-hemisphere structs.');
+    end
+    P = zeros(nFace,3); U = zeros(nFace,3); V = zeros(nFace,3); N = zeros(nFace,3);
+    for hh = 1:2
+        fH   = double(Embedded(hh).GlobalFaces(:));
+        grid = Embedded(hh).face.grid;
+        rot  = Gauge(hh).face.rotation;
+        if isempty(rot)
+            error('view_manifold:noFaceGauge', ...
+                ['Hemisphere %d: Gauge.face.rotation is empty. Recompute the manifold ' ...
+                 'with the current nxr-compute (tess_manifold ''ForceRecompute'').'], hh);
+        end
+        if size(grid,1) ~= numel(fH) || size(grid,2) ~= 3
+            error('view_manifold:shapeMismatch', ...
+                'Hemisphere %d: Embedded.face.grid is [%s], expected [%d x 3].', ...
+                hh, num2str(size(grid)), numel(fH));
+        end
+        cRot = grid .* rot(:);
+        Uh = real(cRot);  Vh = imag(cRot);
+        U(fH,:) = Uh;
+        V(fH,:) = Vh;
+        N(fH,:) = cross(Uh, Vh, 2);
+        P(fH,:) = Embedded(hh).face.centroid;
+    end
+    G = struct('P',P, 'U',U, 'V',V, 'N',N, 'Sing',[]);
+end
+
+
 %% ===== GUI: layered manifold viewer (wireframe + toggleable layers) =====
 function hFig = ViewFigure(ManifoldFile)
     hFig = [];
@@ -125,16 +170,22 @@ function hFig = ViewFigure(ManifoldFile)
 
     % --- state ---
     activeDim  = 'scalar';      % which data dimension is shown (tab-driven)
-    support    = 'vertex';      % data support: 'vertex' or 'face' (scalar only for now)
+    support    = 'vertex';      % data support: 'vertex' or 'face' (all layers)
     showScalar = true;          % within the scalar dim, D toggles the cloud
     colScalar  = [0.2 0.9 1];   % cyan point cloud
     colTangent = [1 1 0];       % yellow U,V tangent frame
     colNormal  = [1 0 1];       % magenta normal
     Gframe     = [];            % cached per-vertex frame (DeriveVertexFrame)
+    GframeF    = [];            % cached per-face frame   (DeriveFaceFrame)
     nFrames    = 2500;          % frame glyphs are decimated for readability
     meanEdge   = MeanEdgeLength(get(hPatch,'Vertices'), get(hPatch,'Faces'));
-    glyphLen   = 0.5 * meanEdge;   % frame glyph length (unit dirs scaled to this)
-    offLen     = 0.2 * meanEdge;   % lift overlays just off the opaque surface
+    offLen     = 0.2 * meanEdge;   % scalar-cloud lift off the opaque surface
+    % Frame glyphs are UNIT (orthonormal) — they carry no magnitude, so their size
+    % is purely legibility: tie each cross to its own cell via the refinement-
+    % covariant local length sqrt(cell area). kGlyph sets the arm length, liftFac
+    % the lift off the surface; both are fractions of that local length.
+    kGlyph     = 0.45;          % frame arm length = kGlyph  * sqrt(local cell area)
+    liftFac    = 0.40;          % frame lift along N = liftFac * sqrt(local cell area)
     Vcache = []; Acache = []; EAcache = []; inSync = false;
 
     % Scalar layer: a point cloud that mirrors the cortex patch's live vertices.
@@ -239,27 +290,60 @@ function hFig = ViewFigure(ManifoldFile)
         UpdateLabel();
     end
 
-    % ===== NESTED: per-vertex frame glyphs (vector2 = U,V; vector3 = U,V,N) =====
+    % ===== NESTED: combed-frame glyphs (vector2 = U,V; vector3 = U,V,N) =====
+    % Draws on the active support: vertices (vertex.grid/rotation at vertex
+    % positions) or face centroids (face.grid/rotation on the dual mesh).
     function DrawVectors()
         delete(findobj(hAxes, '-depth', 1, '-regexp', 'Tag', '^manifoldVec'));
         if ~any(strcmpi(activeDim, {'vector2','vector3'}))
             return;
         end
-        if isempty(Gframe)
-            Gframe = DeriveVertexFrame(M.Embedded, M.Gauge, size(get(hPatch,'Vertices'),1));
+        if strcmpi(support, 'face')
+            if isempty(GframeF)
+                GframeF = DeriveFaceFrame(M.Embedded, M.Gauge, size(get(hPatch,'Faces'),1));
+            end
+            Gf = GframeF;
+        else
+            if isempty(Gframe)
+                Gframe = DeriveVertexFrame(M.Embedded, M.Gauge, size(get(hPatch,'Vertices'),1));
+            end
+            Gf = Gframe;
         end
-        nV  = size(Gframe.P, 1);
-        idx = unique(round(linspace(1, nV, min(nFrames, nV))));   % decimate for readability
-        P = Gframe.P(idx, :) + offLen * Gframe.N(idx, :);         % lift off the surface
-        DrawQuiv(P, Gframe.U(idx,:), colTangent, 'manifoldVecU');
-        DrawQuiv(P, Gframe.V(idx,:), colTangent, 'manifoldVecV');
+        nP  = size(Gf.P, 1);
+        idx = unique(round(linspace(1, nP, min(nFrames, nP))));   % decimate for readability
+        % Principled per-cell sizing: arm length = kGlyph * sqrt(local cell area),
+        % a refinement-covariant world length (vertex: barycentric dual area; face:
+        % triangle area). Glyphs then shrink in proportion to the mesh, so the figure
+        % reads the same at any tessellation density.
+        L  = LengthScale(support);                            % [nElem x 1] world length
+        Lk = L(idx);
+        P  = Gf.P(idx, :) + (liftFac * Lk) .* Gf.N(idx, :);   % per-cell lift off surface
+        DrawQuiv(P, (kGlyph * Lk) .* Gf.U(idx,:), colTangent, 'manifoldVecU');
+        DrawQuiv(P, (kGlyph * Lk) .* Gf.V(idx,:), colTangent, 'manifoldVecV');
         if strcmpi(activeDim, 'vector3')
-            DrawQuiv(P, Gframe.N(idx,:), colNormal, 'manifoldVecN');
+            DrawQuiv(P, (kGlyph * Lk) .* Gf.N(idx,:), colNormal, 'manifoldVecN');
         end
     end
 
-    function DrawQuiv(P, D, col, tag)
-        quiver3(P(:,1), P(:,2), P(:,3), D(:,1)*glyphLen, D(:,2)*glyphLen, D(:,3)*glyphLen, 0, ...
+    % Refinement-covariant local length scale = sqrt(cell area), computed from the
+    % live patch (vertex: barycentric lumped dual area, identical to nxr's
+    % Intrinsic.vertex.dualArea; face: triangle area).
+    function L = LengthScale(supp)
+        Vv = get(hPatch, 'Vertices');  Ff = double(get(hPatch, 'Faces'));
+        e1 = Vv(Ff(:,2),:) - Vv(Ff(:,1),:);
+        e2 = Vv(Ff(:,3),:) - Vv(Ff(:,1),:);
+        Af = 0.5 * sqrt(sum(cross(e1, e2, 2).^2, 2));        % triangle areas
+        if strcmpi(supp, 'face')
+            L = sqrt(Af);
+        else
+            L = sqrt(accumarray(Ff(:), repmat(Af,3,1)/3, [size(Vv,1) 1]));
+        end
+    end
+
+    function DrawQuiv(P, A, col, tag)
+        % A holds the already-scaled arm vectors (world units). Pass scale arg 0 so
+        % quiver3 uses them literally instead of auto-rescaling to "look nice".
+        quiver3(P(:,1), P(:,2), P(:,3), A(:,1), A(:,2), A(:,3), 0, ...
             'Parent', hAxes, 'Color', col, 'LineWidth', 1, 'ShowArrowHead', 'off', 'Tag', tag);
     end
 
@@ -267,9 +351,9 @@ function hFig = ViewFigure(ManifoldFile)
     function UpdateLabel()
         switch lower(activeDim)
             case 'vector2'
-                set(hLabel, 'String', 'Manifold  |  Vector2: tangent frame (U,V)   (H: help)');
+                set(hLabel, 'String', sprintf('Manifold  |  Vector2 (%s): tangent frame (U,V)   (H: help)', support));
             case 'vector3'
-                set(hLabel, 'String', 'Manifold  |  Vector3: full frame (U,V,N)   (H: help)');
+                set(hLabel, 'String', sprintf('Manifold  |  Vector3 (%s): full frame (U,V,N)   (H: help)', support));
             otherwise
                 if showScalar, st = 'on'; else, st = 'off'; end
                 set(hLabel, 'String', sprintf('Manifold  |  Scalar (%s): %s   (D: toggle   H: help)', support, st));
@@ -282,11 +366,10 @@ function hFig = ViewFigure(ManifoldFile)
         ApplyDim();
     end
 
-    % ===== NESTED: support switch (vertex / face) — scalar layer only for now =====
+    % ===== NESTED: support switch (vertex / face) — drives every layer =====
     function SupportChanged(~, ev)
         support = lower(ev.NewValue.String);
-        SyncScalar(true);
-        UpdateLabel();
+        ApplyDim();   % re-sync the scalar cloud and redraw the active frame layer
     end
 
     % ===== NESTED: keyboard =====

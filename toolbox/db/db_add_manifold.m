@@ -63,6 +63,24 @@ OutputFileFull = file_unique(bst_fullfile(ProtocolInfo.SUBJECTS, bst_fileparts(s
 ManifoldMat.ParentSurface = file_short(ParentSurfaceFile);
 ManifoldMat.Comment = Comment;
 
+% Replace (not duplicate) any existing manifold of the same gauge. The Comment
+% encodes the gauge (e.g. 'Manifold (gauge=trivial)'), so a recompute of the same
+% gauge supersedes the old node: delete its file and drop its DB entry before
+% appending the new one. Distinct-gauge manifolds (different Comment) coexist.
+% Without this, every ForceRecompute leaves a stale node as Manifold(1), which the
+% tess_manifold cache path would then load in preference to the fresh result.
+if ~isempty(sSubject.Surface(iSurface).Manifold)
+    oldComments = {sSubject.Surface(iSurface).Manifold.Comment};
+    iSupersede  = find(strcmpi(oldComments, Comment));
+    for k = iSupersede(:)'
+        oldFile = file_fullpath(sSubject.Surface(iSurface).Manifold(k).FileName);
+        if exist(oldFile, 'file')
+            file_delete(oldFile, 1);
+        end
+    end
+    sSubject.Surface(iSurface).Manifold(iSupersede) = [];
+end
+
 % Save to disk
 bst_save(OutputFileFull, ManifoldMat, 'v7');
 

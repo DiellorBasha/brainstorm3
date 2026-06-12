@@ -10,8 +10,21 @@ function test_view_manifold()
 
     ManifoldFile = local_find_manifold();
     assert(~isempty(ManifoldFile), 'No registered manifold node found; compute a manifold first.');
-    M = load(file_fullpath(ManifoldFile), 'ParentSurface');
-    nVert = size(in_tess_bst(M.ParentSurface).Vertices, 1);
+    M = load(file_fullpath(ManifoldFile), 'ParentSurface', 'Embedded', 'Gauge');
+    Tess  = in_tess_bst(M.ParentSurface);
+    nVert = size(Tess.Vertices, 1);
+    nFaceTot = size(Tess.Faces, 1);
+
+    % ---- pure DeriveFaceFrame: combed field on the dual mesh (face centroids) ----
+    GF = view_manifold('DeriveFaceFrame', M.Embedded, M.Gauge, nFaceTot);
+    [nPass,nFail] = chk('DeriveFaceFrame: P,U,V,N are [nFace x 3]', ...
+        isequal(size(GF.P),[nFaceTot 3]) && isequal(size(GF.U),[nFaceTot 3]) ...
+        && isequal(size(GF.V),[nFaceTot 3]) && isequal(size(GF.N),[nFaceTot 3]), nPass,nFail);
+    onF = any(GF.U ~= 0, 2);   % faces actually populated (both hemispheres)
+    Un  = sqrt(sum(GF.U(onF,:).^2, 2));
+    dUV = abs(sum(GF.U(onF,:) .* GF.V(onF,:), 2));
+    [nPass,nFail] = chk('DeriveFaceFrame: combed U is unit-norm', max(abs(Un-1)) < 1e-6, nPass,nFail);
+    [nPass,nFail] = chk('DeriveFaceFrame: U orthogonal to V', max(dUV) < 1e-6, nPass,nFail);
 
     close(findobj(0, 'type', 'figure', 'Tag', '3DViz'));
     hFig = view_manifold(ManifoldFile);
@@ -89,6 +102,37 @@ function test_view_manifold()
             isempty(findobj(hFig,'Tag','manifoldVecU')) && strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
     end
 
+    % Vector layers honor the support switch: Face draws the combed frame on the
+    % dual mesh (centroids), Vertex on the vertices — different geometry, so the
+    % glyph base positions change when the support is switched.
+    hSv = findobj(hFig, 'Tag', 'manifoldSupport');
+    if ~isempty(hT) && ~isempty(hSv)
+        cbT = get(hT, 'SelectionChangedFcn');  cbS = get(hSv, 'SelectionChangedFcn');
+        tScalar = findobj(hT.Children, 'flat', 'Title', 'Scalar');
+        tVec2   = findobj(hT.Children, 'flat', 'Title', 'Vector2');
+        tVert   = findobj(hSv, 'String', 'Vertex');
+        tFace   = findobj(hSv, 'String', 'Face');
+        getBase = @() local_quiver_base(findobj(hFig,'Tag','manifoldVecU'));
+        cbT(hT, struct('NewValue', tVec2, 'OldValue', tScalar)); drawnow;   % enter Vector2 (vertex)
+        baseVert = getBase();
+        [nPass,nFail] = chk('Vector2 + Vertex: frames drawn', ~isempty(baseVert), nPass,nFail);
+        % glyph arms are sized per-cell (kGlyph*sqrt(dualArea)), so arm length VARIES
+        % across the mesh — a fixed global length would give ~zero spread.
+        qUv = findobj(hFig,'Tag','manifoldVecU');
+        au = get(qUv,'UData'); av = get(qUv,'VData'); aw = get(qUv,'WData');
+        armLen = sqrt(au(:).^2 + av(:).^2 + aw(:).^2); armLen = armLen(armLen > 0);
+        covArm = std(armLen) / mean(armLen);
+        [nPass,nFail] = chk('Vector2: arm length scales per-cell (varies, not fixed)', covArm > 0.15, nPass,nFail);
+        cbS(hSv, struct('NewValue', tFace, 'OldValue', tVert)); drawnow;    % -> Face support
+        baseFace = getBase();
+        [nPass,nFail] = chk('Vector2 + Face: frames drawn', ~isempty(baseFace), nPass,nFail);
+        [nPass,nFail] = chk('Vector2: Face support moves glyph bases off the vertices', ...
+            ~isequaln(baseVert, baseFace), nPass,nFail);
+        cbS(hSv, struct('NewValue', tVert, 'OldValue', tFace)); drawnow;    % back to Vertex
+        [nPass,nFail] = chk('Vector2 + Vertex: bases restored', isequaln(getBase(), baseVert), nPass,nFail);
+        cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec2)); drawnow;   % leave clean (Scalar, Vertex)
+    end
+
     % support buttons: Vertex (nVert) <-> Face (nFace centroids), scalar layer
     nFace = size(get(hP,'Faces'), 1);
     hS = findobj(hFig, 'Tag', 'manifoldSupport');
@@ -122,6 +166,12 @@ function f = local_find_manifold()
             end
         end
     end
+end
+
+function B = local_quiver_base(qU)
+    if isempty(qU), B = []; return; end
+    x = get(qU,'XData'); y = get(qU,'YData'); z = get(qU,'ZData');
+    B = [x(:), y(:), z(:)];
 end
 
 function KeyOnFig(hFig, keyName)
