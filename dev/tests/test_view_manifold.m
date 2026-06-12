@@ -1,8 +1,9 @@
 function test_view_manifold()
 % TEST_VIEW_MANIFOLD  Live-figure regression for the manifold viewer.
-% Default view is a true light-grey wireframe (faces off) with the scalar vertex
-% point cloud on; 'D' toggles the scalar layer. Requires Brainstorm running with
-% a registered manifold node.
+% Default view is a true light-grey wireframe (faces off) with the scalar layer
+% on, drawn as the cortex patch's own vertex markers so it follows Smooth/Resect.
+% 'D' toggles the scalar layer. Requires Brainstorm running with a registered
+% manifold node.
 % Authors: Diellor Basha, 2026
     nPass = 0; nFail = 0;
 
@@ -20,20 +21,28 @@ function test_view_manifold()
     hPatch = findobj(hAx3D, 'Type', 'patch');
     [nPass,nFail] = chk('Axes3D exists', ~isempty(hAx3D), nPass,nFail);
     [nPass,nFail] = chk('cortex patch exists', ~isempty(hPatch), nPass,nFail);
+    hP = hPatch(1);
     % default is a true wireframe: faces off (FaceColor 'none')
-    fc = get(hPatch(1), 'FaceColor');
+    fc = get(hP, 'FaceColor');
     [nPass,nFail] = chk('wireframe: FaceColor none', ischar(fc) && strcmpi(fc,'none'), nPass,nFail);
 
-    % scalar layer on by default, covering all vertices
-    hS = findobj(hFig, 'Tag', 'manifoldScalar');
-    [nPass,nFail] = chk('scalar cloud on by default', ~isempty(hS), nPass,nFail);
-    [nPass,nFail] = chk('scalar cloud covers all vertices', ~isempty(hS) && numel(get(hS(1),'XData'))==nVert, nPass,nFail);
+    % scalar layer on by default = patch vertex markers over all vertices
+    [nPass,nFail] = chk('scalar on: patch Marker = ''.''', strcmp(get(hP,'Marker'),'.'), nPass,nFail);
+    [nPass,nFail] = chk('markers cover all vertices', size(get(hP,'Vertices'),1)==nVert, nPass,nFail);
 
     % D toggles the scalar layer off, then back on
     KeyOnFig(hFig, 'd'); drawnow;
-    [nPass,nFail] = chk('D toggles scalar off', isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
+    [nPass,nFail] = chk('D toggles scalar off (Marker none)', strcmpi(get(hP,'Marker'),'none'), nPass,nFail);
     KeyOnFig(hFig, 'd'); drawnow;
-    [nPass,nFail] = chk('D toggles scalar back on', ~isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
+    [nPass,nFail] = chk('D toggles scalar back on', strcmp(get(hP,'Marker'),'.'), nPass,nFail);
+
+    % markers follow Smooth: vertices move, the markers (being the vertices) stay on
+    V0 = get(hP, 'Vertices');
+    panel_surface('SetSurfaceSmooth', hFig, 1, 0.6, 0); drawnow;
+    V1 = get(hP, 'Vertices');
+    [nPass,nFail] = chk('scalar follows Smooth (verts move, markers stay)', ...
+        ~isequal(V0,V1) && strcmp(get(hP,'Marker'),'.'), nPass,nFail);
+    panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0); drawnow;
 
     close(hFig);
     fprintf('\n==== test_view_manifold: %d passed, %d failed ====\n', nPass, nFail);
