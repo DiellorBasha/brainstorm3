@@ -66,10 +66,22 @@ function test_view_manifold()
         cbT = get(hT, 'SelectionChangedFcn');
         tScalar = findobj(hT.Children, 'flat', 'Title', 'Scalar');
         tVec2   = findobj(hT.Children, 'flat', 'Title', 'Vector2');
-        cbT(hT, struct('NewValue', tVec2,   'OldValue', tScalar)); drawnow;
-        [nPass,nFail] = chk('Vector2 tab switches scalar off', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'off'), nPass,nFail);
-        cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec2)); drawnow;
-        [nPass,nFail] = chk('Scalar tab switches scalar on', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
+        tVec3   = findobj(hT.Children, 'flat', 'Title', 'Vector3');
+        % Vector2: scalar off, tangent frame (U,V) drawn, no normal
+        cbT(hT, struct('NewValue', tVec2, 'OldValue', tScalar)); drawnow;
+        [nPass,nFail] = chk('Vector2: scalar off', strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'off'), nPass,nFail);
+        [nPass,nFail] = chk('Vector2: U,V frames drawn, no N', ...
+            ~isempty(findobj(hFig,'Tag','manifoldVecU')) && ~isempty(findobj(hFig,'Tag','manifoldVecV')) ...
+            && isempty(findobj(hFig,'Tag','manifoldVecN')), nPass,nFail);
+        % Vector3: full frame U,V,N
+        cbT(hT, struct('NewValue', tVec3, 'OldValue', tVec2)); drawnow;
+        [nPass,nFail] = chk('Vector3: U,V,N frames drawn', ...
+            ~isempty(findobj(hFig,'Tag','manifoldVecU')) && ~isempty(findobj(hFig,'Tag','manifoldVecV')) ...
+            && ~isempty(findobj(hFig,'Tag','manifoldVecN')), nPass,nFail);
+        % back to Scalar: vector glyphs cleared, scalar on
+        cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec3)); drawnow;
+        [nPass,nFail] = chk('Scalar: vectors cleared, scalar on', ...
+            isempty(findobj(hFig,'Tag','manifoldVecU')) && strcmpi(get(findobj(hFig,'Tag','manifoldScalar'),'Visible'),'on'), nPass,nFail);
     end
 
     close(hFig);

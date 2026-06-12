@@ -123,8 +123,14 @@ function hFig = ViewFigure(ManifoldFile)
     hold(hAxes, 'on');
 
     % --- state ---
-    showScalar = true;          % scalar layer on by default
+    activeDim  = 'scalar';      % which data dimension is shown (tab-driven)
+    showScalar = true;          % within the scalar dim, D toggles the cloud
     colScalar  = [0.2 0.9 1];   % cyan point cloud
+    colTangent = [1 1 0];       % yellow U,V tangent frame
+    colNormal  = [1 0 1];       % magenta normal
+    Gframe     = [];            % cached per-vertex frame (DeriveVertexFrame)
+    nFrames    = 2500;          % frame glyphs are decimated for readability
+    glyphLen   = 1.5 * MeanEdgeLength(get(hPatch,'Vertices'), get(hPatch,'Faces'));
     Vcache = []; Acache = []; EAcache = []; inSync = false;
 
     % Scalar layer: a point cloud that mirrors the cortex patch's live vertices.
@@ -158,7 +164,7 @@ function hFig = ViewFigure(ManifoldFile)
         if inSync || isempty(hPatch) || ~ishandle(hPatch) || isempty(hCloud) || ~ishandle(hCloud)
             return;
         end
-        if ~showScalar
+        if ~(strcmpi(activeDim,'scalar') && showScalar)
             set(hCloud, 'Visible', 'off');
             Vcache = []; Acache = []; EAcache = [];   % force a re-sync when turned back on
             return;
@@ -198,27 +204,65 @@ function hFig = ViewFigure(ManifoldFile)
         inSync = false;
     end
 
+    % ===== NESTED: apply the active dimension (scalar / vector2 / vector3) =====
+    function ApplyDim()
+        SyncScalar(true);   % scalar cloud shown only when activeDim == 'scalar'
+        DrawVectors();      % draw / clear the per-vertex frame glyphs
+        UpdateLabel();
+    end
+
+    % ===== NESTED: per-vertex frame glyphs (vector2 = U,V; vector3 = U,V,N) =====
+    function DrawVectors()
+        delete(findobj(hAxes, '-depth', 1, '-regexp', 'Tag', '^manifoldVec'));
+        if ~any(strcmpi(activeDim, {'vector2','vector3'}))
+            return;
+        end
+        if isempty(Gframe)
+            Gframe = DeriveVertexFrame(M.Embedded, M.Gauge, size(get(hPatch,'Vertices'),1));
+        end
+        nV  = size(Gframe.P, 1);
+        idx = unique(round(linspace(1, nV, min(nFrames, nV))));   % decimate for readability
+        P = Gframe.P(idx, :);
+        DrawQuiv(P, Gframe.U(idx,:), colTangent, 'manifoldVecU');
+        DrawQuiv(P, Gframe.V(idx,:), colTangent, 'manifoldVecV');
+        if strcmpi(activeDim, 'vector3')
+            DrawQuiv(P, Gframe.N(idx,:), colNormal, 'manifoldVecN');
+        end
+    end
+
+    function DrawQuiv(P, D, col, tag)
+        quiver3(P(:,1), P(:,2), P(:,3), D(:,1)*glyphLen, D(:,2)*glyphLen, D(:,3)*glyphLen, 0, ...
+            'Parent', hAxes, 'Color', col, 'LineWidth', 1, 'ShowArrowHead', 'off', 'Tag', tag);
+    end
+
     % ===== NESTED: status label =====
     function UpdateLabel()
-        if showScalar, st = 'on'; else, st = 'off'; end
-        set(hLabel, 'String', sprintf('Manifold  |  scalar layer: %s   (D: scalar   H: help)', st));
+        switch lower(activeDim)
+            case 'vector2'
+                set(hLabel, 'String', 'Manifold  |  Vector2: tangent frame (U,V)   (H: help)');
+            case 'vector3'
+                set(hLabel, 'String', 'Manifold  |  Vector3: full frame (U,V,N)   (H: help)');
+            otherwise
+                if showScalar, st = 'on'; else, st = 'off'; end
+                set(hLabel, 'String', sprintf('Manifold  |  Scalar: %s   (D: toggle   H: help)', st));
+        end
     end
 
     % ===== NESTED: dimension tab switch (Scalar / Vector2 / Vector3) =====
     function DimTabChanged(~, ev)
-        % Only the scalar view is wired; vector2 / vector3 are added later.
-        showScalar = strcmpi(ev.NewValue.Title, 'Scalar');
-        SyncScalar(true);
-        UpdateLabel();
+        activeDim = lower(ev.NewValue.Title);
+        ApplyDim();
     end
 
     % ===== NESTED: keyboard =====
     function KeyPress_Callback(h, ev)
         switch ev.Key
             case 'd'
-                showScalar = ~showScalar;
-                SyncScalar(true);
-                UpdateLabel();
+                if strcmpi(activeDim, 'scalar')
+                    showScalar = ~showScalar;
+                    SyncScalar(true);
+                    UpdateLabel();
+                end
             case 'h'
                 java_dialog('msgbox', ['<HTML><TABLE>' ...
                     '<TR><TD><B>D</B></TD><TD>Toggle the scalar data layer (vertex point cloud)</TD></TR>' ...
@@ -228,4 +272,14 @@ function hFig = ViewFigure(ManifoldFile)
                 if ~isempty(KeyPressFcn_bak), KeyPressFcn_bak(h, ev); end
         end
     end
+end
+
+
+%% ========================================================================
+function L = MeanEdgeLength(Vtx, Fcs)
+Fcs = double(Fcs);
+e1 = Vtx(Fcs(:,2),:) - Vtx(Fcs(:,1),:);
+e2 = Vtx(Fcs(:,3),:) - Vtx(Fcs(:,2),:);
+e3 = Vtx(Fcs(:,1),:) - Vtx(Fcs(:,3),:);
+L  = mean(sqrt([sum(e1.^2,2); sum(e2.^2,2); sum(e3.^2,2)]));
 end
