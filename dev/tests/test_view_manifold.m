@@ -133,6 +133,37 @@ function test_view_manifold()
         cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec2)); drawnow;   % leave clean (Scalar, Vertex)
     end
 
+    % Align-to-Freesurfer toggle + blue example data field (Vector2). Default frame
+    % is the raw grid; Align rotates it to the FS gauge; the blue data field (drawn
+    % like the scalar cloud) is gauge-invariant and must NOT move.
+    hAlignB = findobj(hFig, 'Tag', 'manifoldAlignFS');
+    [nPass,nFail] = chk('Align-to-Freesurfer button present', ~isempty(hAlignB), nPass,nFail);
+    if ~isempty(hT) && ~isempty(hAlignB)
+        cbT = get(hT, 'SelectionChangedFcn');  cbA = get(hAlignB, 'Callback');
+        tScalar = findobj(hT.Children, 'flat', 'Title', 'Scalar');
+        tVec2   = findobj(hT.Children, 'flat', 'Title', 'Vector2');
+        [nPass,nFail] = chk('Align disabled outside vector dims', strcmpi(get(hAlignB,'Enable'),'off'), nPass,nFail);
+        cbT(hT, struct('NewValue', tVec2, 'OldValue', tScalar)); drawnow;   % enter Vector2
+        [nPass,nFail] = chk('Align enabled in Vector2', strcmpi(get(hAlignB,'Enable'),'on'), nPass,nFail);
+        qD = findobj(hFig, 'Tag', 'manifoldVecData');
+        [nPass,nFail] = chk('Vector2: blue example data field drawn', ~isempty(qD), nPass,nFail);
+        [nPass,nFail] = chk('data field colored like scalar (blue)', isequal(get(qD,'Color'), [0.2 0.9 1]), nPass,nFail);
+        frameOff = local_quiver_arms(findobj(hFig,'Tag','manifoldVecU'));
+        dataOff  = local_quiver_arms(findobj(hFig,'Tag','manifoldVecData'));
+        set(hAlignB, 'Value', 1); cbA(hAlignB, []); drawnow;               % Align ON
+        frameOn = local_quiver_arms(findobj(hFig,'Tag','manifoldVecU'));
+        dataOn  = local_quiver_arms(findobj(hFig,'Tag','manifoldVecData'));
+        [nPass,nFail] = chk('Align rotates the reference frame', ~isequaln(frameOff, frameOn), nPass,nFail);
+        [nPass,nFail] = chk('Align leaves the data field fixed', isequaln(dataOff, dataOn), nPass,nFail);
+        % when aligned, frame e1 is parallel to the combed data; when raw, generally not
+        nrm = @(A) A ./ max(sqrt(sum(A.^2,2)), 1e-12);
+        cosOn  = mean(abs(sum(nrm(frameOn) .* nrm(dataOn), 2)));
+        cosOff = mean(abs(sum(nrm(frameOff) .* nrm(dataOff), 2)));
+        [nPass,nFail] = chk('Aligned frame e1 || data; raw frame e1 not', cosOn > 0.999 && cosOff < 0.99, nPass,nFail);
+        set(hAlignB, 'Value', 0); cbA(hAlignB, []); drawnow;               % reset
+        cbT(hT, struct('NewValue', tScalar, 'OldValue', tVec2)); drawnow;  % leave clean
+    end
+
     % support buttons: Vertex (nVert) <-> Face (nFace centroids), scalar layer
     nFace = size(get(hP,'Faces'), 1);
     hS = findobj(hFig, 'Tag', 'manifoldSupport');
@@ -172,6 +203,12 @@ function B = local_quiver_base(qU)
     if isempty(qU), B = []; return; end
     x = get(qU,'XData'); y = get(qU,'YData'); z = get(qU,'ZData');
     B = [x(:), y(:), z(:)];
+end
+
+function A = local_quiver_arms(qU)
+    if isempty(qU), A = []; return; end
+    u = get(qU,'UData'); v = get(qU,'VData'); w = get(qU,'WData');
+    A = [u(:), v(:), w(:)];
 end
 
 function KeyOnFig(hFig, keyName)

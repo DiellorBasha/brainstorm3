@@ -24,6 +24,13 @@ function varargout = view_manifold(varargin)
 % (barycentric dual area on vertices, triangle area on faces). Glyphs therefore
 % scale with the tessellation and the figure reads the same at any mesh density.
 %
+% In the vector dimensions a blue example vector field — the gauge-invariant combed
+% field real(grid.*rot) — is drawn alongside the yellow reference frame, mirroring
+% the scalar point cloud as "data". The 'Align to Freesurfer' toggle rotates the
+% reference frame from the raw grid gauge (default) to the FreeSurfer (trivial)
+% gauge; the blue data field is gauge-invariant and stays fixed. The frame and the
+% data field are lifted clear of the opaque faces to avoid depth-buffer z-fighting.
+%
 % The scalar layer is a point cloud kept in sync with the cortex patch via its
 % MarkedClean event, so it follows the Surfaces-panel Smooth slider and numeric
 % Resect slider (vertex motion) and hides the hemisphere hidden by a left/right/
@@ -68,12 +75,17 @@ end
 
 %% ===== PURE: per-vertex frame from the manifold node =====
 function G = DeriveVertexFrame(Embedded, Gauge, nVert)
-% G: struct with P,U,V,N [nVert x 3] (zeros off-support) and Sing (global vtx ids).
-% U=real(grid.*rot), V=imag(grid.*rot), N=cross(U,V) per the manifold gauge convention.
+% G: struct with P and TWO frames [nVert x 3] (zeros off-support), plus Sing:
+%   U,V,N          aligned (FreeSurfer-combed) frame  = real/imag(grid.*rot)
+%   Uraw,Vraw,Nraw raw grid frame as-is               = real/imag(grid)
+% U (the combed e1) doubles as the gauge-invariant example data field. The two
+% frames differ by the gauge rotation; the surface normal N is the same for both.
     if numel(Embedded) ~= 2 || numel(Gauge) ~= 2
         error('view_manifold:badNode', 'Embedded and Gauge must be 1x2 per-hemisphere structs.');
     end
-    P = zeros(nVert,3); U = zeros(nVert,3); V = zeros(nVert,3); N = zeros(nVert,3);
+    P = zeros(nVert,3);
+    U = zeros(nVert,3); V = zeros(nVert,3); N = zeros(nVert,3);
+    Ur = zeros(nVert,3); Vr = zeros(nVert,3); Nr = zeros(nVert,3);
     Sing = [];
     for hh = 1:2
         vH   = double(Embedded(hh).GlobalVertices(:));
@@ -84,18 +96,18 @@ function G = DeriveVertexFrame(Embedded, Gauge, nVert)
                 'Hemisphere %d: Embedded.vertex.grid is [%s], expected [%d x 3].', ...
                 hh, num2str(size(grid)), numel(vH));
         end
+        E1 = real(grid);   E2 = imag(grid);            % raw grid frame (as-is)
         cRot = grid .* rot(:);
-        Uh = real(cRot);  Vh = imag(cRot);
-        U(vH,:) = Uh;
-        V(vH,:) = Vh;
-        N(vH,:) = cross(Uh, Vh, 2);
+        A1 = real(cRot);   A2 = imag(cRot);            % FreeSurfer-combed frame
+        U(vH,:) = A1;  V(vH,:) = A2;  N(vH,:) = cross(A1, A2, 2);
+        Ur(vH,:) = E1; Vr(vH,:) = E2; Nr(vH,:) = cross(E1, E2, 2);
         P(vH,:) = Embedded(hh).vertex.position;
         if isfield(Gauge(hh),'singularity') && isstruct(Gauge(hh).singularity) ...
                 && isfield(Gauge(hh).singularity,'vertices') && ~isempty(Gauge(hh).singularity.vertices)
             Sing = [Sing; vH(double(Gauge(hh).singularity.vertices(:)))]; %#ok<AGROW>
         end
     end
-    G = struct('P',P, 'U',U, 'V',V, 'N',N, 'Sing',Sing);
+    G = struct('P',P, 'U',U, 'V',V, 'N',N, 'Uraw',Ur, 'Vraw',Vr, 'Nraw',Nr, 'Sing',Sing);
 end
 
 
@@ -107,7 +119,9 @@ function G = DeriveFaceFrame(Embedded, Gauge, nFace)
     if numel(Embedded) ~= 2 || numel(Gauge) ~= 2
         error('view_manifold:badNode', 'Embedded and Gauge must be 1x2 per-hemisphere structs.');
     end
-    P = zeros(nFace,3); U = zeros(nFace,3); V = zeros(nFace,3); N = zeros(nFace,3);
+    P = zeros(nFace,3);
+    U = zeros(nFace,3); V = zeros(nFace,3); N = zeros(nFace,3);
+    Ur = zeros(nFace,3); Vr = zeros(nFace,3); Nr = zeros(nFace,3);
     for hh = 1:2
         fH   = double(Embedded(hh).GlobalFaces(:));
         grid = Embedded(hh).face.grid;
@@ -122,14 +136,14 @@ function G = DeriveFaceFrame(Embedded, Gauge, nFace)
                 'Hemisphere %d: Embedded.face.grid is [%s], expected [%d x 3].', ...
                 hh, num2str(size(grid)), numel(fH));
         end
+        E1 = real(grid);   E2 = imag(grid);            % raw grid frame (as-is)
         cRot = grid .* rot(:);
-        Uh = real(cRot);  Vh = imag(cRot);
-        U(fH,:) = Uh;
-        V(fH,:) = Vh;
-        N(fH,:) = cross(Uh, Vh, 2);
+        A1 = real(cRot);   A2 = imag(cRot);            % FreeSurfer-combed frame
+        U(fH,:) = A1;  V(fH,:) = A2;  N(fH,:) = cross(A1, A2, 2);
+        Ur(fH,:) = E1; Vr(fH,:) = E2; Nr(fH,:) = cross(E1, E2, 2);
         P(fH,:) = Embedded(hh).face.centroid;
     end
-    G = struct('P',P, 'U',U, 'V',V, 'N',N, 'Sing',[]);
+    G = struct('P',P, 'U',U, 'V',V, 'N',N, 'Uraw',Ur, 'Vraw',Vr, 'Nraw',Nr, 'Sing',[]);
 end
 
 
@@ -172,20 +186,31 @@ function hFig = ViewFigure(ManifoldFile)
     activeDim  = 'scalar';      % which data dimension is shown (tab-driven)
     support    = 'vertex';      % data support: 'vertex' or 'face' (all layers)
     showScalar = true;          % within the scalar dim, D toggles the cloud
-    colScalar  = [0.2 0.9 1];   % cyan point cloud
-    colTangent = [1 1 0];       % yellow U,V tangent frame
+    alignFS    = false;         % vector dims: false = grid frame as-is, true = FS-combed
+    colScalar  = [0.2 0.9 1];   % cyan point cloud (scalar data)
+    colData    = [0.2 0.9 1];   % blue example vector field (data) — matches scalar
+    colTangent = [1 1 0];       % yellow U,V reference frame (basis)
     colNormal  = [1 0 1];       % magenta normal
     Gframe     = [];            % cached per-vertex frame (DeriveVertexFrame)
     GframeF    = [];            % cached per-face frame   (DeriveFaceFrame)
-    nFrames    = 2500;          % frame glyphs are decimated for readability
+    hAlign     = [];            % 'Align to Freesurfer' toggle (created below)
+    nFrames    = 60000;         % cap on drawn glyphs (cell-sized glyphs tile the
+                                % surface without overlap, so draw all of a low-res
+                                % mesh; only huge meshes get decimated)
     meanEdge   = MeanEdgeLength(get(hPatch,'Vertices'), get(hPatch,'Faces'));
     offLen     = 0.2 * meanEdge;   % scalar-cloud lift off the opaque surface
     % Frame glyphs are UNIT (orthonormal) — they carry no magnitude, so their size
     % is purely legibility: tie each cross to its own cell via the refinement-
     % covariant local length sqrt(cell area). kGlyph sets the arm length, liftFac
-    % the lift off the surface; both are fractions of that local length.
-    kGlyph     = 0.45;          % frame arm length = kGlyph  * sqrt(local cell area)
-    liftFac    = 0.40;          % frame lift along N = liftFac * sqrt(local cell area)
+    % the lift off the surface; both are fractions of that local length. The frame
+    % and the data field are lifted clear of the opaque faces to avoid z-fighting.
+    kGlyph     = 0.60;          % frame arm length  = kGlyph   * sqrt(local cell area)
+    dataK      = 0.85;          % data arm length   = dataK    * sqrt(local cell area)
+    liftFac    = 0.90;          % frame lift along N = liftFac  * sqrt(local cell area)
+    dataLift   = 1.50;          % data field rides a bit higher than the frame
+    vecAlpha   = 0.55;          % surface transparency in vector dims (tangent glyphs
+                                % lie along the surface; an opaque cortex would occlude
+                                % all but a few — ghost it so the field shows through)
     Vcache = []; Acache = []; EAcache = []; inSync = false;
 
     % Scalar layer: a point cloud that mirrors the cortex patch's live vertices.
@@ -223,6 +248,17 @@ function hFig = ViewFigure(ManifoldFile)
         'Position', [0.04 0.12 0.45 0.76], 'Value', 1);
     uicontrol(hSupport, 'Style', 'togglebutton', 'String', 'Face', 'Units', 'normalized', ...
         'Position', [0.51 0.12 0.45 0.76]);
+
+    % --- Align-to-Freesurfer toggle (vector dims): rotate the reference frame from
+    %     the raw grid gauge to the FreeSurfer (trivial) gauge; the data field is
+    %     gauge-invariant and stays fixed. Enabled only in Vector2/Vector3. ---
+    hAlign = uicontrol('Parent', hFig, 'Style', 'togglebutton', 'String', 'Align to Freesurfer', ...
+        'Units', 'normalized', 'Position', [0.005 0.842 0.165 0.05], 'Tag', 'manifoldAlignFS', ...
+        'Value', 0, 'Enable', 'off', 'ForegroundColor', [0 0 0], ...
+        'FontUnits', 'points', 'FontSize', bst_get('FigFont'), ...
+        'TooltipString', ['Rotate the reference frame from the raw grid gauge to the ' ...
+                          'FreeSurfer (trivial) gauge. The blue data field stays fixed.'], ...
+        'Callback', @AlignChanged);
 
     % ===== NESTED: keep the scalar cloud in sync with the cortex patch =====
     function SyncScalar(force)
@@ -285,8 +321,24 @@ function hFig = ViewFigure(ManifoldFile)
 
     % ===== NESTED: apply the active dimension (scalar / vector2 / vector3) =====
     function ApplyDim()
+        isVec = any(strcmpi(activeDim, {'vector2','vector3'}));
+        % Ghost the cortex in vector dims so the (tangent) field is not occluded;
+        % restore the opaque surface for the scalar cloud.
+        if isVec, a = vecAlpha; else, a = 0; end
+        panel_surface('SetSurfaceTransparency', hFig, 1, a);
         SyncScalar(true);   % scalar cloud shown only when activeDim == 'scalar'
-        DrawVectors();      % draw / clear the per-vertex frame glyphs
+        DrawVectors();      % draw / clear the frame + data glyphs
+        onoff = {'off','on'};
+        if ~isempty(hAlign) && ishandle(hAlign)
+            set(hAlign, 'Enable', onoff{isVec + 1});
+        end
+        UpdateLabel();
+    end
+
+    % ===== NESTED: Align-to-Freesurfer toggle (frame rotates, data stays) =====
+    function AlignChanged(src, ~)
+        alignFS = logical(get(src, 'Value'));
+        DrawVectors();
         UpdateLabel();
     end
 
@@ -311,18 +363,31 @@ function hFig = ViewFigure(ManifoldFile)
         end
         nP  = size(Gf.P, 1);
         idx = unique(round(linspace(1, nP, min(nFrames, nP))));   % decimate for readability
-        % Principled per-cell sizing: arm length = kGlyph * sqrt(local cell area),
-        % a refinement-covariant world length (vertex: barycentric dual area; face:
+        % Principled per-cell sizing: arm length = k * sqrt(local cell area), a
+        % refinement-covariant world length (vertex: barycentric dual area; face:
         % triangle area). Glyphs then shrink in proportion to the mesh, so the figure
         % reads the same at any tessellation density.
         L  = LengthScale(support);                            % [nElem x 1] world length
         Lk = L(idx);
-        P  = Gf.P(idx, :) + (liftFac * Lk) .* Gf.N(idx, :);   % per-cell lift off surface
-        DrawQuiv(P, (kGlyph * Lk) .* Gf.U(idx,:), colTangent, 'manifoldVecU');
-        DrawQuiv(P, (kGlyph * Lk) .* Gf.V(idx,:), colTangent, 'manifoldVecV');
-        if strcmpi(activeDim, 'vector3')
-            DrawQuiv(P, (kGlyph * Lk) .* Gf.N(idx,:), colNormal, 'manifoldVecN');
+        Nl = Gf.N(idx, :);                                    % surface normal (gauge-free)
+        % Reference frame (yellow): the raw grid frame by default; the FreeSurfer-
+        % combed frame when 'Align to Freesurfer' is on. Lifted clear of the faces.
+        if alignFS
+            Ub = Gf.U(idx,:);     Vb = Gf.V(idx,:);     Nb = Gf.N(idx,:);
+        else
+            Ub = Gf.Uraw(idx,:);  Vb = Gf.Vraw(idx,:);  Nb = Gf.Nraw(idx,:);
         end
+        Pf = Gf.P(idx,:) + (liftFac * Lk) .* Nl;
+        DrawQuiv(Pf, (kGlyph * Lk) .* Ub, colTangent, 'manifoldVecU', 1.5);
+        DrawQuiv(Pf, (kGlyph * Lk) .* Vb, colTangent, 'manifoldVecV', 1.5);
+        if strcmpi(activeDim, 'vector3')
+            DrawQuiv(Pf, (kGlyph * Lk) .* Nb, colNormal, 'manifoldVecN', 1.5);
+        end
+        % Example data field (blue): the gauge-invariant combed vector real(grid.*rot).
+        % It is the SAME geometric field in any gauge, so the Align toggle never moves
+        % it — only the reference frame rotates underneath it. Rides a touch higher.
+        Pd = Gf.P(idx,:) + (dataLift * Lk) .* Nl;
+        DrawQuiv(Pd, (dataK * Lk) .* Gf.U(idx,:), colData, 'manifoldVecData', 2.5);
     end
 
     % Refinement-covariant local length scale = sqrt(cell area), computed from the
@@ -340,20 +405,22 @@ function hFig = ViewFigure(ManifoldFile)
         end
     end
 
-    function DrawQuiv(P, A, col, tag)
+    function DrawQuiv(P, A, col, tag, lw)
         % A holds the already-scaled arm vectors (world units). Pass scale arg 0 so
         % quiver3 uses them literally instead of auto-rescaling to "look nice".
+        if nargin < 5 || isempty(lw), lw = 1; end
         quiver3(P(:,1), P(:,2), P(:,3), A(:,1), A(:,2), A(:,3), 0, ...
-            'Parent', hAxes, 'Color', col, 'LineWidth', 1, 'ShowArrowHead', 'off', 'Tag', tag);
+            'Parent', hAxes, 'Color', col, 'LineWidth', lw, 'ShowArrowHead', 'off', 'Tag', tag);
     end
 
     % ===== NESTED: status label =====
     function UpdateLabel()
+        if alignFS, ax = 'FS-aligned'; else, ax = 'grid as-is'; end
         switch lower(activeDim)
             case 'vector2'
-                set(hLabel, 'String', sprintf('Manifold  |  Vector2 (%s): tangent frame (U,V)   (H: help)', support));
+                set(hLabel, 'String', sprintf('Manifold  |  Vector2 (%s): frame %s (yellow) + data field (blue)   (H: help)', support, ax));
             case 'vector3'
-                set(hLabel, 'String', sprintf('Manifold  |  Vector3 (%s): full frame (U,V,N)   (H: help)', support));
+                set(hLabel, 'String', sprintf('Manifold  |  Vector3 (%s): frame %s (yellow/magenta) + data field (blue)   (H: help)', support, ax));
             otherwise
                 if showScalar, st = 'on'; else, st = 'off'; end
                 set(hLabel, 'String', sprintf('Manifold  |  Scalar (%s): %s   (D: toggle   H: help)', support, st));
