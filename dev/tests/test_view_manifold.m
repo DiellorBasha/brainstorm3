@@ -1,12 +1,15 @@
 function test_view_manifold()
-% TEST_VIEW_MANIFOLD  Live-figure regression for the manifold frame viewer.
-% Requires Brainstorm running with a registered manifold node.
+% TEST_VIEW_MANIFOLD  Live-figure regression for the manifold viewer.
+% Default view is a bare wireframe (no overlays); 'D' toggles a scalar vertex
+% point cloud (the scalar data dimension). Requires Brainstorm running with a
+% registered manifold node.
 % Authors: Diellor Basha, 2026
     nPass = 0; nFail = 0;
 
-    % --- find a registered manifold node ---
     ManifoldFile = local_find_manifold();
     assert(~isempty(ManifoldFile), 'No registered manifold node found; compute a manifold first.');
+    M = load(file_fullpath(ManifoldFile), 'ParentSurface');
+    nVert = size(in_tess_bst(M.ParentSurface).Vertices, 1);
 
     close(findobj(0, 'type', 'figure', 'Tag', '3DViz'));
     hFig = view_manifold(ManifoldFile);
@@ -14,23 +17,21 @@ function test_view_manifold()
     [nPass,nFail] = chk('viewer returns a figure', ~isempty(hFig) && ishandle(hFig), nPass,nFail);
 
     hAx3D  = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
-    hPatch = findobj(hAx3D, 'Type', 'patch');
-    hU = findobj(hFig, 'Tag', 'tangentU');
-    hV = findobj(hFig, 'Tag', 'tangentV');
-    [nPass,nFail] = chk('Axes3D survives glyph draw', ~isempty(hAx3D), nPass,nFail);
-    [nPass,nFail] = chk('cortex patch survives glyph draw', ~isempty(hPatch), nPass,nFail);
-    [nPass,nFail] = chk('U glyphs drawn', ~isempty(hU) && numel(get(hU(1),'UData'))>0, nPass,nFail);
-    [nPass,nFail] = chk('V glyphs drawn', ~isempty(hV), nPass,nFail);
+    [nPass,nFail] = chk('Axes3D exists', ~isempty(hAx3D), nPass,nFail);
+    [nPass,nFail] = chk('cortex patch exists', ~isempty(findobj(hAx3D,'Type','patch')), nPass,nFail);
+    % default view is bare: nothing overlaid
+    [nPass,nFail] = chk('default bare (no scalar cloud)', isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
 
-    % N key adds the normal quiver
-    KeyOnFig(hFig, 'n'); drawnow;
-    [nPass,nFail] = chk('N toggles normal glyphs', ~isempty(findobj(hFig,'Tag','tangentN')), nPass,nFail);
+    % D draws the scalar point cloud over all vertices
+    KeyOnFig(hFig, 'd'); drawnow;
+    hS = findobj(hFig, 'Tag', 'manifoldScalar');
+    [nPass,nFail] = chk('D draws scalar point cloud', ~isempty(hS), nPass,nFail);
+    [nPass,nFail] = chk('scalar cloud covers all vertices', ~isempty(hS) && numel(get(hS(1),'XData'))==nVert, nPass,nFail);
+    [nPass,nFail] = chk('cortex survives scalar draw', ~isempty(findobj(hAx3D,'Type','patch')), nPass,nFail);
 
-    % density key changes glyph count
-    n1 = numel(get(findobj(hFig,'Tag','tangentU'),'UData'));
-    KeyOnFig(hFig, 'leftarrow'); drawnow;
-    n2 = numel(get(findobj(hFig,'Tag','tangentU'),'UData'));
-    [nPass,nFail] = chk('density key changes glyph count', n2 < n1, nPass,nFail);
+    % D again toggles it off
+    KeyOnFig(hFig, 'd'); drawnow;
+    [nPass,nFail] = chk('D toggles scalar off', isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
 
     close(hFig);
     fprintf('\n==== test_view_manifold: %d passed, %d failed ====\n', nPass, nFail);
