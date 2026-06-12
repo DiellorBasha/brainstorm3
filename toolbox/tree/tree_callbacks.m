@@ -2537,10 +2537,8 @@ switch (lower(action))
 %% ===== POPUP: MANIFOLD =====
             case 'manifold'
                 if (length(bstNodes) == 1)
-                    % === VIEW ===
-                    gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@ManifoldView_Callback, filenameFull));
-                    % === DISPLAY TANGENT BASIS ===
-                    gui_component('MenuItem', jPopup, [], 'Display tangent basis', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@ManifoldViewTangents_Callback, filenameFull));
+                    % === VIEW MANIFOLD ===
+                    gui_component('MenuItem', jPopup, [], 'View manifold', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@view_manifold, filenameFull));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -3971,47 +3969,6 @@ end
 function ViewTexturedSurface(filenameRelative)
     sSurf = bst_memory('LoadSurface', filenameRelative);
     view_surface_matrix(sSurf.Vertices, sSurf.Faces, [], sSurf.Color, [], [], filenameRelative);
-end
-
-%% ===== MANIFOLD: VIEW =====
-function ManifoldView_Callback(filenameFull)
-    % Minimal inspector for SP1: load and show field names + sizes
-    if ~file_exist(filenameFull)
-        bst_error('Manifold file not found.', 'View manifold', 0);
-        return;
-    end
-    m = load(filenameFull);
-    fnames = fieldnames(m);
-    fprintf('=== Manifold: %s ===\n', filenameFull);
-    for k = 1:numel(fnames)
-        val = m.(fnames{k});
-        if isnumeric(val) || islogical(val)
-            fprintf('  %s: [%s]\n', fnames{k}, num2str(size(val)));
-        elseif ischar(val)
-            fprintf('  %s: ''%s''\n', fnames{k}, val);
-        elseif isstruct(val)
-            fprintf('  %s: struct 1x%d, fields: {%s}\n', fnames{k}, numel(val), strjoin(fieldnames(val),', '));
-        else
-            fprintf('  %s: %s\n', fnames{k}, class(val));
-        end
-    end
-end
-
-%% ===== MANIFOLD: DISPLAY TANGENT BASIS =====
-function ManifoldViewTangents_Callback(filenameFull)
-    % Display the tangent basis for the manifold's parent surface.
-    % Interim wiring: resolves the parent surface and reuses view_tangents.
-    % Reworking this to read the on-file manifold frames is a separate step.
-    if ~file_exist(filenameFull)
-        bst_error('Manifold file not found.', 'Display tangent basis', 0);
-        return;
-    end
-    M = load(filenameFull, 'ParentSurface');
-    if ~isfield(M, 'ParentSurface') || isempty(M.ParentSurface)
-        bst_error('Manifold file has no ParentSurface reference.', 'Display tangent basis', 0);
-        return;
-    end
-    view_tangents(M.ParentSurface);
 end
 
 %% ===== MANIFOLD: DELETE =====
