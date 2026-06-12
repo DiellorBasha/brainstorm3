@@ -1,20 +1,25 @@
 function test_eigenmode_vector_viewer()
 % TEST_EIGENMODE_VECTOR_VIEWER  Live-figure regression for the Dirac eigenmode
-% vector viewer. Requires Brainstorm running with a loaded protocol. Builds a
-% canonical cortex + Dirac eigen node, opens view_eigenmodes, and asserts the
-% cortex survives the quiver draw, arrows update on mode step, and a non-Dirac
-% node is rejected. Created eigen/operator nodes are left in place (cheap).
+% vector viewer. Requires Brainstorm running with a loaded protocol (anatomy).
+%
+% Reuses an existing Dirac/LBO eigen node on the canonical cortex when present
+% (only computes a small K=20 basis if absent) so reruns are fast. The non-Dirac
+% rejection step suppresses the modal bst_error dialog (GuiLevel=-1, restored
+% immediately) so an unattended run cannot block on a dialog.
+%
 % Authors: Diellor Basha, 2026
+    global GlobalData;
     nPass = 0; nFail = 0;
 
-    % --- fixture: canonical cortex + Dirac eigen node ---
     SurfaceFile = bst_canonical_cortex(20484);
-    preEig  = local_eigen_names(SurfaceFile);
-    tess_eigen(SurfaceFile, 'Dirac', 'K', 40, 'Tau', 0.5);   % saves + registers
-    postEig = local_eigen_names(SurfaceFile);
-    newEig  = setdiff(postEig, preEig);
-    assert(~isempty(newEig), 'No new Dirac eigen node was created.');
-    EigenFile = newEig{1};
+
+    % --- fixture: reuse-or-create a Dirac eigen node (avoid costly recompute) ---
+    EigenFile = local_find_eigen(SurfaceFile, 'Dirac');
+    if isempty(EigenFile)
+        tess_eigen(SurfaceFile, 'Dirac', 'K', 20, 'Tau', 0.5);
+        EigenFile = local_find_eigen(SurfaceFile, 'Dirac');
+    end
+    assert(~isempty(EigenFile), 'No Dirac eigen node available.');
 
     % --- open the viewer ---
     close(findobj(0, 'type', 'figure', 'Tag', '3DViz'));
@@ -43,20 +48,29 @@ function test_eigenmode_vector_viewer()
 
     close(hFig);
 
-    % --- non-Dirac node is rejected ---
-    preL  = local_eigen_names(SurfaceFile);
-    tess_eigen(SurfaceFile, 'Laplace-Beltrami', 'K', 40);
-    postL = local_eigen_names(SurfaceFile);
-    lboNew = setdiff(postL, preL);
+    % --- non-Dirac node is rejected; suppress the modal bst_error so an
+    %     unattended run cannot block on a dialog (GuiLevel restored via onCleanup) ---
+    LboFile = local_find_eigen(SurfaceFile, 'Laplace-Beltrami');
+    if isempty(LboFile)
+        tess_eigen(SurfaceFile, 'Laplace-Beltrami', 'K', 20);
+        LboFile = local_find_eigen(SurfaceFile, 'Laplace-Beltrami');
+    end
     rejected = false;
-    if ~isempty(lboNew)
+    if ~isempty(LboFile)
+        gl = [];
+        if isfield(GlobalData,'Program') && isfield(GlobalData.Program,'GuiLevel')
+            gl = GlobalData.Program.GuiLevel;
+            GlobalData.Program.GuiLevel = -1;   % bst_error skips the modal dialog
+        end
+        restoreGui = onCleanup(@() local_restore_gui(gl)); %#ok<NASGU>
         try
-            hbad = view_eigenmodes(lboNew{1});
-            rejected = isempty(hbad);   % bst_error path returns [] without a figure
+            hbad = view_eigenmodes(LboFile);
+            rejected = isempty(hbad);   % rejection path returns [] without a figure
             if ~isempty(hbad) && ishandle(hbad), close(hbad); end
         catch
             rejected = true;
         end
+        clear restoreGui;   % restore GuiLevel now
     end
     [nPass,nFail] = chk('LBO node rejected (Dirac-only)', rejected, nPass,nFail);
 
@@ -64,13 +78,33 @@ function test_eigenmode_vector_viewer()
     if nFail > 0, error('test_eigenmode_vector_viewer: %d test(s) FAILED.', nFail); end
 end
 
-function names = local_eigen_names(SurfaceFile)
-    names = {};
+function f = local_find_eigen(SurfaceFile, Variant)
+% First Eigen child of SurfaceFile whose stored Variant matches, or '' if none.
+    f = '';
     [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
-    if ~isempty(sSubject) && ~isempty(iSurface) ...
-            && isfield(sSubject.Surface(iSurface), 'Eigen') ...
-            && ~isempty(sSubject.Surface(iSurface).Eigen)
-        names = {sSubject.Surface(iSurface).Eigen.FileName};
+    if isempty(sSubject) || isempty(iSurface) ...
+            || ~isfield(sSubject.Surface(iSurface), 'Eigen') ...
+            || isempty(sSubject.Surface(iSurface).Eigen)
+        return;
+    end
+    nodes = sSubject.Surface(iSurface).Eigen;
+    for k = 1:numel(nodes)
+        try
+            E = load(file_fullpath(nodes(k).FileName), 'Variant');
+        catch
+            continue;
+        end
+        if isfield(E,'Variant') && strcmpi(E.Variant, Variant)
+            f = nodes(k).FileName;
+            return;
+        end
+    end
+end
+
+function local_restore_gui(gl)
+    global GlobalData;
+    if ~isempty(gl) && isfield(GlobalData,'Program')
+        GlobalData.Program.GuiLevel = gl;
     end
 end
 
