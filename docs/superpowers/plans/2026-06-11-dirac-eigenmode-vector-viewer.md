@@ -27,7 +27,7 @@
 | `toolbox/gui/panel_surface.m` | Lever `ApplyToColumn`/`IsActive` display hooks | **Modify** |
 | 13 `dev/tests/test_eigenmode_lever_*`, `test_eigenmode_viewer_*`, `test_view_eigenmodes_pure`, `test_eigfilter_design_*` | Tests of the retired lever/old viewer | **Delete** |
 
-**Kept untouched:** `panel_eigenmodes_compute.m` (independent legacy compute dialog), `process_eigenmodes` legacy compute + its menu item, the entire `in_tess_eigenmodes` ecosystem, and the `toolbox/math/eigfilter/` library.
+**Kept untouched:** `panel_eigenmodes_compute.m` (independent legacy compute dialog), `process_eigenmodes` legacy compute + its menu item, the entire `in_tess_eigenmodes` ecosystem, and the **whole `toolbox/math/eigfilter/` system** — the library, the kernel registry (`bst_eigfilter_kernel`), and its direct test `dev/tests/test_eigfilter_pure.m` (needed for the future eigenmode filter designer).
 
 ---
 
@@ -576,7 +576,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - `dev/tests/test_eigfilter_design_smoke.m`
 - `dev/tests/test_eigfilter_design_pure.m`
 
-**Context:** Every file above exercises the deleted lever (`panel_eigenmodes('ResetState'/'GetWeights'/'KernelPairedWeights'/'GetDisplayColumn'/...)`) or the old `view_eigenmodes` contract (`ModesChangedCallback`, paired-grid synthesis). The `test_eigfilter_design_*` pair tests the lever's **kernel-design** API (heat/dog band weights), not the separate living `toolbox/math/eigfilter/` library, so they are part of the lever retirement.
+**Context:** Every file above exercises the deleted lever (`panel_eigenmodes('ResetState'/'GetWeights'/'KernelPairedWeights'/'GetDisplayColumn'/...)`) or the old `view_eigenmodes` contract (`ModesChangedCallback`, paired-grid synthesis).
+
+**The `toolbox/math/eigfilter/` library and its kernel registry (`bst_eigfilter_kernel` = `list`/`info`/`(name,params)`, plus `bst_eigfilter_evaluate`/`compose`/`design_*`) are KEPT — they will back the future eigenmode filter designer — and are NOT touched by this plan.** The `test_eigfilter_design_*` pair only invokes that library *through the deleted panel glue* and adds assertions about panel/lever state (weight shaping, `GetDisplayColumn` synthesis, slider ranges, `UserModes` param commit). The library + registry keep their own independent, comprehensive coverage in `dev/tests/test_eigfilter_pure.m` (heat weights, registry dispatch/list/info, all 10 kernels, compose/evaluate, prior-admissibility), which is **retained**. So deleting the two `*_design_*` glue tests loses no library/registry coverage.
 
 - [ ] **Step 1: Confirm each file targets only retired code**
 

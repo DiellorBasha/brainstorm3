@@ -91,6 +91,12 @@ Two independent units of work.
 `panel_eigenmodes_compute.m`, `process_eigenmodes` (legacy compute + its menu item), and the entire
 `in_tess_eigenmodes` ecosystem (~30 files).
 
+The **whole `toolbox/math/eigfilter/` system is kept** — the library, the kernel registry
+(`bst_eigfilter_kernel` = `list`/`info`/`(name,params)`), `bst_eigfilter_evaluate`/`compose`/
+`design_*`, and its direct test `dev/tests/test_eigfilter_pure.m`. `panel_eigenmodes`'s kernel
+functions are only thin GUI glue over this library; retiring the lever removes the glue, not the
+eigfilter system, which will back the future eigenmode filter designer.
+
 ## 5. Viewer contract and Dirac reconstruction
 
 ### 5.1 Input resolution
