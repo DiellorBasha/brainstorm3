@@ -18,10 +18,12 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
 %     alongside the parent surface and registered in the Brainstorm DB via
 %     db_add_manifold (creating a child node under the surface).
 %
-%     If ForceRecompute is false and the surface already has at least one
-%     manifold child registered, the function returns early with an empty
-%     ManifoldMat (the caller should load via bst_get('ManifoldFile',...) if
-%     the content is needed).
+%     If ForceRecompute is false and the surface already has a manifold child
+%     registered, the existing node is LOADED and returned (no recompute), so
+%     tess_manifold is a single find-or-load-or-create entry point that always
+%     hands back the complete ManifoldMat. It is the canonical (and only) handler
+%     for manifold-file data; other code should obtain the manifold via this call
+%     rather than loading the node ad hoc.
 %
 % OPTIONS:
 %     'Gauge'          : 'trivial' (default), 'levi-civita', or 'euclidean'
@@ -88,8 +90,10 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
             if ~isempty(iSurface) && ...
                isfield(sSubject.Surface(iSurface), 'Manifold') && ...
                ~isempty(sSubject.Surface(iSurface).Manifold)
-                % Already has a manifold node — return empty to signal "use cached".
-                ManifoldMat = struct();
+                % Already has a manifold node — LOAD and return it (no recompute).
+                % tess_manifold is the single find-or-load-or-create entry point,
+                % so it always hands back the complete ManifoldMat.
+                ManifoldMat = load(file_fullpath(sSubject.Surface(iSurface).Manifold(1).FileName));
                 return;
             end
         end

@@ -299,16 +299,13 @@ end
 
 
 %% ===== MANIFOLD GAUGE FRAME (per vertex) =====
-% Per-vertex trivial-gauge frame (e1,e2) from the surface's manifold node:
-% U=real(grid.*rot), V=imag(grid.*rot), grid=Embedded.vertex.grid,
-% rot=Gauge.vertex.rotation. Creates the manifold node if the surface has none.
+% NOTE: view_connection_phase is slated for rework/deprecation. It derives the
+% per-vertex gauge frame ad hoc here; the canonical handler for manifold data is
+% tess_manifold (find-or-load-or-create), which we go through for the node.
+% Per-vertex trivial-gauge frame: U=real(grid.*rot), V=imag(grid.*rot),
+% grid=Embedded.vertex.grid, rot=Gauge.vertex.rotation.
 function [U, V] = GetManifoldFrame(SurfaceFile)
-    [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
-    if ~isfield(sSubject.Surface(iSurface), 'Manifold') || isempty(sSubject.Surface(iSurface).Manifold)
-        tess_manifold(SurfaceFile);                                   % create the node
-        [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
-    end
-    M  = load(file_fullpath(sSubject.Surface(iSurface).Manifold(1).FileName));
+    M  = tess_manifold(SurfaceFile);    % canonical: returns the complete ManifoldMat
     nV = size(in_tess_bst(SurfaceFile).Vertices, 1);
     U  = zeros(nV, 3);  V = zeros(nV, 3);
     for hh = 1:2
