@@ -1171,22 +1171,9 @@ switch (lower(action))
                     gui_component('MenuItem', jPopup, [], 'Display', IconLoader.ICON_DISPLAY, [], @(h,ev)view_surface(filenameRelative));
                 end
 
-                % === DISPLAY TANGENT BASIS (cortex only) ===
-                if strcmpi(nodeType, 'cortex') && (length(bstNodes) == 1)
-                    gui_component('MenuItem', jPopup, [], 'Display tangent basis', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@view_tangents, filenameRelative));
-                end
-
-                % === EIGENMODES (cortex only) ===
-                if strcmpi(nodeType, 'cortex')
-                    AddSeparator(jPopup);
-                    if ~bst_get('ReadOnly')
-                        gui_component('MenuItem', jPopup, [], 'Compute eigenmodes (legacy)', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@process_eigenmodes, 'ComputeInteractive', iSubject, filenameRelative));
-                    end
-                    gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_connection_phase, filenameRelative));
-                end
-
                 % === MANIFOLD (cortex only) ===
                 if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
+                    AddSeparator(jPopup);
                     gui_component('MenuItem', jPopup, [], 'Compute manifold', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_manifold, filenameRelative));
                 end
 
@@ -2552,6 +2539,8 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@ManifoldView_Callback, filenameFull));
+                    % === DISPLAY TANGENT BASIS ===
+                    gui_component('MenuItem', jPopup, [], 'Display tangent basis', IconLoader.ICON_DISPLAY, [], @(h,ev)bst_call(@ManifoldViewTangents_Callback, filenameFull));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -2564,6 +2553,10 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@OperatorView_Callback, filenameFull));
+                    % === VIEW CONNECTION PHASE (Connection Laplacian operator only) ===
+                    if ~isempty(regexp(lower(char(bstNodes(1).getComment())), 'connection laplacian', 'once'))
+                        gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@OperatorViewConnPhase_Callback, filenameFull));
+                    end
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -4004,6 +3997,23 @@ function ManifoldView_Callback(filenameFull)
     end
 end
 
+%% ===== MANIFOLD: DISPLAY TANGENT BASIS =====
+function ManifoldViewTangents_Callback(filenameFull)
+    % Display the tangent basis for the manifold's parent surface.
+    % Interim wiring: resolves the parent surface and reuses view_tangents.
+    % Reworking this to read the on-file manifold frames is a separate step.
+    if ~file_exist(filenameFull)
+        bst_error('Manifold file not found.', 'Display tangent basis', 0);
+        return;
+    end
+    M = load(filenameFull, 'ParentSurface');
+    if ~isfield(M, 'ParentSurface') || isempty(M.ParentSurface)
+        bst_error('Manifold file has no ParentSurface reference.', 'Display tangent basis', 0);
+        return;
+    end
+    view_tangents(M.ParentSurface);
+end
+
 %% ===== MANIFOLD: DELETE =====
 function ManifoldDelete_Callback(filenameRelative)
     % Confirm deletion
@@ -4050,6 +4060,28 @@ function OperatorView_Callback(filenameFull)
             fprintf('  %s: %s\n', fnames{k}, class(val));
         end
     end
+end
+
+%% ===== OPERATOR: VIEW CONNECTION PHASE =====
+function OperatorViewConnPhase_Callback(filenameFull)
+    % Display the connection-Laplacian eigenmode phase for the operator's parent
+    % surface. Interim wiring: resolves the parent surface and reuses
+    % view_connection_phase. Reworking this to read the on-file connection
+    % operator is a separate step.
+    if ~file_exist(filenameFull)
+        bst_error('Operator file not found.', 'View connection phase', 0);
+        return;
+    end
+    S = load(filenameFull, 'ParentSurface', 'Variant');
+    if ~isfield(S, 'ParentSurface') || isempty(S.ParentSurface)
+        bst_error('Operator file has no ParentSurface reference.', 'View connection phase', 0);
+        return;
+    end
+    if ~isfield(S, 'Variant') || ~strcmpi(S.Variant, 'Connection Laplacian')
+        bst_error('Connection phase requires a Connection Laplacian operator.', 'View connection phase', 0);
+        return;
+    end
+    view_connection_phase(S.ParentSurface);
 end
 
 %% ===== OPERATOR: DELETE =====
