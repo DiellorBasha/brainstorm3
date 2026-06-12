@@ -5,17 +5,17 @@ function varargout = view_manifold(varargin)
 %         G    = view_manifold('DeriveVertexFrame', Embedded, Gauge, nVert)
 %
 % Reads a manifold_ DB node (db_template('manifoldmat')) and renders its parent
-% cortex as a bare wireframe, onto which the data dimensions of the manifold are
-% revealed as keyboard-toggled layers:
+% cortex as a true light-grey wireframe (edges only, no filled faces), onto which
+% the data dimensions of the manifold are revealed as keyboard-toggled layers:
 %     scalar  (vertices)        -> 'D' : a point cloud on every vertex
 %     vector2 (tangent frames)  -> (added later)
 %     vector3 (ambient frames)  -> (added later)
 % Each dimension's frame is the geometric object the data lives on: vertices for
 % scalar, tangent (U,V) frames for vector2, ambient (U,V,N) frames for vector3.
 %
-% The default view is the bare mesh with nothing on it. The pure per-vertex frame
-% derivation (DeriveVertexFrame) is retained for the coming vector layers and for
-% view_manifold_registration.
+% The default view is the wireframe with the scalar layer on. The pure per-vertex
+% frame derivation (DeriveVertexFrame) is retained for the coming vector layers
+% and for view_manifold_registration.
 %
 % Keyboard (figure focused):
 %   D   toggle the scalar data layer (vertex point cloud)
@@ -124,10 +124,14 @@ function hFig = ViewFigure(ManifoldFile)
     panel_surface('SetSurfaceSmooth', hFig, 1, 0, 0);
     panel_surface('SetSurfaceEdges',  hFig, 1, 1);
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    % Render the cortex as a true wireframe: edges only (no filled faces), in a
+    % light grey that reads clearly against the black background.
+    set(findobj(hAxes, 'Type', 'patch'), 'FaceColor', 'none', ...
+        'EdgeColor', [0.7 0.7 0.7], 'EdgeAlpha', 1);
     hold(hAxes, 'on');   % CRITICAL: prevents plot3 from resetting the cortex axes
 
     % --- state ---
-    showScalar = false;
+    showScalar = true;          % scalar layer on by default (over the wireframe)
     colScalar  = [0.2 0.9 1];   % cyan point cloud
 
     KeyPressFcn_bak = get(hFig, 'KeyPressFcn');

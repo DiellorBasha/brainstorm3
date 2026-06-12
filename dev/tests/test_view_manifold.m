@@ -1,8 +1,8 @@
 function test_view_manifold()
 % TEST_VIEW_MANIFOLD  Live-figure regression for the manifold viewer.
-% Default view is a bare wireframe (no overlays); 'D' toggles a scalar vertex
-% point cloud (the scalar data dimension). Requires Brainstorm running with a
-% registered manifold node.
+% Default view is a true light-grey wireframe (faces off) with the scalar vertex
+% point cloud on; 'D' toggles the scalar layer. Requires Brainstorm running with
+% a registered manifold node.
 % Authors: Diellor Basha, 2026
     nPass = 0; nFail = 0;
 
@@ -17,21 +17,23 @@ function test_view_manifold()
     [nPass,nFail] = chk('viewer returns a figure', ~isempty(hFig) && ishandle(hFig), nPass,nFail);
 
     hAx3D  = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    hPatch = findobj(hAx3D, 'Type', 'patch');
     [nPass,nFail] = chk('Axes3D exists', ~isempty(hAx3D), nPass,nFail);
-    [nPass,nFail] = chk('cortex patch exists', ~isempty(findobj(hAx3D,'Type','patch')), nPass,nFail);
-    % default view is bare: nothing overlaid
-    [nPass,nFail] = chk('default bare (no scalar cloud)', isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
+    [nPass,nFail] = chk('cortex patch exists', ~isempty(hPatch), nPass,nFail);
+    % default is a true wireframe: faces off (FaceColor 'none')
+    fc = get(hPatch(1), 'FaceColor');
+    [nPass,nFail] = chk('wireframe: FaceColor none', ischar(fc) && strcmpi(fc,'none'), nPass,nFail);
 
-    % D draws the scalar point cloud over all vertices
-    KeyOnFig(hFig, 'd'); drawnow;
+    % scalar layer on by default, covering all vertices
     hS = findobj(hFig, 'Tag', 'manifoldScalar');
-    [nPass,nFail] = chk('D draws scalar point cloud', ~isempty(hS), nPass,nFail);
+    [nPass,nFail] = chk('scalar cloud on by default', ~isempty(hS), nPass,nFail);
     [nPass,nFail] = chk('scalar cloud covers all vertices', ~isempty(hS) && numel(get(hS(1),'XData'))==nVert, nPass,nFail);
-    [nPass,nFail] = chk('cortex survives scalar draw', ~isempty(findobj(hAx3D,'Type','patch')), nPass,nFail);
 
-    % D again toggles it off
+    % D toggles the scalar layer off, then back on
     KeyOnFig(hFig, 'd'); drawnow;
     [nPass,nFail] = chk('D toggles scalar off', isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
+    KeyOnFig(hFig, 'd'); drawnow;
+    [nPass,nFail] = chk('D toggles scalar back on', ~isempty(findobj(hFig,'Tag','manifoldScalar')), nPass,nFail);
 
     close(hFig);
     fprintf('\n==== test_view_manifold: %d passed, %d failed ====\n', nPass, nFail);
