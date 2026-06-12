@@ -40,11 +40,12 @@ function test_eigenmode_vector_viewer()
     U2 = get(findobj(hFig,'Tag','eigArrows'),'UData');
     [nPass,nFail] = chk('mode step changes the field', ~isequal(U1, U2), nPass,nFail);
 
-    % --- quiver-size key changes arrow length (UData scales) ---
-    Ua = get(findobj(hFig,'Tag','eigArrows'),'UData');
+    % --- quiver-size key changes arrow length via AutoScaleFactor (UData is the
+    %     raw vector data and stays constant; quiver3's scale arg drives the factor) ---
+    Sa = get(findobj(hFig,'Tag','eigArrows'),'AutoScaleFactor');
     KeyOnFig(hFig, 'rightarrow', {'shift'});  drawnow;   % Shift+Right = longer
-    Ub = get(findobj(hFig,'Tag','eigArrows'),'UData');
-    [nPass,nFail] = chk('quiver-size key rescales arrows', ~isequal(Ua, Ub), nPass,nFail);
+    Sb = get(findobj(hFig,'Tag','eigArrows'),'AutoScaleFactor');
+    [nPass,nFail] = chk('quiver-size key rescales arrows', Sb > Sa, nPass,nFail);
 
     close(hFig);
 
