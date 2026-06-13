@@ -170,21 +170,17 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         if ~isempty(jRadioMethodMem) && ~isProcess && (~strcmpi(HeadModelType, 'surface') || isShared)
             jRadioMethodMem.setEnabled(0);
         end
-        % Eigenmode head model: only the eigenmode method is valid; disable the others
-        if ~isProcess
-            if isEigenmode
-                jRadioMethodEig.setSelected(1);
-                jRadioMethodMn.setEnabled(0);
-                jRadioMethodBf.setEnabled(0);
-                jRadioMethodDip.setEnabled(0);
-                if ~isempty(jRadioMethodMem); jRadioMethodMem.setEnabled(0); end
-            else
-                jRadioMethodEig.setVisible(0);
-                jRadioMethodEig.setEnabled(0);
-            end
-        else
-            jRadioMethodEig.setVisible(0);
-            jRadioMethodEig.setEnabled(0);
+        % DEPRECATED: the scalar "Eigenmode source mapping" (Eigen-dSPM) method has
+        % been removed from the GUI in favor of the Dirac eigenmode inverse
+        % (right-click > "Compute sources: Dirac eigenmodes"). The radio and its
+        % option sub-panel are kept in the code (dormant) but permanently hidden;
+        % the process-level 'eigenmode' branch still serves the benchmark harness.
+        jRadioMethodEig.setVisible(0);
+        jRadioMethodEig.setEnabled(0);
+        % If the selected head model is itself a scalar eigenmode model, fall back to
+        % the standard minimum-norm method (the eigenmode method is no longer offered).
+        if ~isProcess && isEigenmode && jRadioMethodEig.isSelected()
+            jRadioMethodMn.setSelected(1);
         end
 
     c.gridy = 1;

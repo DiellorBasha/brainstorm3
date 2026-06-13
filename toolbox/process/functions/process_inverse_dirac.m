@@ -222,6 +222,56 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
 end
 
 
+%% ===== COMPUTE INTERACTIVE =====
+% Entry point for the right-click "Compute sources: Dirac eigenmodes" menu.
+% Resolves the selected tree nodes to channel studies, pops the small options
+% dialog (panel_inverse_dirac), then reuses Run() to build the shared kernels.
+function OutputFiles = ComputeInteractive(bstNodes) %#ok<DEFNU>
+    OutputFiles = {};
+    % --- resolve selected nodes to studies (mirror panel_protocols('TreeInverse')) ---
+    nodeType = lower(char(bstNodes(1).getType()));
+    if ismember(nodeType, {'rawdata', 'data'})
+        [iStudies, ~] = tree_dependencies(bstNodes, 'data');
+    else
+        iStudies = tree_channel_studies(bstNodes, 'NoIntra');
+    end
+    if isempty(iStudies)
+        return;
+    elseif isequal(iStudies, -10)
+        bst_error('Error in file selection.', 'Compute sources: Dirac eigenmodes', 0);
+        return;
+    end
+    iStudies = unique(iStudies);
+
+    % --- options dialog ---
+    sOpt = gui_show_dialog('Compute sources: Dirac eigenmodes', @panel_inverse_dirac, 1, []);
+    if isempty(sOpt)
+        return;   % cancelled
+    end
+
+    % --- build a process structure carrying the dialog options ---
+    sProcess = GetDescription();
+    sProcess.options.measure.Value     = sOpt.Measure;
+    sProcess.options.snr.Value{1}      = sOpt.SNR;
+    sProcess.options.nmodes.Value{1}   = sOpt.nModes;
+    sProcess.options.tau.Value{1}      = sOpt.Tau;
+    sProcess.options.noisereg.Value{1} = sOpt.NoiseReg;
+    sProcess.options.sensortypes.Value = sOpt.SensorTypes;
+
+    % --- minimal sInputs: Run builds one shared kernel per channel study and never
+    %     reads the data samples, so one entry per study (carrying iStudy) suffices ---
+    sInputs = repmat(struct('iStudy', []), 1, numel(iStudies));
+    for k = 1:numel(iStudies)
+        sInputs(k).iStudy = iStudies(k);
+    end
+
+    % --- run the shared-kernel computation ---
+    bst_progress('start', 'Compute sources', 'Computing Dirac eigenmode inverse...');
+    OutputFiles = Run(sProcess, sInputs);
+    bst_progress('stop');
+end
+
+
 %% ===== HELPERS =====
 function f = local_function_name(measure)
     switch lower(measure)

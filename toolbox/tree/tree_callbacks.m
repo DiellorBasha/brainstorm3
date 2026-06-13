@@ -1397,6 +1397,7 @@ switch (lower(action))
                     % gui_component('MenuItem', jPopup, [], 'Compute sources [2009]', IconLoader.ICON_RESULTS, [], @(h,ev)selectHeadmodelAndComputeSources(bstNodes, '2009'));
                     % gui_component('MenuItem', jPopup, [], 'Compute sources [2016]', IconLoader.ICON_RESULTS, [], @(h,ev)selectHeadmodelAndComputeSources(bstNodes, '2016'));
                     gui_component('MenuItem', jPopup, [], 'Compute sources [2018]', IconLoader.ICON_RESULTS, [], @(h,ev)selectHeadmodelAndComputeSources(bstNodes, '2018'));
+                    gui_component('MenuItem', jPopup, [], 'Compute sources: Dirac eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)selectHeadmodelAndComputeDirac(bstNodes));
                 end
                 % === SET AS DEFAULT HEADMODEL ===
                 if ~bst_get('ReadOnly') && (~ismember(iHeadModel, sStudy.iHeadModel) || ~bstNodes(1).isMarked())
@@ -2827,6 +2828,7 @@ end % END SWITCH( ACTION )
         % gui_component('MenuItem', jPopup, [], 'Compute sources [2009]', IconLoader.ICON_RESULTS, [], @(h,ev)panel_protocols('TreeInverse', bstNodes, '2009'));
         % gui_component('MenuItem', jPopup, [], 'Compute sources [2016]', IconLoader.ICON_RESULTS, [], @(h,ev)panel_protocols('TreeInverse', bstNodes, '2016'));
         gui_component('MenuItem', jPopup, [], 'Compute sources [2018]', IconLoader.ICON_RESULTS, [], @(h,ev)panel_protocols('TreeInverse', bstNodes, '2018'));
+        gui_component('MenuItem', jPopup, [], 'Compute sources: Dirac eigenmodes', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@process_inverse_dirac, 'ComputeInteractive', bstNodes));
     end
 
 %% ===== MENU: PROJECT ON DEFAULT ANATOMY =====
@@ -3605,6 +3607,15 @@ function selectHeadmodelAndComputeSources(bstNodes, Version)
     tree_callbacks(bstNodes, 'doubleclick');
     % Compute sources
     bst_call(@panel_protocols, 'TreeInverse', bstNodes, Version);
+end
+
+
+%% ===== SELECT HEADMODEL AND COMPUTE DIRAC SOURCES =====
+function selectHeadmodelAndComputeDirac(bstNodes)
+    % Select node (sets this head model as the active one for the study)
+    tree_callbacks(bstNodes, 'doubleclick');
+    % Compute sources in the Dirac eigenmode basis
+    bst_call(@process_inverse_dirac, 'ComputeInteractive', bstNodes);
 end
 
 
