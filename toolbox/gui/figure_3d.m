@@ -1068,6 +1068,9 @@ function FigureKeyPressedCallback(hFig, keyEvent)
             SetSourceVectorColor(hFig, [0 0 1]);
         case 'k'
             SetSourceVectorColor(hFig, [0 0 0]);
+        % === SOURCE-VECTOR TRUE-SIZE TOGGLE ('v') ===
+        case 'v'
+            ToggleSourceVectorTrueSize(hFig);
 
         otherwise
             % ===== PROCESS BY KEYS =====
@@ -2228,6 +2231,11 @@ function DisplayFigurePopup(hFig)
         isShowVec = isfield(TessInfo(iSrcTess),'ShowSourceVectors') && ~isempty(TessInfo(iSrcTess).ShowSourceVectors) && TessInfo(iSrcTess).ShowSourceVectors;
         jItem = gui_component('CheckBoxMenuItem', jPopup, [], 'Show source vectors (quiver)', [], [], @(h,ev)SetShowSourceVectors(hFig, iSrcTess, ~isShowVec));
         jItem.setSelected(isShowVec);
+        % True-size vs unit-normalized arrows (also toggled by the 'v' key)
+        isTrueVec = isfield(TessInfo(iSrcTess),'SourceVectorTrueSize') && ~isempty(TessInfo(iSrcTess).SourceVectorTrueSize) && TessInfo(iSrcTess).SourceVectorTrueSize;
+        jItemTrue = gui_component('CheckBoxMenuItem', jPopup, [], 'True-size arrows [v]', [], [], @(h,ev)SetSourceVectorTrueSize(hFig, iSrcTess, ~isTrueVec));
+        jItemTrue.setSelected(isTrueVec);
+        jItemTrue.setEnabled(isShowVec);
     end
 
     % ==== Display menu ====
@@ -2991,9 +2999,16 @@ end
 %   idx       [k x 1] vertex indices to draw ([] = all)
 %   ScaleLen  scalar arrow length in meters (unit direction is scaled by this)
 %   OffsetLen scalar lift in meters along the normal (avoids depth-buffer occlusion)
+%   TrueSize  logical (default false): if true, draw TRUE-magnitude arrows (length
+%             proportional to the source vector) instead of unit-normalized ones
+%   RefMag    scalar reference magnitude that maps to ScaleLen in true-size mode
+%             (default 1); pass the colormap-max so true lengths stay visible
 % Returns struct G with column vectors X,Y,Z (arrow bases) and U,V,W (arrow vectors).
-% Direction is unit-normalized with an eps-guard; below-eps vectors get zero arrows.
-function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen) %#ok<DEFNU>
+% Default: direction is unit-normalized (eps-guard -> zero arrow), amplitude carried
+% by the colormap. True-size: Vec = (ScaleLen/RefMag)*Vi, preserving relative lengths.
+function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen, TrueSize, RefMag) %#ok<DEFNU>
+    if (nargin < 7) || isempty(TrueSize), TrueSize = false; end
+    if (nargin < 8) || isempty(RefMag) || ~(RefMag > eps), RefMag = 1; end
     if isempty(idx)
         idx = (1:size(P,1))';
     end
@@ -3004,12 +3019,18 @@ function G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen) %#o
     Ni = Ni ./ nN;
     % Arrow bases lifted along the normal
     Base = Pi + OffsetLen * Ni;
-    % Unit-normalized directions (eps-guard -> zero arrow)
-    mag = sqrt(sum(Vi.^2,2));
-    good = mag > eps;
-    Dir = zeros(size(Vi));
-    Dir(good,:) = Vi(good,:) ./ mag(good);
-    Vec = ScaleLen * Dir;
+    if TrueSize
+        % True relative lengths: arrow length proportional to source magnitude,
+        % with RefMag (colormap max) mapped to ScaleLen so the field stays visible.
+        Vec = (ScaleLen / RefMag) * Vi;
+    else
+        % Unit-normalized directions (eps-guard -> zero arrow)
+        mag = sqrt(sum(Vi.^2,2));
+        good = mag > eps;
+        Dir = zeros(size(Vi));
+        Dir(good,:) = Vi(good,:) ./ mag(good);
+        Vec = ScaleLen * Dir;
+    end
     G = struct('X', Base(:,1), 'Y', Base(:,2), 'Z', Base(:,3), ...
                'U', Vec(:,1),  'V', Vec(:,2),  'W', Vec(:,3));
 end
@@ -3105,7 +3126,19 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
         ScaleLen = 0.004;
     end
     OffsetLen = 0.0015;                     % ~1.5 mm lift to clear the depth buffer
-    G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen);
+    % True-size vs unit-normalized arrows ('v' key / context menu). In true-size
+    % mode, map the colormap-max magnitude to ScaleLen so true relative lengths stay
+    % visible (raw amplitudes are physically tiny); fall back to the current max.
+    TrueSize = isfield(sTess,'SourceVectorTrueSize') && ~isempty(sTess.SourceVectorTrueSize) && sTess.SourceVectorTrueSize;
+    if isfield(sTess,'DataLimitValue') && ~isempty(sTess.DataLimitValue)
+        RefMag = max(abs(sTess.DataLimitValue));
+    elseif ~isempty(idx)
+        RefMag = max(mag(idx));
+    else
+        RefMag = 1;
+    end
+    if isempty(RefMag) || ~(RefMag > eps), RefMag = 1; end
+    G = ComputeSourceVectorGlyphs(P, Nrm, V3, idx, ScaleLen, OffsetLen, TrueSize, RefMag);
     % Arrow color (default black; 'b'/'k' keys recolor via SetSourceVectorColor)
     if isfield(sTess,'SourceVectorColor') && ~isempty(sTess.SourceVectorColor)
         arrowColor = sTess.SourceVectorColor;
@@ -3181,6 +3214,31 @@ function SetSourceVectorColor(hFig, color)
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
     hQ    = findobj(hAxes, 'Tag', 'SourceVectors');
     if ~isempty(hQ), set(hQ, 'Color', color); end
+end
+
+%% ===== TOGGLE SOURCE VECTOR TRUE SIZE =====
+% Flip the active source-vector overlay between unit-normalized (direction only;
+% amplitude via colormap) and true-size (arrow length proportional to magnitude).
+% Bound to the 'v' key. No-op unless a source surface currently has the overlay on.
+function ToggleSourceVectorTrueSize(hFig)
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo), return; end
+    iTess = find(arrayfun(@(t) isfield(t,'ShowSourceVectors') && ~isempty(t.ShowSourceVectors) ...
+        && t.ShowSourceVectors && ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
+    if isempty(iTess), return; end   % overlay not active -> let the key pass through
+    cur = isfield(TessInfo(iTess),'SourceVectorTrueSize') && ~isempty(TessInfo(iTess).SourceVectorTrueSize) && TessInfo(iTess).SourceVectorTrueSize;
+    SetSourceVectorTrueSize(hFig, iTess, ~cur);
+end
+
+%% ===== SET SOURCE VECTOR TRUE SIZE =====
+% Set true-size (isTrue=1) vs unit-normalized (isTrue=0) arrows for surface iTess
+% and redraw. Stores the flag so it survives time/redraws.
+function SetSourceVectorTrueSize(hFig, iTess, isTrue)
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (iTess > numel(TessInfo)), return; end
+    TessInfo(iTess).SourceVectorTrueSize = isTrue;
+    setappdata(hFig, 'Surface', TessInfo);
+    PlotSourceVectors(hFig, iTess);
 end
 
 %% ===== PLOT 3D ELECTRODES =====
