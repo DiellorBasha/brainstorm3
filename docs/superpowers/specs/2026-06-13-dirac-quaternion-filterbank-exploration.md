@@ -135,6 +135,42 @@ Expect: (a) a transported directional blob; (b,c) opposite-handed rotating vecto
 wavelets. Quantify handedness by the sign of the surface curl / phase winding around `v`.
 This validates the whole chain before any UI work.
 
+## First-order vs squared Dirac: verified findings (2026-06-13)
+
+We use the **squared** operator `A = (1−τ)D_int²/s_L + τ E/s_E` (PSD, clean
+generalized eigensolve). Question: does squaring lose chirality? Answer, verified
+numerically on the `Subject01` left hemisphere (intrinsic operator, raw `L4`):
+
+- **Exposed the first-order intrinsic Dirac `D`** (Crane, rebuilt verbatim):
+  `[4nF × 4nV] = [81920 × 40968]`, rectangular **vertex→face** (a spin-connection
+  twisted `d`), with `D·(constant quaternion) = 0` (1e-13) → the expected 4-D harmonic
+  kernel. `L4 = D'·MF·D` reproduces the intrinsic squared operator.
+- **There are TWO independent chiralities, and squaring treats them oppositely:**
+  - *Internal / polarization chirality* `R_n̂` (right-multiplication): `R_i,R_j,R_k`
+    commute with `L4` at **1e-16** → eigenspaces are exact **4-fold quaternionic
+    multiplets**. This grading **survives squaring** (it commutes with `D` and `D²`).
+    This is the chirality the demo recovered.
+  - *Spectral-sign chirality* `sign(𝔇)`: the self-adjoint first-order operator is the
+    block `𝔇 = [[0, D†];[D, 0]]` on **vertex⊕face** (the quaternionic Hodge–Dirac).
+    Its spectrum is symmetric `±μ` with `μ² =` the squared eigenvalues, so **squaring
+    is 2-to-1 and folds the sign away** (`μ²` cannot encode `sign μ`). The sign is the
+    *relative vertex↔face phase* `(ψ_v, ±ψ_f)`, invisible to the vertex-only `D²`.
+  - **The two are independent.** On one clean quartet (`μ²=105.17`), the doubled 8-D
+    space factorizes into all four `(sign 𝔇, R_i) ∈ {±1}×{±i}` sectors, 2 real dims
+    each; `Γ=𝔇/μ` and `R_i` commute, `Γ²=+I`, `R_i²=−I`.
+- **Practical:** the spectral chirality is recoverable **without** an indefinite
+  eigensolve — build the squared eigenbasis `Φ` (what we have) plus face partners
+  `Ψ = DΦ/μ`; the per-quartet block `[[0, μI];[μI, 0]]` then carries `sign(𝔇)` on top
+  of `R_n̂`. ⚑ But a single first-order `D` exists only for the **pure** operator
+  (intrinsic XOR extrinsic) — the `τ`-blend is a sum of squares with no first-order
+  root. So a "signed branch" of the filterbank must commit to `τ=0` or `τ=1`.
+
+**Implication for the filterbank:** the current squared basis already delivers
+scale × direction × internal-helicity. A *first-order branch* (pure intrinsic,
+vertex⊕face) would add the genuinely new axis: `sign(𝔇)` projectors = a surface
+**Riesz/Hilbert transform**, one-way traveling vector waves (signed `e^{iμt}`,
+no ad-hoc Hilbert), and harmonic-spinor / spin-structure / index content.
+
 ## Open questions worth probing
 - Which axis `n̂` is physically meaningful — the surface normal `N̂(v)` at the seed
   (helicity about the local normal = the natural "cortical handedness"), or a fixed
