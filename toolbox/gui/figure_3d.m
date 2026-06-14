@@ -3076,19 +3076,28 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
         hQuiver = [];
         return;
     end
-    % Resolve dataset / result / un-oriented 3-vector at the current time
-    [tmp__, iFig, iDS] = bst_figures('GetFigure', hFig); %#ok<ASGLU>
-    if isempty(iDS), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
-    iResult = bst_memory('GetResultInDataSet', iDS, sTess.DataSource.FileName);
-    if isempty(iResult), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
-    % Trailing 0 is ApplyOrient=0: keep the raw 3-vector (no RMS orientation collapse)
-    [V3col, nComponents] = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex', 0);
-    if (nComponents ~= 3) || isempty(V3col)   % only unconstrained fields carry ambient vectors
-        if ~isempty(hQuiver), delete(hQuiver); end
-        hQuiver = [];
-        return;
+    % Vector source: an explicit per-vertex 3-vector in figure appdata
+    % ('QuiverVectorOverride', [nVert x 3]) takes precedence, so the quiver can show
+    % one field while the cortex is colored by an INDEPENDENT scalar overlay (e.g. a
+    % Helmholtz divergence/curl map). Otherwise read the displayed unconstrained source.
+    ovrVec = getappdata(hFig, 'QuiverVectorOverride');
+    if ~isempty(ovrVec) && (size(ovrVec,2) == 3)
+        V3 = ovrVec;
+    else
+        % Resolve dataset / result / un-oriented 3-vector at the current time
+        [tmp__, iFig, iDS] = bst_figures('GetFigure', hFig); %#ok<ASGLU>
+        if isempty(iDS), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
+        iResult = bst_memory('GetResultInDataSet', iDS, sTess.DataSource.FileName);
+        if isempty(iResult), if ~isempty(hQuiver), delete(hQuiver); end, hQuiver = []; return; end
+        % Trailing 0 is ApplyOrient=0: keep the raw 3-vector (no RMS orientation collapse)
+        [V3col, nComponents] = bst_memory('GetResultsValues', iDS, iResult, [], 'CurrentTimeIndex', 0);
+        if (nComponents ~= 3) || isempty(V3col)   % only unconstrained fields carry ambient vectors
+            if ~isempty(hQuiver), delete(hQuiver); end
+            hQuiver = [];
+            return;
+        end
+        V3 = reshape(V3col, 3, [])';            % [nVert x 3] ambient components
     end
-    V3 = reshape(V3col, 3, [])';            % [nVert x 3] ambient components
     % Anchors + normals from the DISPLAYED patch (matches inflation/smoothing)
     hPatch = sTess.hPatch;
     if isempty(hPatch) || ~any(ishandle(hPatch))
@@ -3113,7 +3122,10 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
     if isfield(sTess,'SourceVectorMaxArrows'), MaxArrows = sTess.SourceVectorMaxArrows; else, MaxArrows = []; end
     mag = sqrt(sum(V3.^2,2));
     ThreshVal = 0;
-    if isfield(sTess,'DataLimitValue') && ~isempty(sTess.DataLimitValue) ...
+    if ~isempty(ovrVec) && (size(ovrVec,2) == 3)
+        % Override vector: gate by its OWN magnitude (the colored scalar is unrelated)
+        ThreshVal = 0.10 * max(mag);
+    elseif isfield(sTess,'DataLimitValue') && ~isempty(sTess.DataLimitValue) ...
             && isfield(sTess,'DataThreshold') && ~isempty(sTess.DataThreshold)
         dl = sTess.DataLimitValue;
         ThreshVal = dl(1) + (dl(2) - dl(1)) * sTess.DataThreshold;
