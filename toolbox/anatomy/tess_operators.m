@@ -164,6 +164,9 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     Mass           = cell(1, 2);
     GlobalVertices = cell(1, 2);
     diracScales    = cell(1, 2);   % [sL sE] per hemisphere (Dirac co-normalization)
+    FirstOrderInt  = cell(1, 2);   % Dirac: intrinsic first-order D_int [4F x 4V] per hemisphere
+    FirstOrderExt  = cell(1, 2);   % Dirac: extrinsic first-order D     [4F x 4V] per hemisphere
+    FaceMass       = cell(1, 2);   % Dirac: face-area mass W_F [4F x 4F] per hemisphere
 
     for hh = 1:2
         vH = hemis{hh};
@@ -215,6 +218,20 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     sE = local_lambda_max(E,  B);
                     A  = (1 - Tau) * (L4 / sL) + Tau * (E / sE);          % [4nVh x 4nVh]
                     diracScales{hh} = [sL, sE];   % record for provenance / eigenvalue scale
+
+                    % First-order Dirac ROOTS (nxr), stored for the signed/propagation
+                    % branch: D_int (immersion/edge, root of L4) and D_ext (Gauss map,
+                    % root of E). Each [4F x 4V]; their W_F-Galerkin square reproduces
+                    % L4 / E (verified). W_F = kron(face-area, I4) pairs with them.
+                    Dint1 = nxr_compute('operators', h, 'diracIntrinsicD');   % intrinsic first-order
+                    Dext1 = nxr_compute('operators', h, 'diracD');            % extrinsic first-order
+                    nFh   = size(Floc, 1);
+                    e1f   = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
+                    e2f   = Vloc(Floc(:,3),:) - Vloc(Floc(:,1),:);
+                    fArea = 0.5 * sqrt(sum(cross(e1f, e2f, 2).^2, 2));
+                    FirstOrderInt{hh} = Dint1;
+                    FirstOrderExt{hh} = Dext1;
+                    FaceMass{hh}      = kron(spdiags(fArea, 0, nFh, nFh), speye(4));   % [4F x 4F]
             end
         catch ME
             nxr_compute('destroy', h);
@@ -242,6 +259,10 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     OperatorMat.Operator       = Operator;        % 1x2 cell of sparse matrices
     OperatorMat.Mass           = Mass;            % 1x2 cell of sparse matrices
     OperatorMat.GlobalVertices = GlobalVertices;  % 1x2 cell of global vertex indices
+    if strcmpi(Variant, 'Dirac')
+        OperatorMat.FirstOrder = struct('Intrinsic', {FirstOrderInt}, 'Extrinsic', {FirstOrderExt});
+        OperatorMat.FaceMass   = FaceMass;         % 1x2 cell of W_F [4F x 4F]
+    end
     OperatorMat.Provenance     = prov;
 
     % --- save / register in DB ---
