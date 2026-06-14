@@ -42,13 +42,13 @@ function Out = bst_dirac_filter(SurfaceFile, iVertex, Direction, Filter, Chirali
 %                                                 node must be created.
 %
 % OUTPUT struct Out:
-%   .V        [nVert x 3] complex per-vertex 3-vector wavelet (zeros off the seed hemi)
-%   .W        [nVert x 1] complex scalar (w) channel (spin-connection leakage)
-%   .Helicity [nVert x 1] real local helicity density (Re V x Im V) . Axis
-%   .Coeffs   [K x 1]     final (complex) mode coefficients
-%   .Lambda   [K x 1]     Dirac eigenvalues of the seed hemisphere
-%   .iHemi    1|2         hemisphere holding the seed
-%   .Gain     scalar      filter gain vector summary (g at lambda)
+%   .V             [nVert x 3] complex per-vertex 3-vector wavelet (zeros off the seed hemi)
+%   .Helicity      [nVert x 1] real local helicity density (Re V x Im V) . Axis
+%   .ChiralityAxis [1 x 3]     the (unit) helicity axis used
+%
+% The core (project -> scale -> chirality -> reconstruct) is delegated to
+% bst_dirac_eigenmodes_filter: this synthesis is that filter applied to a
+% directional vertex delta.
 %
 % SEE ALSO: bst_dirac, tess_eigen, tess_operators, bst_eigfilter_kernel
 %
@@ -70,62 +70,38 @@ function Out = bst_dirac_filter(SurfaceFile, iVertex, Direction, Filter, Chirali
     Eig = tess_eigen(SurfaceFile, 'Dirac', 'K', nModes, 'Tau', Tau);
     Op  = load(file_fullpath(Eig.OperatorFile));
 
-    % --- locate the seed vertex's hemisphere ---
-    iHemi = 0;  vloc = 0;
-    for h = 1:numel(Eig.GlobalVertices)
-        loc = find(Eig.GlobalVertices{h}(:) == iVertex, 1);
-        if ~isempty(loc), iHemi = h; vloc = loc; break; end
-    end
-    if iHemi == 0
+    % --- check the seed vertex is in the eigen support ---
+    if ~any(cellfun(@(gv) any(gv(:) == iVertex), Eig.GlobalVertices))
         error('bst_dirac_filter:vertexNotFound', 'Vertex %d is not in the Dirac eigen support.', iVertex);
     end
 
-    Phi = double(Eig.Phi{iHemi});           % [4nVh x K]
-    B   = Op.Mass{iHemi};                    % [4nVh x 4nVh] = kron(Mass_h, I4)
-    lam = Eig.Lambda{iHemi}(:);              % [K x 1]
-    gv  = Eig.GlobalVertices{iHemi}(:);
-    K   = size(Phi,2);  nVh = size(Phi,1)/4;
-
-    % --- pure-imaginary quaternion delta at the seed vertex ---
+    % --- build the seed: a pure-imaginary quaternion vertex delta = the launch
+    %     direction at iVertex (full-cortex 3-vector field, zero elsewhere) ---
     d = Direction(:).';  nd = norm(d);  if nd > 0, d = d/nd; end
-    psi = zeros(4*nVh, 1);
-    psi(4*(vloc-1) + (2:4)) = d(:);          % rows [x;y;z] of block vloc (w stays 0)
-    c = Phi' * (B * psi);                     % [K x 1] mode coefficients (real)
+    nVertTotal = double(max(cellfun(@(x) max(x(:)), Eig.GlobalVertices)));
+    Jdelta = zeros(3*nVertTotal, 1);
+    Jdelta(3*(iVertex-1) + (1:3)) = d(:);
 
-    % --- scale kernel g(lambda) ---
+    % --- scale kernel g(lambda) as a handle (full eigfilter library) ---
     if isempty(Filter)
-        g = ones(K,1);
+        gfun = @(l) ones(size(l));
     else
         params = struct();
         if isfield(Filter,'Params') && ~isempty(Filter.Params), params = Filter.Params; end
         gfun = bst_eigfilter_kernel(Filter.Type, params);
-        g    = bst_eigfilter_evaluate(gfun, lam);
     end
-    c = g .* c;
 
-    % --- optional chirality (helicity) projector P_pm(n) ---
+    % --- delegate project -> scale -> chirality -> reconstruct to the shared filter
+    %     (single source of truth: bst_dirac_eigenmodes_filter; the wavelet is just
+    %     that filter applied to a directional vertex delta) ---
+    Vcol = bst_dirac_eigenmodes_filter(Eig, Op.Mass, Jdelta, 'custom', 'TransferFn', gfun, 'Chirality', Chirality);
+    V = reshape(Vcol, 3, []).';               % [nVertTotal x 3] complex (imag-quaternion part)
+
+    % --- helicity density about the chirality axis ---
     hAxis = [1 0 0];
-    if ~isempty(Chirality) && isfield(Chirality,'Sign') && ~isempty(Chirality.Sign) && (Chirality.Sign ~= 0)
-        if isfield(Chirality,'Axis') && ~isempty(Chirality.Axis), hAxis = Chirality.Axis(:).'; end
-        a = hAxis / norm(hAxis);
-        rhoR = [0 -a(1) -a(2) -a(3); a(1) 0 a(3) -a(2); a(2) -a(3) 0 a(1); a(3) a(2) -a(1) 0];
-        Rfield = kron(speye(nVh), sparse(rhoR));          % [4nVh x 4nVh] right-mult by a
-        Rmode  = Phi' * (B * (Rfield * Phi));             % [K x K] in the eigenbasis
-        c = 0.5 * (c - 1i * sign(Chirality.Sign) * (Rmode * c));
-    end
+    if ~isempty(Chirality) && isfield(Chirality,'Axis') && ~isempty(Chirality.Axis), hAxis = Chirality.Axis(:).'; end
+    hAxis = hAxis / norm(hAxis);
+    Hel = sum(cross(real(V), imag(V), 2) .* repmat(hAxis, nVertTotal, 1), 2);
 
-    % --- reconstruct quaternion field, split into vector (x,y,z) and scalar (w) ---
-    F  = Phi * c;                             % [4nVh x 1] complex
-    Vh = [F(2:4:end), F(3:4:end), F(4:4:end)];% [nVh x 3] imaginary part (the 3-vector)
-    Wh = F(1:4:end);                          % [nVh x 1] scalar (w) channel
-
-    % --- scatter to full-surface arrays ---
-    nVertTotal = double(max(cellfun(@(x) max(x(:)), Eig.GlobalVertices)));
-    V = zeros(nVertTotal, 3);  W = zeros(nVertTotal, 1);
-    V(gv, :) = Vh;  W(gv) = Wh;
-    Hel = zeros(nVertTotal, 1);
-    Hel(gv) = sum(cross(real(Vh), imag(Vh), 2) .* repmat(hAxis/norm(hAxis), nVh, 1), 2);
-
-    Out = struct('V', V, 'W', W, 'Helicity', Hel, 'Coeffs', c, 'Lambda', lam, ...
-                 'iHemi', iHemi, 'iVertexLocal', vloc, 'Gain', g, 'ChiralityAxis', hAxis/norm(hAxis));
+    Out = struct('V', V, 'Helicity', Hel, 'ChiralityAxis', hAxis);
 end
