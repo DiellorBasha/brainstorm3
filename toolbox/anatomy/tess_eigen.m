@@ -37,8 +37,11 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %                        parameter, forwarded to operator creation (Dirac only)
 %     'NoSave'         : true/false (default false) — compute but do not write
 %                        to disk or register in the DB
-%     'ForceRecompute' : true/false (default false) — accepted for API symmetry;
-%                        tess_eigen always recomputes the eigenbasis
+%     'ForceRecompute' : true/false (default false) — when false, an existing
+%                        eigen_*.mat child of the surface whose Variant matches,
+%                        whose stored K is at least the requested K, and (for Dirac)
+%                        whose Tau matches, is loaded and truncated to K modes
+%                        instead of re-solving. Set true to force a fresh eigensolve.
 %
 % OUTPUT:
 %     EigenMat : struct matching db_template('eigenmat'), with fields:
@@ -73,13 +76,13 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     K              = 400;
     Tau            = 0.5;
     NoSave         = false;
-    ForceRecompute = false;  %#ok<NASGU> % accepted for API symmetry; see help
+    ForceRecompute = false;  % when false, reuse a cached eigen node; see help
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
             case 'k',              K              = varargin{i+1};
             case 'tau',            Tau            = varargin{i+1};
             case 'nosave',         NoSave         = logical(varargin{i+1});
-            case 'forcerecompute', ForceRecompute = logical(varargin{i+1}); %#ok<NASGU>
+            case 'forcerecompute', ForceRecompute = logical(varargin{i+1});
             otherwise
                 error('tess_eigen:badOption', 'Unknown option: %s', varargin{i});
         end
@@ -114,6 +117,26 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             'tess_eigen requires nxr-compute: %s', errMsg);
     end
 
+    % --- resolve subject / surface for the parent ---
+    [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', SurfaceFile);
+    if isempty(sSubject) || isempty(iSurface)
+        error('tess_eigen:surfaceNotFound', ...
+            'Could not resolve surface in current protocol: %s', SurfaceFile);
+    end
+
+    % --- find-or-load a cached eigen node before the (expensive) eigensolve ---
+    %     Reuse an existing eigen_*.mat child of this surface whose Variant matches,
+    %     whose stored K >= the requested K, and (for Dirac) whose Tau matches. The
+    %     eigenbasis is nested (ascending eigenvalues, B-orthonormal), so a node with
+    %     more modes is truncated to its first K columns. ForceRecompute skips this.
+    if ~ForceRecompute
+        cached = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDirac);
+        if ~isempty(cached)
+            EigenMat = local_truncate_eigen(cached, K);
+            return;
+        end
+    end
+
     % --- progress feedback: indeterminate bar so the user can see the
     %     (potentially long) eigensolve is running. Only open our own bar if
     %     one is not already visible (so we don't disrupt a parent process'
@@ -122,13 +145,6 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     if ~bst_progress('isVisible')
         bst_progress('start', 'Eigenmodes', sprintf('Computing %s eigenmodes...', Variant));
         eigenBar = onCleanup(@() bst_progress('stop'));  %#ok<NASGU>
-    end
-
-    % --- resolve subject / surface for the parent ---
-    [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', SurfaceFile);
-    if isempty(sSubject) || isempty(iSurface)
-        error('tess_eigen:surfaceNotFound', ...
-            'Could not resolve surface in current protocol: %s', SurfaceFile);
     end
 
     % --- find-or-create the operator node of the requested Variant ---
@@ -301,6 +317,73 @@ function OperatorFile = local_find_operator(sSubject, iSurface, Variant)
         catch
             % skip unreadable/missing entries
         end
+    end
+end
+
+% ----------------------------------------------------------------------------
+function EigenMat = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDirac)
+% Scan the parent surface's Eigen child nodes for a cached eigenbasis of the
+% requested Variant carrying at least K modes (and, for Dirac, matching Tau).
+% Returns the loaded EigenMat (with its stored OperatorFile reference) or [] if
+% none qualifies. The node may hold more than K modes; the caller truncates.
+    EigenMat = [];
+    if isempty(sSubject) || ~isfield(sSubject,'Surface') || isempty(sSubject.Surface) ...
+       || iSurface > numel(sSubject.Surface) ...
+       || ~isfield(sSubject.Surface(iSurface),'Eigen') ...
+       || isempty(sSubject.Surface(iSurface).Eigen)
+        return;
+    end
+    nodes = sSubject.Surface(iSurface).Eigen;
+    for k = 1:numel(nodes)
+        % Skip nodes whose registered Variant is set and does not match.
+        if isfield(nodes(k),'Variant') && ~isempty(nodes(k).Variant) ...
+           && ~strcmpi(nodes(k).Variant, Variant)
+            continue;
+        end
+        try
+            E = load(file_fullpath(nodes(k).FileName));
+        catch
+            continue;   % unreadable / missing entry
+        end
+        if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant);  continue; end
+        if ~isfield(E,'K') || isempty(E.K) || E.K < K;             continue; end
+        if isDirac && abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;  continue; end
+        % The basis must actually carry usable eigen data.
+        if ~isfield(E,'Phi') || isempty(E.Phi) || ~isfield(E,'Lambda') || isempty(E.Lambda)
+            continue;
+        end
+        EigenMat = E;
+        return;
+    end
+end
+
+% ----------------------------------------------------------------------------
+function E = local_truncate_eigen(E, K)
+% Truncate a (possibly larger) cached eigenbasis to its first K modes per
+% hemisphere. The basis is nested (ascending eigenvalues, B-orthonormal), so the
+% leading K columns are exactly the K-mode basis. No-op when E.K == K.
+    if ~isfield(E,'K') || isempty(E.K) || E.K <= K
+        return;
+    end
+    for hh = 1:numel(E.Phi)
+        if ~isempty(E.Phi{hh}) && size(E.Phi{hh},2) > K
+            E.Phi{hh} = E.Phi{hh}(:, 1:K);
+        end
+        if isfield(E,'Lambda') && hh <= numel(E.Lambda) ...
+           && ~isempty(E.Lambda{hh}) && numel(E.Lambda{hh}) > K
+            E.Lambda{hh} = E.Lambda{hh}(1:K);
+        end
+    end
+    E.K = K;
+end
+
+% ----------------------------------------------------------------------------
+function tau = local_eigen_tau(EigenMat, default)
+% Read Tau from an eigen node's Provenance, falling back to default if absent.
+    tau = default;
+    if isfield(EigenMat,'Provenance') && isstruct(EigenMat.Provenance) ...
+       && isfield(EigenMat.Provenance,'Tau') && ~isempty(EigenMat.Provenance.Tau)
+        tau = EigenMat.Provenance.Tau;
     end
 end
 
