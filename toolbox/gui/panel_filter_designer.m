@@ -239,27 +239,49 @@ function i_param_label_update(panelName, name)
 end
 
 
-%% ===== READ WIDGETS -> base design =====
-function base = BuildDesign(S, ctrl)
-    key = i_current_kernel(ctrl);
-    params = ReadParams(S, ctrl);
+%% ===== SINGLE WAVELET DESIGN (sections 1-2; never touches tiling) =====
+% Reads the Input + Filter-kernel controls into ONE designed wavelet. This is the
+% canonical design/exploration object. It carries no tiling fields.
+function wavelet = BuildWavelet(S, ctrl)
+    wavelet = struct('Kernel', i_current_kernel(ctrl), ...
+                     'Params', ReadParams(S, ctrl), ...
+                     'Direction', SeedDirection(S, ctrl), ...
+                     'Chirality', 0, 'Axis', [0 0 1]);
+    if S.isDirac
+        if ctrl.jChirPlus.isSelected()
+            wavelet.Chirality = +1;
+        elseif ctrl.jChirMinus.isSelected()
+            wavelet.Chirality = -1;
+        else
+            wavelet.Chirality = 0;
+        end
+    end
+end
+
+%% ===== SPECTRUM TILING OPTIONS (section 3; consumed by bst_filterbank_tiles) =====
+% Reads only the tiling controls. Separate from the wavelet design so the two cannot
+% corrupt one another: a single wavelet is rendered directly; tiling is an explicit,
+% opt-in transform of a finished wavelet.
+function opts = BuildTiling(S, ctrl)
     lam = S.Lambda;
     N = double(ctrl.jTiles.getValue());
     if N < 1; N = 1; end
-    base = struct('Kernel',key, 'Params',params, ...
-        'Direction', SeedDirection(S, ctrl), 'Chirality',0, 'Axis',[0 0 1], ...
-        'N',N, 'Spacing','geometric', ...
-        'LambdaRange',[max(eps,min(lam(lam>0))) max(lam)], 'Chiralities',[]);
-    if S.isDirac
-        if ctrl.jChirPlus.isSelected()
-            base.Chirality = +1;
-        elseif ctrl.jChirMinus.isSelected()
-            base.Chirality = -1;
-        else
-            base.Chirality = 0;
-        end
-        if ctrl.jChiSplit.isSelected(); base.Chiralities = [1 -1]; end
+    % Span the MEANINGFUL spectrum: exclude the near-zero degenerate kernel modes (the
+    % constant-quaternion null space, lambda ~ 1e-20) so the coarsest tile isn't a
+    % degenerate DC-only filter. Floor the lower bound at 1e-4 of the max eigenvalue.
+    hi  = max(lam);
+    pos = lam(lam > hi * 1e-4);
+    if isempty(pos); lo = max(eps, hi*1e-3); else; lo = min(pos); end
+    opts = struct('N', N, 'Spacing', 'geometric', 'LambdaRange', [lo hi], 'Chiralities', []);
+    if S.isDirac && ctrl.jChiSplit.isSelected()
+        opts.Chiralities = [1 -1];
     end
+end
+
+% A tiling is active only when the user opts in (more than one spectral tile, or a
+% chirality cross). Otherwise the design stays a single wavelet.
+function tf = i_is_tiling(opts)
+    tf = (opts.N > 1) || ~isempty(opts.Chiralities);
 end
 
 function d = SeedDirection(S, ctrl)
@@ -287,8 +309,14 @@ end
 function Refresh(panelName)
     [S, ctrl] = GetState(panelName);
     if isempty(S) || isempty(S.SeedCoeffs); return; end
-    base  = BuildDesign(S, ctrl);
-    Tiles = bst_filterbank_tiles(base);
+    % SINGLE-WAVELET path by default; the tiling module is invoked ONLY on opt-in.
+    wavelet = BuildWavelet(S, ctrl);
+    opts    = BuildTiling(S, ctrl);
+    if i_is_tiling(opts)
+        Tiles = bst_filterbank_tiles(wavelet, opts);   % spectrum tiling module
+    else
+        Tiles = wavelet;                                % one designed wavelet, as-is
+    end
     S.ActiveTile = min(max(1, S.ActiveTile), numel(Tiles));
     S.Tiles = Tiles;
     SetState(ctrl, S);
@@ -304,7 +332,7 @@ function Refresh(panelName)
     kernels = arrayfun(@(t) bst_eigfilter_kernel(t.Kernel, t.Params), Tiles, 'UniformOutput', false);
     bank = struct('Kernels', {kernels}, 'Active', S.ActiveTile, ...
                   'OnSelect', @(j) OnSelectTile(panelName, j));
-    view_eigfilter_response(bank, S.Lambda, sprintf('%s - %d tile(s)', i_current_kernel(ctrl), numel(Tiles)));
+    view_eigfilter_response(bank, S.Lambda, sprintf('%s - %d tile(s)', wavelet.Kernel, numel(Tiles)));
 end
 
 
@@ -392,34 +420,41 @@ end
 function LoadBank(panelName, loadBank) %#ok<DEFNU>
     [S, ctrl] = GetState(panelName);
     if isempty(S) || ~isfield(loadBank,'Tiling') || isempty(loadBank.Tiling); return; end
-    base = loadBank.Tiling;
-    % kernel
+    % saved Tiling = struct('Wavelet', <single design>, 'Opts', <tiling options>)
+    wavelet = loadBank.Tiling.Wavelet;
+    opts    = loadBank.Tiling.Opts;
+    % --- restore the single-wavelet design (sections 1-2) ---
     for k = 1:numel(ctrl.KernelKeys)
-        if strcmpi(ctrl.KernelKeys{k}, base.Kernel); ctrl.jKernel.setSelectedIndex(k-1); break; end
+        if strcmpi(ctrl.KernelKeys{k}, wavelet.Kernel); ctrl.jKernel.setSelectedIndex(k-1); break; end
     end
     BuildParamWidgets(ctrl, ctrl.hFig);
     [S, ctrl] = GetState(panelName);
     % scale sliders: closest mode index to each saved param value
-    if isfield(base,'Params') && isstruct(base.Params)
+    if isfield(wavelet,'Params') && isstruct(wavelet.Params)
         for i = 1:numel(S.ParamNames)
             nm = S.ParamNames{i};
-            if ~isfield(base.Params, nm); continue; end
+            if ~isfield(wavelet.Params, nm); continue; end
             js = ctrl.jParams.getClientProperty(['slider_' nm]);
             if isempty(js); continue; end
-            target = base.Params.(nm);
+            target = wavelet.Params.(nm);
             if strcmpi(nm,'beta'); lamWanted = target; else; lamWanted = 1/max(target,eps); end
             [~, k] = min(abs(S.Lambda - lamWanted));
             js.setValue(k);
         end
     end
-    if isfield(base,'N'); ctrl.jTiles.setValue(max(1, base.N)); end
-    if S.isDirac && isfield(base,'Chirality')
-        switch base.Chirality
+    if S.isDirac && isfield(wavelet,'Chirality')
+        switch wavelet.Chirality
             case 1,  ctrl.jChirPlus.setSelected(true);
             case -1, ctrl.jChirMinus.setSelected(true);
             otherwise, ctrl.jChirNone.setSelected(true);
         end
-        if isfield(base,'Chiralities') && ~isempty(base.Chiralities); ctrl.jChiSplit.setSelected(true); end
+    end
+    % --- restore the tiling options (section 3) ---
+    if isstruct(opts)
+        if isfield(opts,'N'); ctrl.jTiles.setValue(max(1, opts.N)); end
+        if S.isDirac && isfield(opts,'Chiralities') && ~isempty(opts.Chiralities)
+            ctrl.jChiSplit.setSelected(true);
+        end
     end
     iVertex = [];
     if isfield(loadBank,'Provenance') && isstruct(loadBank.Provenance) && isfield(loadBank.Provenance,'DesignVertex')
@@ -437,15 +472,20 @@ function OnSave(panelName) %#ok<DEFNU>
         java_dialog('warning', 'Seed the filter first (click a cortical vertex or pick a source map).', 'Save filterbank');
         return;
     end
-    base  = BuildDesign(S, ctrl);
-    Tiles = bst_filterbank_tiles(base);
+    wavelet = BuildWavelet(S, ctrl);
+    opts    = BuildTiling(S, ctrl);
+    if i_is_tiling(opts)
+        Tiles = bst_filterbank_tiles(wavelet, opts);   % materialize the bank via the module
+    else
+        Tiles = wavelet;                                % single wavelet
+    end
     fb = db_template('filterbankmat');
     fb.ParentEigen = S.EigenFile;
     fb.Variant     = S.Variant;
-    fb.Tiles       = Tiles;
-    fb.Tiling      = base;
+    fb.Tiles       = Tiles;                              % materialized bank (1 or N recipes)
+    fb.Tiling      = struct('Wavelet', wavelet, 'Opts', opts);   % regenerable: design + tiling
     fb.Provenance  = struct('DesignVertex', S.iVertex, 'ComputeDate', datestr(now,'yyyy-mm-dd HH:MM:SS'));
-    Comment = sprintf('%s filterbank (%d tile(s))', base.Kernel, numel(Tiles));
+    Comment = sprintf('%s filterbank (%d tile(s))', wavelet.Kernel, numel(Tiles));
     db_add_filterbank(S.iSubject, S.EigenFile, fb, Comment);
     S.ctxFn.Close();
 end

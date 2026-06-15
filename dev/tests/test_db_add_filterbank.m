@@ -9,14 +9,14 @@ function test_db_add_filterbank()
         'No eigen node on Subject01 surface 5; compute one first.');
     EigenFile = sSubject.Surface(iSurf).Eigen(1).FileName;
 
-    base = struct('Kernel','mexhat','Params',struct(),'Direction',[1 0 0], ...
-                  'Chirality',0,'Axis',[0 0 1],'N',4,'Spacing','geometric', ...
-                  'LambdaRange',[1 256],'Chiralities',0);
+    wavelet = struct('Kernel','mexhat','Params',struct('t',0.01),'Direction',[1 0 0], ...
+                     'Chirality',0,'Axis',[0 0 1]);
+    opts    = struct('N',4,'Spacing','geometric','LambdaRange',[1 256],'Chiralities',[]);
     fb = db_template('filterbankmat');
     fb.ParentEigen = file_short(EigenFile);
     fb.Variant     = 'Dirac';
-    fb.Tiles       = bst_filterbank_tiles(base);
-    fb.Tiling      = base;
+    fb.Tiles       = bst_filterbank_tiles(wavelet, opts);
+    fb.Tiling      = struct('Wavelet', wavelet, 'Opts', opts);
 
     iFb = db_add_filterbank(1, EigenFile, fb, 'TEST filterbank');
     nFail = nFail + chk('returns an index', ~isempty(iFb));

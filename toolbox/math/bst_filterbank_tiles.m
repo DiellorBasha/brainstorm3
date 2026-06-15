@@ -1,70 +1,79 @@
-function Tiles = bst_filterbank_tiles(base)
-% BST_FILTERBANK_TILES: Expand one base filter design into a spectrum-spanning bank.
+function Tiles = bst_filterbank_tiles(wavelet, opts)
+% BST_FILTERBANK_TILES: Replicate a single designed wavelet into a spectrum-spanning bank.
 %
-% USAGE:  Tiles = bst_filterbank_tiles(base)
+% USAGE:  Tiles = bst_filterbank_tiles(wavelet, opts)
 %
-% INPUT base (struct):
+% This is the SPECTRUM TILING module. It is deliberately separate from single-wavelet
+% design: it takes a FINISHED wavelet (the canonical design/exploration object) and an
+% options struct describing how to replicate it across the eigenvalue spectrum, and
+% returns a bank of wavelet recipes. It never reads any GUI state and never decides the
+% single wavelet itself — callers that only want one wavelet should use the wavelet
+% directly and not call this function.
+%
+% INPUT wavelet (struct) - one designed wavelet:
 %   .Kernel      kernel name in the bst_eigfilter registry (e.g. 'mexhat','heat')
-%   .Params      struct of fixed kernel params (the scale param is overwritten per tile)
-%   .Direction   [1x3] launch direction (Dirac); copied to every tile
-%   .Chirality   scalar 0 | +1 | -1 (the base sign; ignored if .Chiralities set)
+%   .Params      struct of kernel params (the scale param is set per tile when N>1)
+%   .Direction   [1x3] ambient launch direction (Dirac); copied to every tile
+%   .Chirality   scalar 0 | +1 | -1 (used when opts.Chiralities is empty)
 %   .Axis        [1x3] chirality axis (Dirac); copied to every tile
+%
+% INPUT opts (struct) - how to tile the spectrum:
 %   .N           number of spectral tiles (>=1)
 %   .Spacing     'geometric' (default) | 'linear' — spacing of tile centers in lambda
-%   .LambdaRange [lo hi] eigenvalue band the tiles tile (lo>0 for geometric)
-%   .Chiralities [] or 0 => single bank at .Chirality; a vector (e.g. [1 -1]) crosses
-%                every spectral tile with each listed sign (doubling/tripling the bank)
+%   .LambdaRange [lo hi] eigenvalue band the tiles span (lo>0 for geometric)
+%   .Chiralities [] => single chirality (= wavelet.Chirality); a vector (e.g. [1 -1])
+%                crosses every spectral tile with each listed sign
 %
 % OUTPUT:
 %   Tiles : 1xM struct array, each (Kernel,Params,Direction,Chirality,Axis), where
-%           M = N * max(1,numel(.Chiralities)). The scale parameter of .Params is set
-%           per tile so the tile CENTERS (the lambda of peak response) span LambdaRange.
-%
-% The scale param name and the center<->param map are read from the kernel family
-% (bandpass kernels like mexhat peak at lambda=1/t; heat uses t=1/center as a soft
-% cutoff; tikhonov uses beta as the cutoff). Unknown kernels fall back to a linear
-% sweep of the kernel's first metadata parameter.
+%           M = N * max(1,numel(opts.Chiralities)). When N>1 the scale parameter of each
+%           tile is set so the tile CENTERS (lambda of peak/cutoff) span LambdaRange.
+%           When N==1 the wavelet's own scale param is kept unchanged.
 %
 % SEE ALSO: bst_eigfilter_kernel, bst_dirac_eigenmodes_filter, panel_filter_designer
 %
 % Authors: Diellor Basha, 2026
 
-    if ~isfield(base,'N') || isempty(base.N) || base.N < 1, base.N = 1; end
-    if ~isfield(base,'Spacing') || isempty(base.Spacing), base.Spacing = 'geometric'; end
-    if ~isfield(base,'LambdaRange') || numel(base.LambdaRange) ~= 2, base.LambdaRange = [1 100]; end
-    if ~isfield(base,'Params') || ~isstruct(base.Params), base.Params = struct(); end
-    if ~isfield(base,'Direction') || isempty(base.Direction), base.Direction = [1 0 0]; end
-    if ~isfield(base,'Axis') || isempty(base.Axis), base.Axis = [0 0 1]; end
-    if ~isfield(base,'Chirality') || isempty(base.Chirality), base.Chirality = 0; end
-    if ~isfield(base,'Chiralities'), base.Chiralities = []; end
+    % --- normalize the single wavelet ---
+    if ~isfield(wavelet,'Params') || ~isstruct(wavelet.Params), wavelet.Params = struct(); end
+    if ~isfield(wavelet,'Direction') || isempty(wavelet.Direction), wavelet.Direction = [1 0 0]; end
+    if ~isfield(wavelet,'Axis') || isempty(wavelet.Axis), wavelet.Axis = [0 0 1]; end
+    if ~isfield(wavelet,'Chirality') || isempty(wavelet.Chirality), wavelet.Chirality = 0; end
 
-    lo = base.LambdaRange(1); hi = base.LambdaRange(2);
-    N  = base.N;
-    if strcmpi(base.Spacing,'geometric')
+    % --- normalize the tiling options ---
+    if (nargin < 2) || isempty(opts), opts = struct(); end
+    if ~isfield(opts,'N') || isempty(opts.N) || opts.N < 1, opts.N = 1; end
+    if ~isfield(opts,'Spacing') || isempty(opts.Spacing), opts.Spacing = 'geometric'; end
+    if ~isfield(opts,'LambdaRange') || numel(opts.LambdaRange) ~= 2, opts.LambdaRange = [1 100]; end
+    if ~isfield(opts,'Chiralities'), opts.Chiralities = []; end
+
+    N  = opts.N;
+    lo = opts.LambdaRange(1); hi = opts.LambdaRange(2);
+    if strcmpi(opts.Spacing,'geometric')
         if lo <= 0, lo = max(eps, hi*1e-3); end
         if N == 1, centers = sqrt(lo*hi); else, centers = exp(linspace(log(lo), log(hi), N)); end
     else
         if N == 1, centers = (lo+hi)/2; else, centers = linspace(lo, hi, N); end
     end
 
-    [scaleName, centerToParam] = i_scale_map(base.Kernel);
+    [scaleName, centerToParam] = i_scale_map(wavelet.Kernel);
 
-    signs = base.Chiralities;
-    if isempty(signs), signs = base.Chirality; end
+    signs = opts.Chiralities;
+    if isempty(signs), signs = wavelet.Chirality; end
 
     Tiles = repmat(i_blank_tile(), 1, N*numel(signs));
     t = 0;
     for s = 1:numel(signs)
         for j = 1:N
             t = t + 1;
-            p = base.Params;
-            % N==1 is the user's single designed wavelet: keep its scale param as-is.
-            % N>1 tiles the spectrum: each tile's scale is set from its spectral center.
+            p = wavelet.Params;
+            % N==1: keep the wavelet's designed scale. N>1: set each tile's scale from
+            % its spectral center so the bank spans LambdaRange.
             if N > 1
                 p.(scaleName) = centerToParam(centers(j));
             end
-            Tiles(t) = struct('Kernel', base.Kernel, 'Params', p, ...
-                'Direction', base.Direction(:).', 'Chirality', signs(s), 'Axis', base.Axis(:).');
+            Tiles(t) = struct('Kernel', wavelet.Kernel, 'Params', p, ...
+                'Direction', wavelet.Direction(:).', 'Chirality', signs(s), 'Axis', wavelet.Axis(:).');
         end
     end
 end
