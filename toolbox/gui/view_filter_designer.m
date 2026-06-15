@@ -52,9 +52,13 @@ function hFig = view_filter_designer(NodeFile)
     ctxFn.PushField = @(J) i_push_field(hFig, J);
     ctxFn.Close     = @() i_teardown(hFig);
 
-    % --- build + dock the panel, then link state ---
+    % --- build + dock the panel, make it the active tab ---
     bstPanel = panel_filter_designer('CreatePanel', EigenMat, EigenFile, hFig, ctxFn);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
+    try, gui_brainstorm('SetSelectedTab', 'FilterDesigner', 0); catch, end %#ok<CTCH>
+
+    % --- show the full 3D source vectors by default (Dirac design is vector-native) ---
+    try, figure_3d('SetShowSourceVectors', hFig, 1, 1); catch, end %#ok<CTCH>
 
     % --- link: closing the figure ends the session; clicks seed the delta ---
     set(hFig, 'CloseRequestFcn', @(h,e) i_teardown(h));
@@ -110,9 +114,11 @@ function i_push_field(hFig, J)
     setappdata(hFig, 'Surface', TessInfo);
     % the quiver shows the true vector field (per-vertex 3-vector)
     setappdata(hFig, 'QuiverVectorOverride', reshape(J, 3, [])');
-    % repaint
+    % repaint scalar magnitude + colormap
     panel_surface('UpdateSurfaceData', hFig);
     panel_surface('UpdateSurfaceColormap', hFig);
+    % re-plot the source-vector quiver from the new field (reads the override)
+    try, figure_3d('SetShowSourceVectors', hFig, 1, 1); catch, end %#ok<CTCH>
 end
 
 

@@ -8,10 +8,12 @@ function varargout = panel_filter_designer(varargin)
 % session state lives in the preview figure's appdata ('FilterDesignerState'), which
 % the orchestrator (view_filter_designer) creates and links via ctxFn callbacks.
 %
-% The Dirac structure exposes three filter axes (see bst_dirac, bst_dirac_eigenmodes_filter):
-% SCALE g(lambda) (shared eigfilter library), DIRECTION (seed quaternion), CHIRALITY
-% (helicity projector). The panel reads one base design, tiles the spectrum into a bank
-% (bst_filterbank_tiles), previews the selected tile live, and saves a recipe bank.
+% Workflow: the user designs ONE wavelet (kernel + scale + direction + chirality) and
+% sees it live on the cortex; optionally they then tile the spectrum into a small bank
+% of that wavelet at several scales. The Dirac structure exposes three filter axes:
+% SCALE g(lambda) (shared eigfilter library, driven here in mode-index space), DIRECTION
+% (the ambient 3D seed vector, set by azimuth/elevation sliders), and CHIRALITY (helicity
+% projector). Source vectors are full 3D ambient fields (never normal/tangent components).
 %
 % Dispatched subfunctions (panel_filter_designer('Name', args...)):
 %   CreatePanel(EigenMat, EigenFile, hFig, ctxFn) -> bstPanel
@@ -37,79 +39,101 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     panelName = 'FilterDesigner';
     isDirac = strcmpi(EigenMat.Variant, 'Dirac');
 
-    jPanel = gui_river([5 5], [3 8 8 8]);
+    jPanel = gui_river([4 4], [3 8 8 8]);
 
-    % --- operator (read-only) ---
-    gui_component('label', jPanel, '', ['<HTML><B>Operator:</B> ' EigenMat.Variant]);
+    % ===== WAVELET DESIGN =====
+    gui_component('label', jPanel, '', '<HTML><B>Design a single wavelet</B>');
+    gui_component('label', jPanel, 'br', ['Operator: ' EigenMat.Variant]);
 
     % --- input mode ---
     jPanel.add('br', JLabel('Input:'));
-    jInputDelta  = gui_component('radio', jPanel, 'tab',  'Delta (click vertex)');
+    jInputDelta  = gui_component('radio', jPanel, 'tab',  'Delta (click a vertex)');
     jInputSource = gui_component('radio', jPanel, 'br tab', 'Active source map');
     jInputDelta.setSelected(true);
     grpIn = ButtonGroup(); grpIn.add(jInputDelta); grpIn.add(jInputSource);
 
-    % --- kernel dropdown (from the registry) ---
-    names = bst_eigfilter_kernel('list');
+    % --- kernel dropdown (curated, friendly display names) ---
+    [keys, displays] = i_kernel_list();
     jPanel.add('br', JLabel('Kernel:'));
-    jKernel = gui_component('combobox', jPanel, 'tab', [], {names}, [], [], []);
+    jKernel = gui_component('combobox', jPanel, 'tab', [], {displays}, [], [], []);
 
-    % --- params sub-panel (rebuilt when the kernel changes) ---
+    % --- scale parameter sliders (rebuilt per kernel, in mode-index space) ---
     jParams = gui_river([2 2], [0 4 0 4]);
     jPanel.add('br hfill', jParams);
 
-    % --- direction + chirality (Dirac only) ---
-    jDir = []; jChir = [];
+    % --- seed direction (Dirac, delta mode): azimuth + elevation -> ambient 3D vector ---
+    jAz = []; jEl = []; jAzVal = []; jElVal = [];
     if isDirac
-        jPanel.add('br', JLabel('Direction:'));
-        jDir = gui_component('combobox', jPanel, 'tab', [], {{'Surface normal','Tangent','Ambient X'}}, [], [], []);
-        jPanel.add('br', JLabel('Chirality:'));
-        jChir = gui_component('combobox', jPanel, 'tab', [], {{'None','+ (right)','- (left)'}}, [], [], []);
+        gui_component('label', jPanel, 'br', '<HTML><I>Seed direction (ambient 3D)</I>');
+        jPanel.add('br', JLabel('Azimuth:'));
+        jAz    = i_slider(jPanel, 'tab hfill', 0, 360, 0);
+        jAzVal = gui_component('label', jPanel, '', '0&deg;');
+        jPanel.add('br', JLabel('Elevation:'));
+        jEl    = i_slider(jPanel, 'tab hfill', -90, 90, 0);
+        jElVal = gui_component('label', jPanel, '', '0&deg;');
     end
 
-    % --- tiling ---
+    % --- chirality (Dirac) ---
+    jChirNone = []; jChirPlus = []; jChirMinus = [];
+    if isDirac
+        jPanel.add('br', JLabel('Chirality:'));
+        jChirNone  = gui_component('radio', jPanel, 'tab', 'None');
+        jChirPlus  = gui_component('radio', jPanel, '', '+ right');
+        jChirMinus = gui_component('radio', jPanel, '', '- left');
+        jChirNone.setSelected(true);
+        grpCh = ButtonGroup(); grpCh.add(jChirNone); grpCh.add(jChirPlus); grpCh.add(jChirMinus);
+    end
+
+    % ===== SPECTRUM TILING (optional) + ACTIONS =====
+    gui_component('label', jPanel, 'br', ' ');
+    gui_component('label', jPanel, 'br', '<HTML><B>Spectrum tiling (optional)</B>');
     jPanel.add('br', JLabel('Tiles:'));
-    jTiles = gui_component('text', jPanel, 'tab', '4');
+    jTiles    = i_slider(jPanel, 'tab hfill', 1, 12, 1);
+    jTilesVal = gui_component('label', jPanel, '', '1 (single wavelet)');
     jChiSplit = gui_component('checkbox', jPanel, 'br', 'Cross with both chiralities');
     if ~isDirac; jChiSplit.setEnabled(false); end
+    jActiveTile = gui_component('label', jPanel, 'br', '');
 
-    % --- save / cancel ---
     jSave   = gui_component('button', jPanel, 'br right', 'Save bank');
     jCancel = gui_component('button', jPanel, '', 'Cancel');
 
-    % --- collect Java handles into sControls (hFig links to the appdata state) ---
-    ctrl = struct('jKernel',jKernel, 'jParams',jParams, 'jDir',jDir, 'jChir',jChir, ...
-                  'jTiles',jTiles, 'jChiSplit',jChiSplit, 'jInputDelta',jInputDelta, ...
-                  'jInputSource',jInputSource, 'jSave',jSave, 'jCancel',jCancel, 'hFig',hFig);
+    % --- collect Java handles ---
+    ctrl = struct('jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
+                  'jAz',jAz, 'jEl',jEl, 'jAzVal',jAzVal, 'jElVal',jElVal, ...
+                  'jChirNone',jChirNone, 'jChirPlus',jChirPlus, 'jChirMinus',jChirMinus, ...
+                  'jTiles',jTiles, 'jTilesVal',jTilesVal, 'jChiSplit',jChiSplit, ...
+                  'jActiveTile',jActiveTile, 'jInputDelta',jInputDelta, 'jInputSource',jInputSource, ...
+                  'jSave',jSave, 'jCancel',jCancel, 'hFig',hFig);
 
-    % --- initialise the session state on the preview figure ---
+    % --- session state on the preview figure ---
     [~, iSubject] = bst_get('EigenFile', EigenFile);
     if isempty(iSubject); iSubject = []; end
-    VertNormals = [];
-    try
-        sSurf = in_tess_bst(EigenMat.ParentSurface);
-        if isfield(sSurf,'VertNormals'); VertNormals = sSurf.VertNormals; end
-    catch
-    end
     S = struct('EigenMat',EigenMat, 'EigenFile',file_short(EigenFile), 'iSubject',iSubject, ...
                'Variant',EigenMat.Variant, 'isDirac',isDirac, 'ctxFn',ctxFn, ...
-               'Op',load(file_fullpath(EigenMat.OperatorFile)), 'VertNormals',VertNormals, ...
-               'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[], 'ParamFields',struct());
+               'Op',load(file_fullpath(EigenMat.OperatorFile)), ...
+               'Lambda',double(EigenMat.Lambda{1}(:)), ...
+               'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[], 'ParamNames',{{}});
     setappdata(hFig, 'FilterDesignerState', S);
 
-    % --- build the initial parameter widgets for the default kernel ---
+    % --- build the initial scale sliders for the default kernel ---
     BuildParamWidgets(ctrl, hFig);
 
     % --- wire callbacks ---
     java_setcb(jKernel,   'ActionPerformedCallback', @(h,e) OnKernelChanged(panelName));
-    java_setcb(jTiles,    'ActionPerformedCallback', @(h,e) Refresh(panelName));
     java_setcb(jChiSplit, 'ActionPerformedCallback', @(h,e) Refresh(panelName));
+    java_setcb(jTiles,    'StateChangedCallback',    @(h,e) i_tiles_label(panelName));
+    java_setcb(jTiles,    'MouseReleasedCallback',   @(h,e) Refresh(panelName));
     if isDirac
-        java_setcb(jDir,  'ActionPerformedCallback', @(h,e) ReseedAndRefresh(panelName));
-        java_setcb(jChir, 'ActionPerformedCallback', @(h,e) Refresh(panelName));
+        java_setcb(jAz, 'StateChangedCallback',  @(h,e) i_dir_label(panelName));
+        java_setcb(jEl, 'StateChangedCallback',  @(h,e) i_dir_label(panelName));
+        java_setcb(jAz, 'MouseReleasedCallback', @(h,e) ReseedAndRefresh(panelName));
+        java_setcb(jEl, 'MouseReleasedCallback', @(h,e) ReseedAndRefresh(panelName));
+        java_setcb(jChirNone,  'ActionPerformedCallback', @(h,e) Refresh(panelName));
+        java_setcb(jChirPlus,  'ActionPerformedCallback', @(h,e) Refresh(panelName));
+        java_setcb(jChirMinus, 'ActionPerformedCallback', @(h,e) Refresh(panelName));
     end
-    java_setcb(jSave,     'ActionPerformedCallback', @(h,e) OnSave(panelName));
-    java_setcb(jCancel,   'ActionPerformedCallback', @(h,e) OnCancel(panelName));
+    java_setcb(jSave,   'ActionPerformedCallback', @(h,e) OnSave(panelName));
+    java_setcb(jCancel, 'ActionPerformedCallback', @(h,e) OnCancel(panelName));
 
     bstPanelNew = BstPanel(panelName, jPanel, ctrl);
 end
@@ -129,55 +153,128 @@ function SetState(ctrl, S)
 end
 
 
-%% ===== PARAM WIDGETS (auto-built from kernel meta) =====
-function BuildParamWidgets(ctrl, hFig)
-    kname = char(ctrl.jKernel.getSelectedItem());
-    meta  = bst_eigfilter_kernel('info', kname);
-    ctrl.jParams.removeAll();
-    pf = struct();
-    fn = fieldnames(meta.params);
-    for i = 1:numel(fn)
-        d = meta.params.(fn{i});
-        ctrl.jParams.add('br', javax.swing.JLabel([fn{i} ':']));
-        jv = gui_component('text', ctrl.jParams, 'tab', num2str(d.default));
-        java_setcb(jv, 'ActionPerformedCallback', @(h,e) Refresh('FilterDesigner'));
-        pf.(fn{i}) = jv;
+%% ===== KERNEL LIST (curated, friendly names) =====
+function [keys, displays] = i_kernel_list()
+    keys = {'mexhat','dog','heat','inverse_heat','tikhonov'};
+    displays = cell(1, numel(keys));
+    for i = 1:numel(keys)
+        try
+            m = bst_eigfilter_kernel('info', keys{i});
+            displays{i} = m.display;
+        catch
+            displays{i} = keys{i};
+        end
     end
-    ctrl.jParams.revalidate(); ctrl.jParams.repaint();
-    S = getappdata(hFig, 'FilterDesignerState');
-    S.ParamFields = pf;
-    setappdata(hFig, 'FilterDesignerState', S);
 end
 
-function params = ReadParams(S)
-    params = struct();
-    fn = fieldnames(S.ParamFields);
-    for i = 1:numel(fn)
-        v = str2double(char(S.ParamFields.(fn{i}).getText()));
-        if ~isnan(v); params.(fn{i}) = v; end
+function key = i_current_kernel(ctrl)
+    idx = ctrl.jKernel.getSelectedIndex() + 1;          % java 0-based
+    idx = max(1, min(numel(ctrl.KernelKeys), idx));
+    key = ctrl.KernelKeys{idx};
+end
+
+
+%% ===== SCALE SLIDERS (mode-index space) =====
+function BuildParamWidgets(ctrl, hFig)
+    import javax.swing.*;
+    key  = i_current_kernel(ctrl);
+    meta = bst_eigfilter_kernel('info', key);
+    S = getappdata(hFig, 'FilterDesignerState');
+    K = numel(S.Lambda);
+    ctrl.jParams.removeAll();
+    pf = fieldnames(meta.params);
+    names = {};
+    for i = 1:numel(pf)
+        nm = pf{i};
+        ctrl.jParams.add('br', JLabel([i_param_label(nm) ':']));
+        js = i_slider(ctrl.jParams, 'tab hfill', 1, K, round(K/2));
+        jv = gui_component('label', ctrl.jParams, '', '');
+        % store handles as client properties so ReadParams can retrieve them
+        ctrl.jParams.putClientProperty(['slider_' nm], js);
+        ctrl.jParams.putClientProperty(['vlabel_' nm], jv);
+        java_setcb(js, 'StateChangedCallback',  @(h,e) i_param_label_update(ctrl.hFig, nm));
+        java_setcb(js, 'MouseReleasedCallback', @(h,e) Refresh('FilterDesigner'));
+        names{end+1} = nm; %#ok<AGROW>
     end
+    ctrl.jParams.revalidate(); ctrl.jParams.repaint();
+    S.ParamNames = names;
+    setappdata(hFig, 'FilterDesignerState', S);
+    for i = 1:numel(names); i_param_label_update(hFig, names{i}); end
+end
+
+function params = ReadParams(S, ctrl)
+    params = struct();
+    K = numel(S.Lambda);
+    for i = 1:numel(S.ParamNames)
+        nm = S.ParamNames{i};
+        js = ctrl.jParams.getClientProperty(['slider_' nm]);
+        if isempty(js); continue; end
+        k = max(1, min(K, double(js.getValue())));
+        params.(nm) = i_param_value(nm, S.Lambda(k));
+    end
+end
+
+function v = i_param_value(name, lamk)
+    % Map a mode-index's eigenvalue to the kernel's scale parameter.
+    if strcmpi(name, 'beta')
+        v = max(lamk, eps);            % tikhonov acts at lambda ~ beta
+    else
+        v = 1 ./ max(lamk, eps);       % heat/mexhat/dog: peak/cutoff at lambda = 1/t
+    end
+end
+
+function lab = i_param_label(name)
+    switch lower(name)
+        case 't',    lab = 'Scale (coarse-fine)';
+        case 't1',   lab = 'Coarse edge';
+        case 't2',   lab = 'Fine edge';
+        case 'beta', lab = 'Scale (coarse-fine)';
+        otherwise,   lab = name;
+    end
+end
+
+function i_param_label_update(hFig, name)
+    ctrl = bst_get('PanelControls', 'FilterDesigner');
+    if isempty(ctrl); return; end
+    S = getappdata(hFig, 'FilterDesignerState');
+    js = ctrl.jParams.getClientProperty(['slider_' name]);
+    jv = ctrl.jParams.getClientProperty(['vlabel_' name]);
+    if isempty(js) || isempty(jv); return; end
+    k = max(1, min(numel(S.Lambda), double(js.getValue())));
+    jv.setText(sprintf('mode %d', k));
 end
 
 
 %% ===== READ WIDGETS -> base design =====
 function base = BuildDesign(S, ctrl)
-    kname = char(ctrl.jKernel.getSelectedItem());
-    params = ReadParams(S);
-    lam = double(S.EigenMat.Lambda{1}(:));
-    N = round(str2double(char(ctrl.jTiles.getText())));
-    if isnan(N) || N < 1; N = 1; end
-    base = struct('Kernel',kname, 'Params',params, ...
-        'Direction',[1 0 0], 'Chirality',0, 'Axis',[0 0 1], ...
+    key = i_current_kernel(ctrl);
+    params = ReadParams(S, ctrl);
+    lam = S.Lambda;
+    N = double(ctrl.jTiles.getValue());
+    if N < 1; N = 1; end
+    base = struct('Kernel',key, 'Params',params, ...
+        'Direction', SeedDirection(S, ctrl), 'Chirality',0, 'Axis',[0 0 1], ...
         'N',N, 'Spacing','geometric', ...
-        'LambdaRange',[max(eps,min(lam)) max(lam)], 'Chiralities',[]);
+        'LambdaRange',[max(eps,min(lam(lam>0))) max(lam)], 'Chiralities',[]);
     if S.isDirac
-        switch char(ctrl.jChir.getSelectedItem())
-            case '+ (right)', base.Chirality = +1;
-            case '- (left)',  base.Chirality = -1;
-            otherwise,        base.Chirality = 0;
+        if ctrl.jChirPlus.isSelected()
+            base.Chirality = +1;
+        elseif ctrl.jChirMinus.isSelected()
+            base.Chirality = -1;
+        else
+            base.Chirality = 0;
         end
         if ctrl.jChiSplit.isSelected(); base.Chiralities = [1 -1]; end
     end
+end
+
+function d = SeedDirection(S, ctrl)
+    d = [1 0 0];
+    if ~S.isDirac || isempty(ctrl.jAz); return; end
+    az = double(ctrl.jAz.getValue());   % degrees
+    el = double(ctrl.jEl.getValue());
+    d = [cosd(el)*cosd(az), cosd(el)*sind(az), sind(el)];
+    nrm = norm(d); if nrm > 0; d = d / nrm; end
 end
 
 
@@ -195,20 +292,25 @@ end
 %% ===== RECOMPUTE + PUSH PREVIEW =====
 function Refresh(panelName)
     [S, ctrl] = GetState(panelName);
-    if isempty(S) || isempty(S.SeedCoeffs); return; end       % no seed yet
+    if isempty(S) || isempty(S.SeedCoeffs); return; end
     base  = BuildDesign(S, ctrl);
     Tiles = bst_filterbank_tiles(base);
     S.ActiveTile = min(max(1, S.ActiveTile), numel(Tiles));
     S.Tiles = Tiles;
     SetState(ctrl, S);
-    % push the active tile's field to the preview figure
     J = ComputeField(S, Tiles(S.ActiveTile));
     S.ctxFn.PushField(J);
-    % spectrum strip with all tiles, active highlighted, clickable
+    % active-tile indicator
+    if numel(Tiles) > 1
+        ctrl.jActiveTile.setText(sprintf('<HTML>Showing tile %d / %d', S.ActiveTile, numel(Tiles)));
+    else
+        ctrl.jActiveTile.setText('');
+    end
+    % spectrum strip: all tiles, active highlighted, clickable
     kernels = arrayfun(@(t) bst_eigfilter_kernel(t.Kernel, t.Params), Tiles, 'UniformOutput', false);
     bank = struct('Kernels', {kernels}, 'Active', S.ActiveTile, ...
                   'OnSelect', @(j) OnSelectTile(panelName, j));
-    view_eigfilter_response(bank, S.EigenMat.Lambda{1}, sprintf('%s tiles (n=%d)', base.Kernel, numel(Tiles)));
+    view_eigfilter_response(bank, S.Lambda, sprintf('%s - %d tile(s)', i_current_kernel(ctrl), numel(Tiles)));
 end
 
 
@@ -217,9 +319,9 @@ function SetSeedVertex(panelName, iVertex) %#ok<DEFNU>
     [S, ctrl] = GetState(panelName);
     if isempty(S); return; end
     nV = double(max(cellfun(@(x) max(x(:)), S.EigenMat.GlobalVertices)));
-    dirVec = ResolveDirection(S, ctrl, iVertex);
+    d = SeedDirection(S, ctrl);
     Jdelta = zeros(3*nV, 1);
-    Jdelta(3*(iVertex-1) + (1:3)) = dirVec(:);
+    Jdelta(3*(iVertex-1) + (1:3)) = d(:);
     [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, Jdelta, 'custom', ...
                   'TransferFn', @(l) ones(size(l)), 'ReturnCoeffs', true);
     S.SeedCoeffs = c;  S.iVertex = iVertex;
@@ -228,7 +330,6 @@ function SetSeedVertex(panelName, iVertex) %#ok<DEFNU>
 end
 
 function SetSeedSource(panelName, J) %#ok<DEFNU>
-    % Seed from a loaded unconstrained source frame J [3nV x 1] (the source-map input).
     [S, ctrl] = GetState(panelName);
     if isempty(S); return; end
     [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, J(:), 'custom', ...
@@ -239,33 +340,12 @@ function SetSeedSource(panelName, J) %#ok<DEFNU>
 end
 
 function ReseedAndRefresh(panelName)
-    % Direction changed: if a delta seed exists, re-project it with the new direction.
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(S) && ~isempty(S.iVertex)
-        SetSeedVertex(panelName, S.iVertex);
+        SetSeedVertex(panelName, S.iVertex);    % re-project the delta with the new direction
     else
         Refresh(panelName);
     end
-end
-
-function dirVec = ResolveDirection(S, ctrl, iVertex)
-    dirVec = [1 0 0];
-    if ~S.isDirac || isempty(ctrl.jDir); return; end
-    switch char(ctrl.jDir.getSelectedItem())
-        case 'Surface normal'
-            if ~isempty(S.VertNormals) && (iVertex <= size(S.VertNormals,1))
-                dirVec = S.VertNormals(iVertex, :);
-            end
-        case 'Tangent'
-            if ~isempty(S.VertNormals) && (iVertex <= size(S.VertNormals,1))
-                n = S.VertNormals(iVertex, :);
-                ref = [1 0 0]; if abs(n*ref') > 0.9; ref = [0 1 0]; end
-                dirVec = cross(n, ref);
-            end
-        otherwise   % 'Ambient X'
-            dirVec = [1 0 0];
-    end
-    nrm = norm(dirVec); if nrm > 0; dirVec = dirVec / nrm; end
 end
 
 
@@ -279,46 +359,70 @@ function OnSelectTile(panelName, j) %#ok<DEFNU>
 end
 
 
+%% ===== SMALL LIVE LABELS =====
+function i_tiles_label(panelName)
+    [S, ctrl] = GetState(panelName); %#ok<ASGLU>
+    if isempty(ctrl); return; end
+    n = double(ctrl.jTiles.getValue());
+    if n <= 1; ctrl.jTilesVal.setText('1 (single wavelet)');
+    else;      ctrl.jTilesVal.setText(sprintf('%d tiles', n)); end
+end
+
+function i_dir_label(panelName)
+    [S, ctrl] = GetState(panelName); %#ok<ASGLU>
+    if isempty(ctrl) || isempty(ctrl.jAz); return; end
+    ctrl.jAzVal.setText(sprintf('%d&deg;', double(ctrl.jAz.getValue())));
+    ctrl.jElVal.setText(sprintf('%d&deg;', double(ctrl.jEl.getValue())));
+end
+
+
+%% ===== ON KERNEL CHANGE =====
+function OnKernelChanged(panelName)
+    ctrl = bst_get('PanelControls', panelName);
+    if isempty(ctrl); return; end
+    BuildParamWidgets(ctrl, ctrl.hFig);
+    Refresh(panelName);
+end
+
+
 %% ===== LOAD A SAVED BANK INTO THE WIDGETS =====
 function LoadBank(panelName, loadBank) %#ok<DEFNU>
     [S, ctrl] = GetState(panelName);
     if isempty(S) || ~isfield(loadBank,'Tiling') || isempty(loadBank.Tiling); return; end
     base = loadBank.Tiling;
     % kernel
-    items = ctrl.jKernel.getModel();
-    for k = 0:items.getSize()-1
-        if strcmpi(char(items.getElementAt(k)), base.Kernel); ctrl.jKernel.setSelectedIndex(k); break; end
+    for k = 1:numel(ctrl.KernelKeys)
+        if strcmpi(ctrl.KernelKeys{k}, base.Kernel); ctrl.jKernel.setSelectedIndex(k-1); break; end
     end
     BuildParamWidgets(ctrl, ctrl.hFig);
     [S, ctrl] = GetState(panelName);
-    % params
+    % scale sliders: closest mode index to each saved param value
     if isfield(base,'Params') && isstruct(base.Params)
-        pf = fieldnames(S.ParamFields);
-        for i = 1:numel(pf)
-            if isfield(base.Params, pf{i}); S.ParamFields.(pf{i}).setText(num2str(base.Params.(pf{i}))); end
+        for i = 1:numel(S.ParamNames)
+            nm = S.ParamNames{i};
+            if ~isfield(base.Params, nm); continue; end
+            js = ctrl.jParams.getClientProperty(['slider_' nm]);
+            if isempty(js); continue; end
+            target = base.Params.(nm);
+            if strcmpi(nm,'beta'); lamWanted = target; else; lamWanted = 1/max(target,eps); end
+            [~, k] = min(abs(S.Lambda - lamWanted));
+            js.setValue(k);
         end
     end
-    % tiles
-    if isfield(base,'N'); ctrl.jTiles.setText(num2str(base.N)); end
-    % direction / chirality
-    if S.isDirac
-        if isfield(base,'Chirality')
-            switch base.Chirality
-                case 1,  ctrl.jChir.setSelectedItem('+ (right)');
-                case -1, ctrl.jChir.setSelectedItem('- (left)');
-                otherwise, ctrl.jChir.setSelectedItem('None');
-            end
+    if isfield(base,'N'); ctrl.jTiles.setValue(max(1, base.N)); end
+    if S.isDirac && isfield(base,'Chirality')
+        switch base.Chirality
+            case 1,  ctrl.jChirPlus.setSelected(true);
+            case -1, ctrl.jChirMinus.setSelected(true);
+            otherwise, ctrl.jChirNone.setSelected(true);
         end
         if isfield(base,'Chiralities') && ~isempty(base.Chiralities); ctrl.jChiSplit.setSelected(true); end
     end
-    % re-seed at the saved design vertex (if any) -> triggers a refresh
     iVertex = [];
     if isfield(loadBank,'Provenance') && isstruct(loadBank.Provenance) && isfield(loadBank.Provenance,'DesignVertex')
         iVertex = loadBank.Provenance.DesignVertex;
     end
-    if ~isempty(iVertex)
-        SetSeedVertex(panelName, iVertex);
-    end
+    if ~isempty(iVertex); SetSeedVertex(panelName, iVertex); end
 end
 
 
@@ -338,7 +442,7 @@ function OnSave(panelName) %#ok<DEFNU>
     fb.Tiles       = Tiles;
     fb.Tiling      = base;
     fb.Provenance  = struct('DesignVertex', S.iVertex, 'ComputeDate', datestr(now,'yyyy-mm-dd HH:MM:SS'));
-    Comment = sprintf('%s filterbank (%d tiles)', base.Kernel, numel(Tiles));
+    Comment = sprintf('%s filterbank (%d tile(s))', base.Kernel, numel(Tiles));
     db_add_filterbank(S.iSubject, S.EigenFile, fb, Comment);
     S.ctxFn.Close();
 end
@@ -346,4 +450,13 @@ end
 function OnCancel(panelName) %#ok<DEFNU>
     S = GetState(panelName);
     if ~isempty(S) && isfield(S,'ctxFn') && ~isempty(S.ctxFn); S.ctxFn.Close(); end
+end
+
+
+%% ===== JSLIDER HELPER =====
+function js = i_slider(jParent, constraints, mn, mx, val)
+    import javax.swing.*;
+    js = JSlider(mn, mx, val);
+    js.setPreferredSize(java_scaled('dimension', 130, 22));
+    jParent.add(constraints, js);
 end
