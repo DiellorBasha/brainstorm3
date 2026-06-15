@@ -1,4 +1,4 @@
-function [JFilt, h] = bst_dirac_eigenmodes_filter(EigenMat, MassCell, J, FilterType, varargin)
+function [JFilt, h, Coeffs] = bst_dirac_eigenmodes_filter(EigenMat, MassCell, J, FilterType, varargin)
 % BST_DIRAC_EIGENMODES_FILTER: Spectral filtering of a cortical VECTOR field in the
 % Dirac eigenmode domain (the vector analogue of bst_eigenmodes_filter).
 %
@@ -51,27 +51,35 @@ function [JFilt, h] = bst_dirac_eigenmodes_filter(EigenMat, MassCell, J, FilterT
 %
 % Authors: Diellor Basha, 2026
 
-    % --- parse chirality option (everything else forwarded to the gain function) ---
-    Chirality = [];
+    % --- parse Chirality / ReturnCoeffs / Coeffs options; the rest go to the gain ---
+    Chirality = [];  ReturnCoeffs = false;  CoeffsIn = [];  %#ok<NASGU>
     keep = true(1, numel(varargin));
     for i = 1:2:numel(varargin)
-        if ischar(varargin{i}) && strcmpi(varargin{i}, 'Chirality')
-            Chirality = varargin{i+1};
-            keep(i:i+1) = false;
+        if ischar(varargin{i})
+            switch lower(varargin{i})
+                case 'chirality',    Chirality    = varargin{i+1};          keep(i:i+1) = false;
+                case 'returncoeffs', ReturnCoeffs = logical(varargin{i+1}); keep(i:i+1) = false; %#ok<NASGU>
+                case 'coeffs',       CoeffsIn     = varargin{i+1};          keep(i:i+1) = false;
+            end
         end
     end
     gainArgs = varargin(keep);
 
-    % --- normalize J to [3*nVert x nTime] ---
+    % --- normalize J to [3*nVert x nTime] (J may be empty when Coeffs are supplied) ---
     nVert = double(max(cellfun(@(x) max(x(:)), EigenMat.GlobalVertices)));
     if (size(J,2) == 3) && (size(J,1) == nVert)
         J = reshape(J.', [], 1);                 % [nVert x 3] single frame -> [3nVert x 1]
     end
-    nTime = size(J, 2);
+    if ~isempty(CoeffsIn)
+        nTime = size(CoeffsIn{1}, 2);            % number of columns is set by the cached coeffs
+    else
+        nTime = size(J, 2);
+    end
     JFilt = zeros(3*nVert, nTime);
 
     nHemi = numel(EigenMat.Phi);
     h = cell(1, nHemi);
+    Coeffs = cell(1, nHemi);
     for hh = 1:nHemi
         Phi = double(EigenMat.Phi{hh});          % [4nVh x K]
         B   = MassCell{hh};                       % [4nVh x 4nVh]
@@ -79,13 +87,17 @@ function [JFilt, h] = bst_dirac_eigenmodes_filter(EigenMat, MassCell, J, FilterT
         gv  = EigenMat.GlobalVertices{hh}(:);
         nVh = size(Phi, 1) / 4;
 
-        % --- embed the hemisphere's 3-vectors as pure-imaginary quaternions ---
-        Jx = J(3*(gv-1)+1, :);  Jy = J(3*(gv-1)+2, :);  Jz = J(3*(gv-1)+3, :);
-        Psi = zeros(4*nVh, nTime);
-        Psi(2:4:end, :) = Jx;  Psi(3:4:end, :) = Jy;  Psi(4:4:end, :) = Jz;   % w rows = 0
-
-        % --- project, SCALE-filter, optional CHIRALITY, reconstruct ---
-        c = Phi' * (B * Psi);                              % [K x nTime]
+        % --- project (or use cached coeffs), SCALE-filter, optional CHIRALITY, reconstruct ---
+        if ~isempty(CoeffsIn)
+            c = CoeffsIn{hh};                              % cached projection (skip embed + project)
+        else
+            % embed the hemisphere's 3-vectors as pure-imaginary quaternions, then project
+            Jx = J(3*(gv-1)+1, :);  Jy = J(3*(gv-1)+2, :);  Jz = J(3*(gv-1)+3, :);
+            Psi = zeros(4*nVh, nTime);
+            Psi(2:4:end, :) = Jx;  Psi(3:4:end, :) = Jy;  Psi(4:4:end, :) = Jz;   % w rows = 0
+            c = Phi' * (B * Psi);                          % [K x nTime]
+        end
+        Coeffs{hh} = c;
         h{hh} = bst_eigenmodes_filter_gain(lam, FilterType, gainArgs{:});   % [K x 1]
         c = bsxfun(@times, h{hh}, c);
 
