@@ -72,8 +72,8 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok
     end
     jOpt.add(jSec1);
 
-    % ===== SECTION 2: FILTER KERNEL =====
-    [keys, displays] = i_kernel_list();
+    % ===== SECTION 2: FILTER KERNEL (shared helper) =====
+    [keys, displays] = bst_eigfilter_panel('Kernels');
     jSec2 = gui_river([2 2], [2 8 3 6], '2. Filter kernel');
     gui_component('label', jSec2, 'br', 'Kernel:');
     jKernel = gui_component('combobox', jSec2, 'br hfill', [], {displays}, [], [], []);
@@ -113,11 +113,11 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok
                'Op',load(file_fullpath(EigenMat.OperatorFile)), ...
                'Lambda',double(EigenMat.Lambda{1}(:)), ...
                'FrameU',Frame.U, 'FrameV',Frame.V, 'FrameN',Frame.N, ...
-               'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[], 'ParamNames',{{}});
+               'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[]);
     setappdata(hFig, 'WaveletDesignerState', S);
 
-    % --- build the initial scale sliders for the default kernel ---
-    BuildParamWidgets(ctrl, hFig);
+    % --- build the initial scale sliders for the default kernel (shared helper) ---
+    bst_eigfilter_panel('BuildSliders', jParams, keys{1}, S.Lambda, @() Refresh('WaveletDesigner'));
 
     % --- wire callbacks ---
     % JSlider: StateChangedCallback fires continuously during a drag; we update the cheap
@@ -154,114 +154,13 @@ function SetState(ctrl, S)
 end
 
 
-%% ===== KERNEL LIST (curated, friendly names) =====
-function [keys, displays] = i_kernel_list()
-    keys = {'mexhat','dog','heat','inverse_heat','tikhonov'};
-    displays = cell(1, numel(keys));
-    for i = 1:numel(keys)
-        try
-            m = bst_eigfilter_kernel('info', keys{i});
-            displays{i} = m.display;
-        catch
-            displays{i} = keys{i};
-        end
-    end
-end
-
-function key = i_current_kernel(ctrl)
-    idx = ctrl.jKernel.getSelectedIndex() + 1;          % java 0-based
-    idx = max(1, min(numel(ctrl.KernelKeys), idx));
-    key = ctrl.KernelKeys{idx};
-end
-
-
-%% ===== SCALE SLIDERS (mode-index space) =====
-function BuildParamWidgets(ctrl, hFig)
-    import javax.swing.*;
-    key  = i_current_kernel(ctrl);
-    meta = bst_eigfilter_kernel('info', key);
-    S = getappdata(hFig, 'WaveletDesignerState');
-    K = numel(S.Lambda);
-    ctrl.jParams.removeAll();
-    pf = fieldnames(meta.params);
-    names = {};
-    nP = numel(pf);
-    for i = 1:nP
-        nm = pf{i};
-        % Stagger default mode positions so multi-scale kernels (e.g. dog: t1,t2) start
-        % at DISTINCT scales rather than all at K/2 (which would make t1==t2).
-        defMode = max(1, min(K, round(K * i/(nP+1))));
-        % Title row "<label>: mode N" + a slider row capped by coarse ... fine.
-        [js, jTitle] = i_labeled_slider(ctrl.jParams, ...
-            sprintf('%s: mode %d', i_param_label(nm), defMode), 'coarse', 'fine', 1, K, defMode);
-        % store handles as client properties so ReadParams / labels can retrieve them
-        ctrl.jParams.putClientProperty(['slider_' nm], js);
-        ctrl.jParams.putClientProperty(['title_' nm], jTitle);
-        java_setcb(js, 'StateChangedCallback', @(h,e) OnParamSlider('WaveletDesigner', nm, h));
-        names{end+1} = nm; %#ok<AGROW>
-    end
-    ctrl.jParams.revalidate(); ctrl.jParams.repaint();
-    S.ParamNames = names;
-    setappdata(hFig, 'WaveletDesignerState', S);
-end
-
-function params = ReadParams(S, ctrl)
-    params = struct();
-    K = numel(S.Lambda);
-    for i = 1:numel(S.ParamNames)
-        nm = S.ParamNames{i};
-        js = ctrl.jParams.getClientProperty(['slider_' nm]);
-        if isempty(js); continue; end
-        k = max(1, min(K, double(js.getValue())));
-        params.(nm) = i_param_value(nm, S.Lambda(k));
-    end
-    % dog (difference of Gaussians) requires t1 < t2; the two sliders are independent,
-    % so order them and guarantee a strict separation regardless of slider positions.
-    if isfield(params,'t1') && isfield(params,'t2')
-        lo = min(params.t1, params.t2);
-        hi = max(params.t1, params.t2);
-        if hi <= lo * (1 + 1e-3); hi = lo * 1.5; end
-        params.t1 = lo; params.t2 = hi;
-    end
-end
-
-function v = i_param_value(name, lamk)
-    % Map a mode-index's eigenvalue to the kernel's scale parameter.
-    if strcmpi(name, 'beta')
-        v = max(lamk, eps);            % tikhonov acts at lambda ~ beta
-    else
-        v = 1 ./ max(lamk, eps);       % heat/mexhat/dog: peak/cutoff at lambda = 1/t
-    end
-end
-
-function lab = i_param_label(name)
-    switch lower(name)
-        case 't',    lab = 'Scale';
-        case 't1',   lab = 'Band edge 1';      % dog passband ends (mode space); math
-        case 't2',   lab = 'Band edge 2';      % orders them so t1 < t2 automatically
-        case 'beta', lab = 'Scale';
-        otherwise,   lab = name;
-    end
-end
-
-function i_param_label_update(panelName, name)
-    ctrl = bst_get('PanelControls', panelName);
-    if isempty(ctrl); return; end
-    S = getappdata(ctrl.hFig, 'WaveletDesignerState');
-    js = ctrl.jParams.getClientProperty(['slider_' name]);
-    jt = ctrl.jParams.getClientProperty(['title_' name]);
-    if isempty(js) || isempty(jt); return; end
-    k = max(1, min(numel(S.Lambda), double(js.getValue())));
-    jt.setText(sprintf('%s: mode %d', i_param_label(name), k));
-end
-
 
 %% ===== SINGLE WAVELET DESIGN (sections 1-2; never touches tiling) =====
 % Reads the Input + Filter-kernel controls into ONE designed wavelet. This is the
 % canonical design/exploration object. It carries no tiling fields.
 function wavelet = BuildWavelet(S, ctrl)
-    wavelet = struct('Kernel', i_current_kernel(ctrl), ...
-                     'Params', ReadParams(S, ctrl), ...
+    wavelet = struct('Kernel', bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys), ...
+                     'Params', bst_eigfilter_panel('ReadParams', ctrl.jParams, S.Lambda), ...
                      'Direction', SeedDirection(S, ctrl), ...
                      'Chirality', 0, 'Axis', [0 0 1]);
     if S.isDirac
@@ -400,11 +299,6 @@ end
 
 
 %% ===== GATED SLIDER HANDLERS (label live; recompute on settle) =====
-function OnParamSlider(panelName, nm, js)
-    i_param_label_update('WaveletDesigner', nm);
-    if ~js.getValueIsAdjusting(); Refresh(panelName); end
-end
-
 function OnTilesSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl)
@@ -429,7 +323,9 @@ end
 function OnKernelChanged(panelName)
     ctrl = bst_get('PanelControls', panelName);
     if isempty(ctrl); return; end
-    BuildParamWidgets(ctrl, ctrl.hFig);
+    S = getappdata(ctrl.hFig, 'WaveletDesignerState');
+    key = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    bst_eigfilter_panel('BuildSliders', ctrl.jParams, key, S.Lambda, @() Refresh('WaveletDesigner'));
     Refresh(panelName);
 end
 
@@ -445,12 +341,13 @@ function LoadBank(panelName, loadBank) %#ok<DEFNU>
     for k = 1:numel(ctrl.KernelKeys)
         if strcmpi(ctrl.KernelKeys{k}, wavelet.Kernel); ctrl.jKernel.setSelectedIndex(k-1); break; end
     end
-    BuildParamWidgets(ctrl, ctrl.hFig);
+    bst_eigfilter_panel('BuildSliders', ctrl.jParams, wavelet.Kernel, S.Lambda, @() Refresh('WaveletDesigner'));
     [S, ctrl] = GetState(panelName);
     % scale sliders: closest mode index to each saved param value
     if isfield(wavelet,'Params') && isstruct(wavelet.Params)
-        for i = 1:numel(S.ParamNames)
-            nm = S.ParamNames{i};
+        pnames = bst_eigfilter_panel('ParamNames', ctrl.jParams);
+        for i = 1:numel(pnames)
+            nm = pnames{i};
             if ~isfield(wavelet.Params, nm); continue; end
             js = ctrl.jParams.getClientProperty(['slider_' nm]);
             if isempty(js); continue; end
