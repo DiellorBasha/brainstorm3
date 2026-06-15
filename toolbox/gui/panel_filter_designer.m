@@ -56,15 +56,14 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     jChirNone = []; jChirPlus = []; jChirMinus = [];
     if isDirac
         % seed direction: azimuth + elevation -> full ambient 3D unit vector
+        % (title+value on one row; the slider gets its own full-width row)
         gui_component('label', jPanel, 'br tab', '<HTML><I>Seed direction (ambient 3D)</I>');
-        jPanel.add('br tab', JLabel('Azimuth:'));
-        jAz    = i_slider(jPanel, 'tab hfill', 0, 360, 0);
-        jAzVal = gui_component('label', jPanel, '', '0&deg;');
-        jPanel.add('br tab', JLabel('Elevation:'));
-        jEl    = i_slider(jPanel, 'tab hfill', -90, 90, 0);
-        jElVal = gui_component('label', jPanel, '', '0&deg;');
+        jAzVal = gui_component('label', jPanel, 'br tab', 'Azimuth: 0&deg;');
+        jAz    = i_slider(jPanel, 'br hfill', 0, 360, 0);
+        jElVal = gui_component('label', jPanel, 'br tab', 'Elevation: 0&deg;');
+        jEl    = i_slider(jPanel, 'br hfill', -90, 90, 0);
         % chirality (helicity of the reconstructed vector field; None = real field)
-        jPanel.add('br tab', JLabel('Chirality:'));
+        gui_component('label', jPanel, 'br tab', 'Chirality:');
         jChirNone  = gui_component('radio', jPanel, 'tab', 'None');
         jChirPlus  = gui_component('radio', jPanel, '', '+ right');
         jChirMinus = gui_component('radio', jPanel, '', '- left');
@@ -75,16 +74,15 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     % ===== SECTION 2: FILTER KERNEL =====
     gui_component('label', jPanel, 'br', '<HTML><B>2. Filter kernel</B>');
     [keys, displays] = i_kernel_list();
-    jPanel.add('br tab', JLabel('Kernel:'));
-    jKernel = gui_component('combobox', jPanel, 'tab', [], {displays}, [], [], []);
+    gui_component('label', jPanel, 'br tab', 'Kernel:');
+    jKernel = gui_component('combobox', jPanel, 'br tab hfill', [], {displays}, [], [], []);
     jParams = gui_river([2 2], [0 4 0 4]);        % scale sliders, rebuilt per kernel
     jPanel.add('br tab hfill', jParams);
 
     % ===== SECTION 3: SPECTRUM TILING (optional) =====
     gui_component('label', jPanel, 'br', '<HTML><B>3. Spectrum tiling (optional)</B>');
-    jPanel.add('br tab', JLabel('Tiles:'));
-    jTiles    = i_slider(jPanel, 'tab hfill', 1, 12, 1);
-    jTilesVal = gui_component('label', jPanel, '', '1 (single wavelet)');
+    jTilesVal = gui_component('label', jPanel, 'br tab', 'Tiles: 1 (single wavelet)');
+    jTiles    = i_slider(jPanel, 'br hfill', 1, 12, 1);
     jChiSplit = gui_component('checkbox', jPanel, 'br tab', 'Cross with both chiralities');
     if ~isDirac; jChiSplit.setEnabled(false); end
     jActiveTile = gui_component('label', jPanel, 'br tab', '');
@@ -186,12 +184,15 @@ function BuildParamWidgets(ctrl, hFig)
         % Stagger default mode positions so multi-scale kernels (e.g. dog: t1,t2) start
         % at DISTINCT scales rather than all at K/2 (which would make t1==t2).
         defMode = max(1, min(K, round(K * i/(nP+1))));
-        ctrl.jParams.add('br', JLabel([i_param_label(nm) ':']));
-        js = i_slider(ctrl.jParams, 'tab hfill', 1, K, defMode);
-        jv = gui_component('label', ctrl.jParams, '', sprintf('mode %d', defMode));
-        % store handles as client properties so ReadParams can retrieve them
+        % Row 1: "<label>: mode N" (title + live value together).
+        jTitle = gui_component('label', ctrl.jParams, 'br', sprintf('%s: mode %d', i_param_label(nm), defMode));
+        % Row 2: coarse [====== slider ======] fine
+        gui_component('label', ctrl.jParams, 'br', 'coarse');
+        js = i_slider(ctrl.jParams, 'hfill', 1, K, defMode);
+        gui_component('label', ctrl.jParams, '', 'fine');
+        % store handles as client properties so ReadParams / labels can retrieve them
         ctrl.jParams.putClientProperty(['slider_' nm], js);
-        ctrl.jParams.putClientProperty(['vlabel_' nm], jv);
+        ctrl.jParams.putClientProperty(['title_' nm], jTitle);
         java_setcb(js, 'StateChangedCallback', @(h,e) OnParamSlider('FilterDesigner', nm, h));
         names{end+1} = nm; %#ok<AGROW>
     end
@@ -231,10 +232,10 @@ end
 
 function lab = i_param_label(name)
     switch lower(name)
-        case 't',    lab = 'Scale (coarse-fine)';
+        case 't',    lab = 'Scale';
         case 't1',   lab = 'Band edge 1';      % dog passband ends (mode space); math
         case 't2',   lab = 'Band edge 2';      % orders them so t1 < t2 automatically
-        case 'beta', lab = 'Scale (coarse-fine)';
+        case 'beta', lab = 'Scale';
         otherwise,   lab = name;
     end
 end
@@ -244,10 +245,10 @@ function i_param_label_update(panelName, name)
     if isempty(ctrl); return; end
     S = getappdata(ctrl.hFig, 'FilterDesignerState');
     js = ctrl.jParams.getClientProperty(['slider_' name]);
-    jv = ctrl.jParams.getClientProperty(['vlabel_' name]);
-    if isempty(js) || isempty(jv); return; end
+    jt = ctrl.jParams.getClientProperty(['title_' name]);
+    if isempty(js) || isempty(jt); return; end
     k = max(1, min(numel(S.Lambda), double(js.getValue())));
-    jv.setText(sprintf('mode %d', k));
+    jt.setText(sprintf('%s: mode %d', i_param_label(name), k));
 end
 
 
@@ -403,8 +404,8 @@ function OnTilesSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl)
         n = double(ctrl.jTiles.getValue());
-        if n <= 1; ctrl.jTilesVal.setText('1 (single wavelet)');
-        else;      ctrl.jTilesVal.setText(sprintf('%d tiles', n)); end
+        if n <= 1; ctrl.jTilesVal.setText('Tiles: 1 (single wavelet)');
+        else;      ctrl.jTilesVal.setText(sprintf('Tiles: %d', n)); end
     end
     if ~js.getValueIsAdjusting(); Refresh(panelName); end
 end
@@ -412,8 +413,8 @@ end
 function OnDirSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl) && ~isempty(ctrl.jAz)
-        ctrl.jAzVal.setText(sprintf('%d&deg;', double(ctrl.jAz.getValue())));
-        ctrl.jElVal.setText(sprintf('%d&deg;', double(ctrl.jEl.getValue())));
+        ctrl.jAzVal.setText(sprintf('Azimuth: %d&deg;', double(ctrl.jAz.getValue())));
+        ctrl.jElVal.setText(sprintf('Elevation: %d&deg;', double(ctrl.jEl.getValue())));
     end
     if ~js.getValueIsAdjusting(); ReseedAndRefresh(panelName); end
 end
@@ -512,6 +513,8 @@ end
 function js = i_slider(jParent, constraints, mn, mx, val)
     import javax.swing.*;
     js = JSlider(mn, mx, val);
-    js.setPreferredSize(java_scaled('dimension', 130, 22));
+    % Small preferred width: 'hfill' stretches the slider to the available row width, so a
+    % large preferred size is what pushed the right edge past the narrow tools-tab panel.
+    js.setPreferredSize(java_scaled('dimension', 40, 22));
     jParent.add(constraints, js);
 end
