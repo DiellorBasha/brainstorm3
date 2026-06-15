@@ -1,25 +1,24 @@
 function hFig = view_helmholtz(SrcResultsFile, varargin)
-% VIEW_HELMHOLTZ: Dedicated Helmholtz/vorticity view of a Dirac source map. Shows a
-% switchable signed scalar (curl/div/psi/phi/|field|) on the cortex with field-quiver +
-% vortex-core overlays. The decomposition runs ON THE ACTIVE FRAME ONLY: the cotan
-% Poisson factor is built once (bst_dirac_helmholtz Prepare) and each time the cursor
-% moves the displayed frame is decomposed on the fly (Frame) and cached. The whole-series
-% version belongs in a batch process_ (not here).
+% VIEW_HELMHOLTZ: Helmholtz/vorticity view of a Dirac source map. Opens the NATIVE
+% unconstrained-source display (the real vector field + norm, exactly like "Display on
+% cortex") and lets a control panel swap the scalar that colors the cortex:
+%   Norm (|J|, native)  /  Curl.n (vorticity)  /  Divergence  /  Stream psi  /  Potential phi
+% The signed Helmholtz scalars are decomposed on the ACTIVE FRAME ONLY (cached Cholesky
+% factor; recomputed as the time cursor moves) and shown with a diverging colormap; the
+% native source vectors and the optional vortex-core markers stay in sync.
 %
 % USAGE:
-%   hFig = view_helmholtz(SrcResultsFile)            % launch on a 3-component source results
-%   view_helmholtz('SetScalar', hFig, scalarName)    % dispatched from panel_helmholtz
-%   view_helmholtz('SetLayers', hFig, showCores, showQuiver)
+%   hFig = view_helmholtz(SrcResultsFile)            % launch on a 3-component Dirac source
+%   view_helmholtz('SetScalar', hFig, scalarName)    % 'Norm'|'Curl'|'Div'|'Psi'|'Phi'
+%   view_helmholtz('SetCores',  hFig, showCores)
 %   view_helmholtz('Close', hFig)
-%   view_helmholtz('UpdateFrame', hFig)              % the time-cursor overlay hook
+%   view_helmholtz('UpdateFrame', hFig)              % the time-cursor hook
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    % dispatch string-first calls (from the panel / the overlay hook). The frame/overlay
-    % updaters need a live figure: ignore stale calls whose handle is gone (panel outliving
-    % a deleted figure). Close runs regardless (it tears the panel down).
-    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetScalar','SetLayers','Close','UpdateFrame'}))
-        if any(strcmp(SrcResultsFile, {'SetScalar','SetLayers','UpdateFrame'})) && ...
+    % dispatch string-first calls; the frame/overlay updaters need a live figure
+    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetScalar','SetCores','Close','UpdateFrame'}))
+        if any(strcmp(SrcResultsFile, {'SetScalar','SetCores','UpdateFrame'})) && ...
                 (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
             return;
         end
@@ -27,11 +26,9 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
         return;
     end
 
-    % Resolve the source results; load it if it is not already in a DataSet (the view is
-    % launched from the database tree node). Use the FULL loader so kernel links resolve
-    % their imaging kernel + recordings (the light loader leaves nComponents/kernel unset).
-    % A bare shared kernel has no recordings -> LoadResultsFileFull errors (no time); we
-    % catch that and tell the user to open a recordings link instead.
+    % Resolve + load the source (the tree node may not be loaded). Use the FULL loader so
+    % a Dirac kernel link resolves its imaging kernel + recordings; a bare shared kernel
+    % (no recordings) errors -> tell the user to open a recordings link.
     [iDS, iResult] = bst_memory('GetDataSetResult', SrcResultsFile);
     if isempty(iResult)
         try
@@ -57,55 +54,32 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     LBO   = i_op(SurfaceFile, 'Laplace-Beltrami');
     Surf  = in_tess_bst(SurfaceFile, 0);
     nV = size(Surf.Vertices,1);
-    % size sanity: the in-memory field (kernel or full) must match the surface
-    if ~isempty(R.ImageGridAmp) && (size(R.ImageGridAmp,1) ~= 3*nV)
-        bst_progress('stop'); bst_error('Field size mismatch with surface.', 'Helmholtz view', 0); return;
-    end
     bst_progress('text', 'Factorizing the cotan operator...');
     Op = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);   % ONE Cholesky factor, reused per frame
-
-    % decompose the CURRENTLY-DISPLAYED frame only
-    fullTime = bst_memory('GetTimeVector', iDS, iResult);
-    nT = numel(fullTime);
-    [~, iT0] = bst_memory('GetTimeVector', iDS, iResult, 'CurrentTimeIndex');
-    if isempty(iT0) || iT0 < 1; iT0 = 1; end
-    Jt0 = double(bst_memory('GetResultsValues', iDS, iResult, [], iT0, 0));   % [3nV x 1]
-    if size(Jt0,1) ~= 3*nV
-        bst_progress('stop');
-        bst_error('Source field does not match the surface (vertex count).', 'Helmholtz view', 0); return;
-    end
-    Ht0 = bst_dirac_helmholtz('Frame', Op, Jt0);
     bst_progress('stop');
 
-    % dedicated figure: a 1-component results acts as the time-aware, colormapped host.
-    % Its ImageGridAmp is a placeholder (seeded non-zero so the native pipeline never warns
-    % "all values null"); the displayed scalar is set per frame via TessInfo.Data below.
-    Cache = containers.Map('KeyType','double', 'ValueType','any');
-    Cache(iT0) = Ht0;
-    tmpFile = i_make_scalar_results(SurfaceFile, repmat(Ht0.Curl, 1, nT), fullTime);
-    [hFig, iDSp, iResp] = i_open(SurfaceFile, tmpFile);
+    % open the NATIVE source display (vector field + norm) and show the vectors
+    [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResultsFile, [], 'NewFigure');
     if isempty(hFig); return; end
     iTess = i_find_tess(hFig);
-    St = struct('Op',Op, 'srcDS',iDS, 'srcResult',iResult, 'Scalar','Curl', ...
-                'ShowCores',true, 'ShowQuiver',false, 'TmpFile',tmpFile, ...
-                'iDS',iDSp, 'iResult',iResp, 'nV',nV, 'iTess',iTess, 'Cache',Cache);
-    setappdata(hFig, 'HelmholtzState', St);
+    try, figure_3d('SetShowSourceVectors', hFig, iTess, 1); catch, end %#ok<CTCH>
 
-    % the active frame is decomposed + recolored here; this also rides the time cursor
-    % (panel_surface UpdateSurfaceData fires CustomOverlayFcn on every cursor move)
-    setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));
+    St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Scalar','Norm', ...
+                'ShowCores',true, 'iTess',iTess, 'nV',nV, ...
+                'Cache',containers.Map('KeyType','double','ValueType','any'));
+    setappdata(hFig, 'HelmholtzState', St);
+    setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));   % rides the time cursor
     set(hFig, 'CloseRequestFcn', @(h,e) Close(h));
     UpdateFrame(hFig);
 
-    % dock the control panel (clear any stale prior instance first so its controls do not
-    % linger pointing at a deleted figure)
+    % dock the control panel (clear any stale prior instance first)
     gui_hide('Helmholtz');
     bstPanel = panel_helmholtz('CreatePanel', hFig);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Helmholtz', 0); catch, end %#ok<CTCH>
 end
 
-%% ===== active-frame decompose + recolor + overlays (the time hook) =====
+%% ===== active-frame override of the cortex scalar + vectors + cores (the time hook) =====
 function UpdateFrame(hFig)
     if isempty(hFig) || ~ishandle(hFig); return; end
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
@@ -113,75 +87,79 @@ function UpdateFrame(hFig)
     hAx = hAx(1);
     TessInfo = getappdata(hFig,'Surface');
     if isempty(TessInfo) || (St.iTess > numel(TessInfo)) || ~ishandle(TessInfo(St.iTess).hPatch); return; end
-    % current frame -> decompose on demand (cache visited frames)
+    % current source frame
     [~, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     if isempty(iT) || iT < 1; iT = 1; end
-    if isKey(St.Cache, iT)
-        Ht = St.Cache(iT);
-    else
-        Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
-        Ht = bst_dirac_helmholtz('Frame', St.Op, Jt);
-        St.Cache(iT) = Ht;   % containers.Map is a handle: persists without setappdata
+    Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));   % [3nV x 1]
+    if size(Jt,1) ~= 3*St.nV; return; end
+    isSigned = ~strcmp(St.Scalar, 'Norm');
+    % decompose this frame only when a signed scalar or the cores are needed (cache it)
+    Ht = [];
+    if isSigned || St.ShowCores
+        if isKey(St.Cache, iT); Ht = St.Cache(iT);
+        else; Ht = bst_dirac_helmholtz('Frame', St.Op, Jt); St.Cache(iT) = Ht; end
     end
-    % recolor the cortex with the selected scalar for this frame
-    scal = Ht.(St.Scalar);
-    TessInfo(St.iTess).Data = scal;
-    TessInfo(St.iTess).DataMinMax = i_minmax(scal, St.Scalar);
-    setappdata(hFig, 'Surface', TessInfo);
-    panel_surface('UpdateSurfaceColormap', hFig);     % recolor only -- does NOT re-fire this hook
-    % overlays
-    V = get(TessInfo(St.iTess).hPatch, 'Vertices');
+    % --- cortex scalar: override with the signed Helmholtz field (Norm stays native) ---
+    if isSigned
+        scal = Ht.(St.Scalar);
+        TessInfo(St.iTess).Data        = scal;
+        TessInfo(St.iTess).DataMinMax  = i_minmax(scal);
+        TessInfo(St.iTess).ColormapType = 'stat2';     % signed diverging
+        setappdata(hFig, 'Surface', TessInfo);
+        panel_surface('UpdateSurfaceColormap', hFig);  % recolor only (no overlay re-fire)
+        TessInfo = getappdata(hFig,'Surface');
+    end
+    % --- native vectors: gate by their own magnitude regardless of the colored scalar ---
+    setappdata(hFig, 'QuiverVectorOverride', reshape(Jt, 3, [])');
+    try, figure_3d('PlotSourceVectors', hFig, St.iTess); catch, end %#ok<CTCH>
+    % --- vortex-core markers ---
     delete(findobj(hAx,'Tag','HelmholtzCore'));
-    delete(findobj(hAx,'Tag','HelmholtzQuiver'));
-    if St.ShowCores
+    if St.ShowCores && ~isempty(Ht)
+        V = get(TessInfo(St.iTess).hPatch, 'Vertices');
         for k = 1:numel(Ht.Cores)
             v = Ht.Cores(k).iVertex; col = [1 0 0]; if Ht.Cores(k).charge < 0; col = [0 0 1]; end
             line('Parent',hAx,'XData',V(v,1),'YData',V(v,2),'ZData',V(v,3), 'Marker','o', ...
-                'MarkerSize',10,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
+                'MarkerSize',9,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
                 'Tag','HelmholtzCore','Clipping','off');
         end
         i_count_readout(Ht.Cores);
-    end
-    if St.ShowQuiver
-        nVv = size(V,1); step = max(1, round(nVv/2000)); vi = (1:step:nVv)';
-        bb = max(V,[],1)-min(V,[],1);  L = 0.05*norm(bb);
-        Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
-        d = [Jt(3*(vi-1)+1), Jt(3*(vi-1)+2), Jt(3*(vi-1)+3)];
-        nd = sqrt(sum(d.^2,2)); d = d ./ max(nd,eps);
-        P = V(vi,:); Q = P + L*d;
-        % one line object, segments NaN-separated: flatten [start; end; NaN] column-major
-        nanv = nan(numel(vi),1);
-        Xd = reshape([P(:,1) Q(:,1) nanv]', 1, []);
-        Yd = reshape([P(:,2) Q(:,2) nanv]', 1, []);
-        Zd = reshape([P(:,3) Q(:,3) nanv]', 1, []);
-        line('Parent',hAx, 'XData',Xd, 'YData',Yd, 'ZData',Zd, ...
-             'Color',[.2 .2 .2], 'Tag','HelmholtzQuiver', 'Clipping','off');
+    else
+        i_count_readout([]);
     end
 end
 
-%% ===== set the displayed scalar / layers (called by the panel) =====
+%% ===== panel actions =====
 function SetScalar(hFig, scalarName) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
     St.Scalar = scalarName; setappdata(hFig, 'HelmholtzState', St);
-    UpdateFrame(hFig);
+    if strcmp(scalarName, 'Norm')
+        % restore the native norm coloring (source colormap), then refresh overlays
+        bst_colormaps('AddColormapToFigure', hFig, 'source');
+        TessInfo = getappdata(hFig,'Surface');
+        TessInfo(St.iTess).ColormapType = 'source';
+        TessInfo(St.iTess).DataMinMax   = [];
+        setappdata(hFig,'Surface',TessInfo);
+        panel_surface('UpdateSurfaceData', hFig);      % recompute norm + recolor (fires UpdateFrame)
+    else
+        bst_colormaps('AddColormapToFigure', hFig, 'stat2');
+        UpdateFrame(hFig);
+    end
 end
-function SetLayers(hFig, showCores, showQuiver) %#ok<DEFNU>
+function SetCores(hFig, showCores) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
-    St.ShowCores = showCores; St.ShowQuiver = showQuiver;
-    setappdata(hFig, 'HelmholtzState', St);
+    St.ShowCores = showCores; setappdata(hFig, 'HelmholtzState', St);
     UpdateFrame(hFig);
 end
 
-%% ===== close (delete figure first while registered, then the temp node) =====
+%% ===== close (remove hooks, delete figure) =====
 function Close(hFig) %#ok<DEFNU>
-    if ~isempty(hFig) && all(ishandle(hFig)); St = getappdata(hFig, 'HelmholtzState'); else; St = []; end
     try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
-    try, rmappdata(hFig, 'CustomOverlayFcn'); catch, end %#ok<CTCH>
-    try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>
-    try, bst_figures('DeleteFigure', hFig, []); catch, delete(hFig); end %#ok<CTCH>
-    if ~isempty(St) && isfield(St,'TmpFile') && ~isempty(St.TmpFile)
-        try, file_delete(file_fullpath(St.TmpFile), 1); db_reload_studies(-3); catch, end %#ok<CTCH>
+    if ~isempty(hFig) && all(ishandle(hFig))
+        try, rmappdata(hFig, 'CustomOverlayFcn'); catch, end %#ok<CTCH>
+        try, rmappdata(hFig, 'QuiverVectorOverride'); catch, end %#ok<CTCH>
+        try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>
     end
+    try, bst_figures('DeleteFigure', hFig, []); catch, if ~isempty(hFig)&&all(ishandle(hFig)); delete(hFig); end; end %#ok<CTCH>
 end
 
 %% ===== helpers =====
@@ -196,32 +174,19 @@ function Op = i_op(SurfaceFile, variant)
     end
     if isempty(Op); tess_operators(SurfaceFile, variant); Op = i_op(SurfaceFile, variant); end
 end
-function tmpFile = i_make_scalar_results(SurfaceFile, scalar, Time)
-    R = db_template('resultsmat');
-    R.ImageGridAmp = scalar; R.ImagingKernel = []; R.nComponents = 1;
-    R.Time = Time; R.HeadModelType = 'surface'; R.SurfaceFile = file_short(SurfaceFile);
-    R.Comment = 'Helmholtz scalar';
-    tmpFile = db_add(-3, R);
-end
-function [hFig, iDS, iResult] = i_open(SurfaceFile, tmpFile)
-    [hFig, iDS] = view_surface_data(SurfaceFile, tmpFile, [], 'NewFigure');
-    [iDS2, iResult] = bst_memory('GetDataSetResult', tmpFile);
-    if ~isempty(iDS2); iDS = iDS2; end
-end
 function iTess = i_find_tess(hFig)
     TessInfo = getappdata(hFig, 'Surface');
     iTess = find(arrayfun(@(t) ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
     if isempty(iTess); iTess = 1; end
 end
-function mm = i_minmax(scal, scalarName)
-    if strcmp(scalarName, 'Fmag')
-        mm = [0, max(max(scal), eps)];                 % magnitude: one-sided
-    else
-        m = max(abs(scal));  if m == 0; m = eps; end
-        mm = [-m, m];                                  % signed: symmetric diverging
-    end
+function mm = i_minmax(scal)
+    m = max(abs(scal));  if m == 0; m = eps; end
+    mm = [-m, m];                                      % signed -> symmetric diverging
 end
 function i_count_readout(cores)
-    nPos = sum([cores.charge] > 0); nNeg = sum([cores.charge] < 0);
-    try, panel_helmholtz('SetReadout', sprintf('%d vortices (+), %d antivortices (-), net %+d', nPos, nNeg, nPos-nNeg)); catch, end %#ok<CTCH>
+    if isempty(cores); txt = 'no cores'; else
+        nPos = sum([cores.charge] > 0); nNeg = sum([cores.charge] < 0);
+        txt = sprintf('%d vortices (+), %d antivortices (-), net %+d', nPos, nNeg, nPos-nNeg);
+    end
+    try, panel_helmholtz('SetReadout', txt); catch, end %#ok<CTCH>
 end

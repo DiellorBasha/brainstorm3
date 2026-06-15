@@ -1,10 +1,10 @@
 function test_helmholtz_view()
-% Live: open the Helmholtz view on a synthetic 3-comp source. It must decompose only the
-% ACTIVE frame, display the selected scalar for that frame, match the core overlay count,
-% recompute on cursor move (on-demand cache grows), and close cleanly.
+% Live: open the Helmholtz view on a synthetic 3-comp source. It opens the NATIVE source
+% display (vector field + norm); switching the scalar overrides the cortex coloring with
+% the active-frame Helmholtz field (signed, diverging colormap) while the native vectors
+% stay; cores toggle; back to Norm restores the source colormap; close cleans up.
 % Authors: Diellor Basha, 2026
     nFail = 0;
-    % synthetic unconstrained source on cortex_20484V (3 time frames)
     SurfaceFile = bst_get('Subject',1).Surface(5).FileName;
     nV = size(in_tess_bst(SurfaceFile,0).Vertices,1);
     R = db_template('resultsmat'); rng(0);
@@ -12,55 +12,52 @@ function test_helmholtz_view()
     R.HeadModelType='surface'; R.SurfaceFile=file_short(SurfaceFile); R.Comment='SYN helmholtz src';
     srcFile = db_add(-3, R);
 
-    % launch like the database-tree node does: the results file is NOT loaded/displayed;
-    % view_helmholtz must load it itself and open its own figure
+    % launch like the tree node: the source is not pre-displayed; view loads + displays it
     hFig = view_helmholtz(srcFile); drawnow;
     nFail = nFail + chk('view opens (loads unshown results)', ishandle(hFig));
     St = getappdata(hFig,'HelmholtzState');
-    nFail = nFail + chk('default scalar is Curl', strcmp(St.Scalar,'Curl'));
+    hAx = findobj(hFig,'-depth',1,'Tag','Axes3D'); hAx=hAx(1);
+    nFail = nFail + chk('default scalar is Norm', strcmp(St.Scalar,'Norm'));
+    nFail = nFail + chk('native source vectors shown', ~isempty(findobj(hFig,'Tag','SourceVectors')));
+    nFail = nFail + chk('starts on the source colormap', strcmpi(getappdata(hFig,'Colormap').Type,'source'));
 
-    % the displayed scalar must equal the decomposition of the ACTIVE frame
+    % active-frame decomposition for comparison
     [~, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
     Ht = bst_dirac_helmholtz('Frame', St.Op, Jt);
-    TessInfo = getappdata(hFig,'Surface');
-    nFail = nFail + chk('displays active-frame Curl', isequal(TessInfo(St.iTess).Data, Ht.Curl));
-    nFail = nFail + chk('only active frame cached', St.Cache.Count == 1);
 
-    % switch to Psi -> recolors from the cached frame (no recompute)
-    view_helmholtz('SetScalar', hFig, 'Psi'); drawnow;
-    TessInfo = getappdata(hFig,'Surface');
-    nFail = nFail + chk('switch to Psi recolors active frame', isequal(TessInfo(St.iTess).Data, Ht.Psi));
+    % switch to Curl: cortex coloring becomes the signed curl, diverging colormap, vectors kept
+    view_helmholtz('SetScalar', hFig, 'Curl'); drawnow;
+    TI = getappdata(hFig,'Surface');
+    nFail = nFail + chk('Curl overrides cortex scalar', isequal(TI(St.iTess).Data, Ht.Curl));
+    nFail = nFail + chk('Curl uses a diverging colormap', strcmpi(getappdata(hFig,'Colormap').Type,'stat2'));
+    nFail = nFail + chk('Curl color axis symmetric', abs(sum(get(hAx,'CLim'))) < 1e-9*max(abs(get(hAx,'CLim'))) + eps);
+    nFail = nFail + chk('vectors still shown under Curl', ~isempty(findobj(hFig,'Tag','SourceVectors')));
 
-    % core overlay count matches the active frame's cores
-    hAx = findobj(hFig,'-depth',1,'Tag','Axes3D'); hAx=hAx(1);
-    nMarkers = numel(findobj(hAx,'Tag','HelmholtzCore'));
-    nFail = nFail + chk('core markers match active frame', nMarkers == numel(Ht.Cores));
+    % cores match the active frame, and toggle off
+    nFail = nFail + chk('core markers match active frame', numel(findobj(hAx,'Tag','HelmholtzCore')) == numel(Ht.Cores));
+    view_helmholtz('SetCores', hFig, false); drawnow;
+    nFail = nFail + chk('cores hide when toggled off', isempty(findobj(hAx,'Tag','HelmholtzCore')));
 
-    % field quiver toggles on/off without error (one NaN-separated line object)
-    view_helmholtz('SetLayers', hFig, true, true); drawnow;
-    nFail = nFail + chk('quiver renders when on', numel(findobj(hAx,'Tag','HelmholtzQuiver')) == 1);
-    view_helmholtz('SetLayers', hFig, true, false); drawnow;
-    nFail = nFail + chk('quiver removed when off', isempty(findobj(hAx,'Tag','HelmholtzQuiver')));
-
-    % time-following: not static, and a cursor move decomposes the new frame on demand
+    % back to Norm restores the source colormap; time-following stays live
+    view_helmholtz('SetScalar', hFig, 'Norm'); drawnow;
+    nFail = nFail + chk('Norm restores source colormap', strcmpi(getappdata(hFig,'Colormap').Type,'source'));
     nFail = nFail + chk('figure not static (follows time)', ~isequal(getappdata(hFig,'isStatic'),1));
+    view_helmholtz('SetScalar', hFig, 'Psi'); drawnow;
     panel_time('SetCurrentTime', 2.0); drawnow;
     [~, iT2] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     nFail = nFail + chk('cursor move decomposed a new frame', isKey(St.Cache, iT2) && (St.Cache.Count >= 2));
 
-    % close cleans up
+    % close cleans up + stale dispatch is ignored
     view_helmholtz('Close', hFig); drawnow;
     nFail = nFail + chk('panel closed', isempty(bst_get('PanelControls','Helmholtz')));
     nFail = nFail + chk('figure closed', ~ishandle(hFig));
-    % stale-handle guard: a dispatched updater call on the now-deleted figure must no-op
     okGuard = true;
-    try, view_helmholtz('SetLayers', hFig, true, true); catch; okGuard = false; end
     try, view_helmholtz('SetScalar', hFig, 'Div'); catch; okGuard = false; end
+    try, view_helmholtz('SetCores', hFig, true);   catch; okGuard = false; end
     nFail = nFail + chk('stale dispatch is ignored (no error)', okGuard);
-    % cleanup synthetic source
-    [~,iSt] = bst_get('AnyFile', srcFile); file_delete(file_fullpath(srcFile),1); db_reload_studies(iSt);
 
+    [~,iSt] = bst_get('AnyFile', srcFile); file_delete(file_fullpath(srcFile),1); db_reload_studies(iSt);
     fprintf('\n==== test_helmholtz_view: %d failed ====\n', nFail);
     if nFail > 0, error('test_helmholtz_view FAILED'); end
 end
