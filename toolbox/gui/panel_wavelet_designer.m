@@ -18,7 +18,6 @@ function varargout = panel_wavelet_designer(varargin)
 % Dispatched subfunctions (panel_wavelet_designer('Name', args...)):
 %   CreatePanel(EigenMat, EigenFile, hFig, ctxFn) -> bstPanel
 %   SetSeedVertex(panelName, iVertex)   seed a delta at a clicked vertex
-%   SetSeedSource(panelName, J)         seed the active loaded source frame [3nV x 1]
 %   GetState(panelName) -> S            the current session-state struct
 %   OnSelectTile(panelName, j)          make tile j the displayed tile
 %   OnSave(panelName) / OnCancel(panelName)
@@ -51,10 +50,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     % delta suffices; the Dirac operator acts on full 3D vector fields, so the input is
     % richer: a delta gets a 3D ambient DIRECTION, and (optionally) a CHIRALITY.
     jSec1 = gui_river([2 2], [2 8 3 6], '1. Input');
-    jInputDelta  = gui_component('radio', jSec1, 'br', 'Delta (click a vertex)');
-    jInputSource = gui_component('radio', jSec1, 'br', 'Active source map');
-    jInputDelta.setSelected(true);
-    grpIn = ButtonGroup(); grpIn.add(jInputDelta); grpIn.add(jInputSource);
+    gui_component('label', jSec1, 'br', '<HTML><I>Click a vertex on the cortex to place the wavelet.</I>');
 
     jAz = []; jEl = []; jAzVal = []; jElVal = [];
     jChirNone = []; jChirPlus = []; jChirMinus = [];
@@ -104,7 +100,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
                   'jAz',jAz, 'jEl',jEl, 'jAzVal',jAzVal, 'jElVal',jElVal, ...
                   'jChirNone',jChirNone, 'jChirPlus',jChirPlus, 'jChirMinus',jChirMinus, ...
                   'jTiles',jTiles, 'jTilesVal',jTilesVal, 'jChiSplit',jChiSplit, ...
-                  'jActiveTile',jActiveTile, 'jInputDelta',jInputDelta, 'jInputSource',jInputSource, ...
+                  'jActiveTile',jActiveTile, ...
                   'jSave',jSave, 'jCancel',jCancel, 'hFig',hFig);
 
     % --- session state on the preview figure ---
@@ -365,16 +361,6 @@ function SetSeedVertex(panelName, iVertex) %#ok<DEFNU>
     [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, Jdelta, 'custom', ...
                   'TransferFn', @(l) ones(size(l)), 'ReturnCoeffs', true);
     S.SeedCoeffs = c;  S.iVertex = iVertex;
-    SetState(ctrl, S);
-    Refresh(panelName);
-end
-
-function SetSeedSource(panelName, J) %#ok<DEFNU>
-    [S, ctrl] = GetState(panelName);
-    if isempty(S); return; end
-    [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, J(:), 'custom', ...
-                  'TransferFn', @(l) ones(size(l)), 'ReturnCoeffs', true);
-    S.SeedCoeffs = c;  S.iVertex = [];
     SetState(ctrl, S);
     Refresh(panelName);
 end
