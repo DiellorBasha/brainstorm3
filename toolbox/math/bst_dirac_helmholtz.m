@@ -3,16 +3,25 @@ function varargout = bst_dirac_helmholtz(varargin)
 % using the first-order intrinsic Dirac (div + curl) and a scalar-LBO Poisson solve
 % (potential phi, stream function psi), plus vortex-core detection (psi extrema).
 %
-% USAGE:
-%   H = bst_dirac_helmholtz(DiracOp, LBO, Surf, J)
-%       DiracOp : loaded Dirac operator node (.FirstOrder.Intrinsic{h}, .GlobalVertices{h})
-%       LBO     : loaded Laplace-Beltrami operator node (.Operator{h}=cotan K, .Mass{h}=M)
-%       Surf    : loaded surface (.Vertices, .Faces, .VertConn, .VertNormals)
-%       J       : [3nV x nT] source field over time (x,y,z per global vertex)
-%   Returns H with per-vertex x time fields .Curl .Div .Psi .Phi .Fmag [nV x nT] and
-%   H.Cores (1 x nT cell; each a struct array (iVertex, charge, omega) of psi extrema).
+% The expensive part (the cotan Poisson solve) is factorized ONCE via Prepare and reused
+% per frame via Frame -- so the interactive view decomposes only the displayed time step,
+% and a batch process can loop Frame over the series with a single factorization.
 %
-%   psi = bst_dirac_helmholtz('PoissonSolve', K, M, omega)   % K psi = M omega, mean-zero
+% USAGE:
+%   Op = bst_dirac_helmholtz('Prepare', DiracOp, LBO, Surf)
+%       Builds + caches the per-hemisphere operator pieces and the Cholesky factor of the
+%       pinned cotan stiffness. DiracOp/LBO are the loaded operator nodes, Surf the loaded
+%       tessellation (.Vertices, .Faces, .VertConn, .VertNormals).
+%
+%   Ht = bst_dirac_helmholtz('Frame', Op, Jt)
+%       Decomposes a single frame Jt [3nV x 1] -> struct with per-vertex [nV x 1] fields
+%       .Curl .Div .Psi .Phi .Fmag and .Cores (struct array (iVertex, charge, omega)).
+%
+%   H = bst_dirac_helmholtz(DiracOp, LBO, Surf, J)
+%       Whole-series convenience (Prepare once, Frame per column). J [3nV x nT]; returns
+%       H.Curl/Div/Psi/Phi/Fmag [nV x nT] and H.Cores (1 x nT cell). (Batch primitive.)
+%
+%   psi   = bst_dirac_helmholtz('PoissonSolve', K, M, omega)   % K psi = M omega, mean-zero
 %   cores = bst_dirac_helmholtz('FindCores', psi, VertConn, omega)
 %
 % Math (per hemisphere h): embed J as a pure-imaginary quaternion; q = D_int * psi gives
@@ -29,12 +38,16 @@ function varargout = bst_dirac_helmholtz(varargin)
     [varargout{1:nargout}] = Decompose(varargin{:});
 end
 
-function H = Decompose(DiracOp, LBO, Surf, J)
+%% ===== PREPARE: build + cache the static operator pieces and the Cholesky factor =====
+function Op = Prepare(DiracOp, LBO, Surf) %#ok<DEFNU>
     Vtx = Surf.Vertices;  Fcs = double(Surf.Faces);
-    nVtot = size(Vtx,1);  nT = size(J,2);
-    H = struct('Curl',zeros(nVtot,nT), 'Div',zeros(nVtot,nT), ...
-               'Psi',zeros(nVtot,nT),  'Phi',zeros(nVtot,nT),  'Fmag',zeros(nVtot,nT));
-    for hh = 1:numel(DiracOp.FirstOrder.Intrinsic)
+    nVtot = size(Vtx,1);
+    nH = numel(DiracOp.FirstOrder.Intrinsic);
+    Op = struct();
+    Op.nVtot    = nVtot;
+    Op.VertConn = Surf.VertConn;
+    [Op.D, Op.vH, Op.Nf, Op.Wfv, Op.M, Op.cholK, Op.free, Op.totMass] = deal(cell(1,nH));
+    for hh = 1:nH
         D  = DiracOp.FirstOrder.Intrinsic{hh};           % [4F x 4V]
         vH = double(DiracOp.GlobalVertices{hh}(:));
         nVh = numel(vH);
@@ -55,40 +68,72 @@ function H = Decompose(DiracOp, LBO, Surf, J)
         I = [Floc(:,1);Floc(:,2);Floc(:,3)];  Jc = [1:nFh,1:nFh,1:nFh]';
         Wfv = sparse(I, Jc, repmat(Af,3,1), nVh, nFh);
         Wfv = spdiags(1./max(sum(Wfv,2),eps),0,nVh,nVh) * Wfv;
-        % LBO pieces for this hemisphere
+        % LBO pieces + ONE Cholesky factor of the pinned (vertex 1 fixed) cotan stiffness
         K = LBO.Operator{hh};  M = LBO.Mass{hh};
-        for t = 1:nT
-            Jx = J(3*(vH-1)+1, t);  Jy = J(3*(vH-1)+2, t);  Jz = J(3*(vH-1)+3, t);
-            psiQ = zeros(4*nVh,1);
-            psiQ(2:4:end) = Jx; psiQ(3:4:end) = Jy; psiQ(4:4:end) = Jz;
-            q = D * psiQ;                                % [4F x 1]
-            divF = q(1:4:end);                           % w-part (per face)
-            curlF = [q(2:4:end), q(3:4:end), q(4:4:end)];% imag part (per face)
-            omF = sum(curlF .* Nf, 2);                   % vorticity per face
-            omV = Wfv * omF;                             % per vertex
-            dvV = Wfv * divF;
-            psi = PoissonSolve(K, M, omV);
-            phi = PoissonSolve(K, M, dvV);
-            H.Curl(vH,t) = omV;  H.Div(vH,t) = dvV;  H.Psi(vH,t) = psi;  H.Phi(vH,t) = phi;
-            H.Fmag(vH,t) = sqrt(Jx.^2 + Jy.^2 + Jz.^2);
-        end
-    end
-    H.Cores = cell(1, nT);
-    for t = 1:nT
-        H.Cores{t} = FindCores(H.Psi(:,t), Surf.VertConn, H.Curl(:,t));
+        free = (2:size(K,1))';
+        Op.D{hh}=D; Op.vH{hh}=vH; Op.Nf{hh}=Nf; Op.Wfv{hh}=Wfv; Op.M{hh}=M;
+        Op.cholK{hh}  = decomposition(K(free,free), 'chol');
+        Op.free{hh}   = free;
+        Op.totMass{hh}= sum(M(:));
     end
 end
 
+%% ===== FRAME: decompose a single time frame using the cached factor =====
+function Ht = Frame(Op, Jt) %#ok<DEFNU>
+    nVtot = Op.nVtot;
+    Ht = struct('Curl',zeros(nVtot,1), 'Div',zeros(nVtot,1), ...
+                'Psi',zeros(nVtot,1),  'Phi',zeros(nVtot,1),  'Fmag',zeros(nVtot,1));
+    for hh = 1:numel(Op.D)
+        vH = Op.vH{hh};  nVh = numel(vH);
+        Jx = Jt(3*(vH-1)+1);  Jy = Jt(3*(vH-1)+2);  Jz = Jt(3*(vH-1)+3);
+        psiQ = zeros(4*nVh,1);
+        psiQ(2:4:end) = Jx; psiQ(3:4:end) = Jy; psiQ(4:4:end) = Jz;
+        q = Op.D{hh} * psiQ;                              % [4F x 1]
+        divF  = q(1:4:end);                               % w-part (per face)
+        curlF = [q(2:4:end), q(3:4:end), q(4:4:end)];     % imag part (per face)
+        omF = sum(curlF .* Op.Nf{hh}, 2);                 % vorticity per face
+        omV = Op.Wfv{hh} * omF;                           % per vertex
+        dvV = Op.Wfv{hh} * divF;
+        psi = i_poisson(Op.cholK{hh}, Op.M{hh}, omV, Op.free{hh}, Op.totMass{hh});
+        phi = i_poisson(Op.cholK{hh}, Op.M{hh}, dvV, Op.free{hh}, Op.totMass{hh});
+        Ht.Curl(vH)=omV;  Ht.Div(vH)=dvV;  Ht.Psi(vH)=psi;  Ht.Phi(vH)=phi;
+        Ht.Fmag(vH)=sqrt(Jx.^2 + Jy.^2 + Jz.^2);
+    end
+    Ht.Cores = FindCores(Ht.Psi, Op.VertConn, Ht.Curl);
+end
+
+%% ===== whole-series convenience (Prepare once, Frame per column) =====
+function H = Decompose(DiracOp, LBO, Surf, J)
+    Op = Prepare(DiracOp, LBO, Surf);
+    nVtot = Op.nVtot;  nT = size(J,2);
+    H = struct('Curl',zeros(nVtot,nT), 'Div',zeros(nVtot,nT), ...
+               'Psi',zeros(nVtot,nT),  'Phi',zeros(nVtot,nT),  'Fmag',zeros(nVtot,nT));
+    H.Cores = cell(1, nT);
+    for t = 1:nT
+        Ht = Frame(Op, J(:,t));
+        H.Curl(:,t)=Ht.Curl; H.Div(:,t)=Ht.Div; H.Psi(:,t)=Ht.Psi;
+        H.Phi(:,t)=Ht.Phi;   H.Fmag(:,t)=Ht.Fmag;  H.Cores{t}=Ht.Cores;
+    end
+end
+
+%% ===== Poisson solves =====
 function psi = PoissonSolve(K, M, omega) %#ok<DEFNU>
-    n = size(K,1);
-    omega = omega - (sum(M*omega) / sum(sum(M))) * ones(n,1);   % project to mean-zero
+    % Convenience: factor then solve (Frame uses the cached factor instead).
+    free = (2:size(K,1))';
+    dK = decomposition(K(free,free), 'chol');
+    psi = i_poisson(dK, M, omega, free, sum(M(:)));
+end
+
+function psi = i_poisson(dK, M, omega, free, totMass)
+    n = size(M,1);
+    omega = omega - (sum(M*omega) / totMass) * ones(n,1);  % project to the mean-zero subspace
     rhs = M * omega;
-    free = 2:n;                                                 % pin psi(1)=0
     psi = zeros(n,1);
-    psi(free) = K(free,free) \ rhs(free);
+    psi(free) = dK \ rhs(free);                            % pinned solve (vertex 1 fixed)
     psi = psi - mean(psi);
 end
 
+%% ===== core detection: local extrema of psi over the 1-ring =====
 function cores = FindCores(psi, VertConn, omega) %#ok<DEFNU>
     cores = struct('iVertex',{}, 'charge',{}, 'omega',{});
     [ii, jj] = find(VertConn);                                  % neighbor pairs

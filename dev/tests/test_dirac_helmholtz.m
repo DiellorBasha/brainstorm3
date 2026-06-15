@@ -36,6 +36,13 @@ function test_dirac_helmholtz()
     nFail = nFail + chk('field has both curl and div', max(abs(H.Curl(:)))>0 && max(abs(H.Div(:)))>0);
     nFail = nFail + chk('Cores is 1xnT cell', iscell(H.Cores) && numel(H.Cores)==2);
 
+    % --- (4) on-demand path: Prepare once + Frame(single col) == whole-series column ---
+    Op  = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Ht  = bst_dirac_helmholtz('Frame', Op, J(:,1));
+    nFail = nFail + chk('Frame Curl == Decompose col 1', isequal(Ht.Curl, H.Curl(:,1)));
+    nFail = nFail + chk('Frame Psi  == Decompose col 1', isequal(Ht.Psi,  H.Psi(:,1)));
+    nFail = nFail + chk('Frame cores match col 1', numel(Ht.Cores)==numel(H.Cores{1}));
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end

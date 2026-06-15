@@ -1,10 +1,10 @@
 function test_helmholtz_view()
-% Live: open the Helmholtz view on a synthetic 3-comp source, switch the scalar, check
-% the displayed series swaps and the core overlay count matches, then close cleanly.
+% Live: open the Helmholtz view on a synthetic 3-comp source. It must decompose only the
+% ACTIVE frame, display the selected scalar for that frame, match the core overlay count,
+% recompute on cursor move (on-demand cache grows), and close cleanly.
 % Authors: Diellor Basha, 2026
-    global GlobalData;
     nFail = 0;
-    % synthetic unconstrained source on cortex_20484V
+    % synthetic unconstrained source on cortex_20484V (3 time frames)
     SurfaceFile = bst_get('Subject',1).Surface(5).FileName;
     nV = size(in_tess_bst(SurfaceFile,0).Vertices,1);
     R = db_template('resultsmat'); rng(0);
@@ -17,24 +17,31 @@ function test_helmholtz_view()
     nFail = nFail + chk('view opens', ishandle(hFig));
     St = getappdata(hFig,'HelmholtzState');
     nFail = nFail + chk('default scalar is Curl', strcmp(St.Scalar,'Curl'));
-    [iDS,iResult] = bst_memory('GetDataSetResult', St.TmpFile);
-    nFail = nFail + chk('displays Curl series', isequal(GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp, St.H.Curl));
-    % switch to Psi
+
+    % the displayed scalar must equal the decomposition of the ACTIVE frame
+    [~, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
+    Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
+    Ht = bst_dirac_helmholtz('Frame', St.Op, Jt);
+    TessInfo = getappdata(hFig,'Surface');
+    nFail = nFail + chk('displays active-frame Curl', isequal(TessInfo(St.iTess).Data, Ht.Curl));
+    nFail = nFail + chk('only active frame cached', St.Cache.Count == 1);
+
+    % switch to Psi -> recolors from the cached frame (no recompute)
     view_helmholtz('SetScalar', hFig, 'Psi'); drawnow;
-    nFail = nFail + chk('switch to Psi swaps series', isequal(GlobalData.DataSet(iDS).Results(iResult).ImageGridAmp, St.H.Psi));
-    % time-following: the scalar figure must not be static, and a cursor move must fire
-    % the overlay refresh (the path that keeps quiver + cores in sync with the colormap)
-    nFail = nFail + chk('figure not static (follows time)', ~isequal(getappdata(hFig,'isStatic'),1));
-    realFcn = getappdata(hFig,'CustomOverlayFcn');
-    assignin('base','HVK',0);
-    setappdata(hFig,'CustomOverlayFcn',@(h) assignin('base','HVK',evalin('base','HVK')+1));
-    panel_time('SetCurrentTime', 1.0); drawnow;
-    setappdata(hFig,'CustomOverlayFcn', realFcn);
-    nFail = nFail + chk('cursor move fires overlay refresh', evalin('base','HVK') >= 1);
-    % core overlay count matches H.Cores at frame 1
+    TessInfo = getappdata(hFig,'Surface');
+    nFail = nFail + chk('switch to Psi recolors active frame', isequal(TessInfo(St.iTess).Data, Ht.Psi));
+
+    % core overlay count matches the active frame's cores
     hAx = findobj(hFig,'-depth',1,'Tag','Axes3D'); hAx=hAx(1);
     nMarkers = numel(findobj(hAx,'Tag','HelmholtzCore'));
-    nFail = nFail + chk('core markers match', nMarkers == numel(St.H.Cores{1}));
+    nFail = nFail + chk('core markers match active frame', nMarkers == numel(Ht.Cores));
+
+    % time-following: not static, and a cursor move decomposes the new frame on demand
+    nFail = nFail + chk('figure not static (follows time)', ~isequal(getappdata(hFig,'isStatic'),1));
+    panel_time('SetCurrentTime', 2.0); drawnow;
+    [~, iT2] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
+    nFail = nFail + chk('cursor move decomposed a new frame', isKey(St.Cache, iT2) && (St.Cache.Count >= 2));
+
     % close cleans up
     view_helmholtz('Close', hFig); drawnow;
     nFail = nFail + chk('panel closed', isempty(bst_get('PanelControls','Helmholtz')));
