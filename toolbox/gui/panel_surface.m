@@ -1743,6 +1743,7 @@ function [isOk, TessInfo] = UpdateSurfaceData(hFig, iSurfaces)
     if (nargin < 2) || isempty(iSurfaces)
         iSurfaces = find(~cellfun(@(c)isempty(c.Type), {TessInfo.DataSource}));
         if isempty(iSurfaces)
+            FireCustomOverlay(hFig);
             return
         end
     end
@@ -2076,6 +2077,19 @@ function [isOk, TessInfo] = UpdateSurfaceData(hFig, iSurfaces)
     setappdata(hFig, 'Surface', TessInfo);
     % Update colormap
     UpdateSurfaceColormap(hFig, iSurfaces);
+    % Custom overlay hook (e.g. the Helmholtz view): redraw figure-owned overlays after
+    % the surface-data refresh, which is exactly the per-figure time-cursor update path.
+    FireCustomOverlay(hFig);
+end
+
+% ===== CUSTOM OVERLAY HOOK =====
+% A figure can register a CustomOverlayFcn appdata that redraws its own overlays
+% (quiver, markers) after each surface-data refresh (the per-figure time-cursor update).
+function FireCustomOverlay(hFig)
+    ovFcn = getappdata(hFig, 'CustomOverlayFcn');
+    if ~isempty(ovFcn)
+        try, ovFcn(hFig); catch, end %#ok<CTCH>
+    end
 end
 
 
