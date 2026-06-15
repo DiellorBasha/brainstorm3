@@ -17,6 +17,12 @@ function test_filterbank_tiles()
     nFail = nFail + chk('geometric centers (constant ratio)', max(abs(ratios - ratios(1))) < 1e-9);
     nFail = nFail + chk('span covers LambdaRange ends', abs(centers(1)-1)<1e-6 && abs(centers(end)-256)<1e-6);
 
+    % N==1 keeps the user's designed scale param (does NOT overwrite from LambdaRange)
+    base1 = base; base1.N = 1; base1.Params = struct('t', 0.0123);
+    T1 = bst_filterbank_tiles(base1);
+    nFail = nFail + chk('N=1 single tile', numel(T1)==1);
+    nFail = nFail + chk('N=1 keeps designed scale param', abs(T1(1).Params.t - 0.0123) < 1e-12);
+
     % chirality split doubles the bank into +1/-1 with matched scales
     base2 = base; base2.Chiralities = [1 -1];
     T2 = bst_filterbank_tiles(base2);

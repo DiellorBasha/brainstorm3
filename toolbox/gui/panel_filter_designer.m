@@ -40,43 +40,31 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     isDirac = strcmpi(EigenMat.Variant, 'Dirac');
 
     jPanel = gui_river([4 4], [3 8 8 8]);
+    gui_component('label', jPanel, '', ['<HTML><I>Operator: ' EigenMat.Variant '</I>']);
 
-    % ===== WAVELET DESIGN =====
-    gui_component('label', jPanel, '', '<HTML><B>Design a single wavelet</B>');
-    gui_component('label', jPanel, 'br', ['Operator: ' EigenMat.Variant]);
-
-    % --- input mode ---
-    jPanel.add('br', JLabel('Input:'));
-    jInputDelta  = gui_component('radio', jPanel, 'tab',  'Delta (click a vertex)');
+    % ===== SECTION 1: INPUT (the seed / source) =====
+    % The seed is the source the wavelet is built from. For Laplace-Beltrami a vertex
+    % delta suffices; the Dirac operator acts on full 3D vector fields, so the input is
+    % richer: a delta gets a 3D ambient DIRECTION, and (optionally) a CHIRALITY.
+    gui_component('label', jPanel, 'br', '<HTML><B>1. Input</B>');
+    jInputDelta  = gui_component('radio', jPanel, 'br tab', 'Delta (click a vertex)');
     jInputSource = gui_component('radio', jPanel, 'br tab', 'Active source map');
     jInputDelta.setSelected(true);
     grpIn = ButtonGroup(); grpIn.add(jInputDelta); grpIn.add(jInputSource);
 
-    % --- kernel dropdown (curated, friendly display names) ---
-    [keys, displays] = i_kernel_list();
-    jPanel.add('br', JLabel('Kernel:'));
-    jKernel = gui_component('combobox', jPanel, 'tab', [], {displays}, [], [], []);
-
-    % --- scale parameter sliders (rebuilt per kernel, in mode-index space) ---
-    jParams = gui_river([2 2], [0 4 0 4]);
-    jPanel.add('br hfill', jParams);
-
-    % --- seed direction (Dirac, delta mode): azimuth + elevation -> ambient 3D vector ---
     jAz = []; jEl = []; jAzVal = []; jElVal = [];
-    if isDirac
-        gui_component('label', jPanel, 'br', '<HTML><I>Seed direction (ambient 3D)</I>');
-        jPanel.add('br', JLabel('Azimuth:'));
-        jAz    = i_slider(jPanel, 'tab hfill', 0, 360, 0);
-        jAzVal = gui_component('label', jPanel, '', '0&deg;');
-        jPanel.add('br', JLabel('Elevation:'));
-        jEl    = i_slider(jPanel, 'tab hfill', -90, 90, 0);
-        jElVal = gui_component('label', jPanel, '', '0&deg;');
-    end
-
-    % --- chirality (Dirac) ---
     jChirNone = []; jChirPlus = []; jChirMinus = [];
     if isDirac
-        jPanel.add('br', JLabel('Chirality:'));
+        % seed direction: azimuth + elevation -> full ambient 3D unit vector
+        gui_component('label', jPanel, 'br tab', '<HTML><I>Seed direction (ambient 3D)</I>');
+        jPanel.add('br tab', JLabel('Azimuth:'));
+        jAz    = i_slider(jPanel, 'tab hfill', 0, 360, 0);
+        jAzVal = gui_component('label', jPanel, '', '0&deg;');
+        jPanel.add('br tab', JLabel('Elevation:'));
+        jEl    = i_slider(jPanel, 'tab hfill', -90, 90, 0);
+        jElVal = gui_component('label', jPanel, '', '0&deg;');
+        % chirality (helicity of the reconstructed vector field; None = real field)
+        jPanel.add('br tab', JLabel('Chirality:'));
         jChirNone  = gui_component('radio', jPanel, 'tab', 'None');
         jChirPlus  = gui_component('radio', jPanel, '', '+ right');
         jChirMinus = gui_component('radio', jPanel, '', '- left');
@@ -84,16 +72,24 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
         grpCh = ButtonGroup(); grpCh.add(jChirNone); grpCh.add(jChirPlus); grpCh.add(jChirMinus);
     end
 
-    % ===== SPECTRUM TILING (optional) + ACTIONS =====
-    gui_component('label', jPanel, 'br', ' ');
-    gui_component('label', jPanel, 'br', '<HTML><B>Spectrum tiling (optional)</B>');
-    jPanel.add('br', JLabel('Tiles:'));
+    % ===== SECTION 2: FILTER KERNEL =====
+    gui_component('label', jPanel, 'br', '<HTML><B>2. Filter kernel</B>');
+    [keys, displays] = i_kernel_list();
+    jPanel.add('br tab', JLabel('Kernel:'));
+    jKernel = gui_component('combobox', jPanel, 'tab', [], {displays}, [], [], []);
+    jParams = gui_river([2 2], [0 4 0 4]);        % scale sliders, rebuilt per kernel
+    jPanel.add('br tab hfill', jParams);
+
+    % ===== SECTION 3: SPECTRUM TILING (optional) =====
+    gui_component('label', jPanel, 'br', '<HTML><B>3. Spectrum tiling (optional)</B>');
+    jPanel.add('br tab', JLabel('Tiles:'));
     jTiles    = i_slider(jPanel, 'tab hfill', 1, 12, 1);
     jTilesVal = gui_component('label', jPanel, '', '1 (single wavelet)');
-    jChiSplit = gui_component('checkbox', jPanel, 'br', 'Cross with both chiralities');
+    jChiSplit = gui_component('checkbox', jPanel, 'br tab', 'Cross with both chiralities');
     if ~isDirac; jChiSplit.setEnabled(false); end
-    jActiveTile = gui_component('label', jPanel, 'br', '');
+    jActiveTile = gui_component('label', jPanel, 'br tab', '');
 
+    % ===== ACTIONS =====
     jSave   = gui_component('button', jPanel, 'br right', 'Save bank');
     jCancel = gui_component('button', jPanel, '', 'Cancel');
 
@@ -119,15 +115,15 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     BuildParamWidgets(ctrl, hFig);
 
     % --- wire callbacks ---
+    % JSlider: StateChangedCallback fires continuously during a drag; we update the cheap
+    % text label on every tick and run the expensive Refresh/Reseed only when the drag
+    % settles (~getValueIsAdjusting). MouseReleasedCallback on a JSlider is unreliable.
     java_setcb(jKernel,   'ActionPerformedCallback', @(h,e) OnKernelChanged(panelName));
     java_setcb(jChiSplit, 'ActionPerformedCallback', @(h,e) Refresh(panelName));
-    java_setcb(jTiles,    'StateChangedCallback',    @(h,e) i_tiles_label(panelName));
-    java_setcb(jTiles,    'MouseReleasedCallback',   @(h,e) Refresh(panelName));
+    java_setcb(jTiles,    'StateChangedCallback',    @(h,e) OnTilesSlider(panelName, h));
     if isDirac
-        java_setcb(jAz, 'StateChangedCallback',  @(h,e) i_dir_label(panelName));
-        java_setcb(jEl, 'StateChangedCallback',  @(h,e) i_dir_label(panelName));
-        java_setcb(jAz, 'MouseReleasedCallback', @(h,e) ReseedAndRefresh(panelName));
-        java_setcb(jEl, 'MouseReleasedCallback', @(h,e) ReseedAndRefresh(panelName));
+        java_setcb(jAz, 'StateChangedCallback', @(h,e) OnDirSlider(panelName, h));
+        java_setcb(jEl, 'StateChangedCallback', @(h,e) OnDirSlider(panelName, h));
         java_setcb(jChirNone,  'ActionPerformedCallback', @(h,e) Refresh(panelName));
         java_setcb(jChirPlus,  'ActionPerformedCallback', @(h,e) Refresh(panelName));
         java_setcb(jChirMinus, 'ActionPerformedCallback', @(h,e) Refresh(panelName));
@@ -188,18 +184,16 @@ function BuildParamWidgets(ctrl, hFig)
         nm = pf{i};
         ctrl.jParams.add('br', JLabel([i_param_label(nm) ':']));
         js = i_slider(ctrl.jParams, 'tab hfill', 1, K, round(K/2));
-        jv = gui_component('label', ctrl.jParams, '', '');
+        jv = gui_component('label', ctrl.jParams, '', sprintf('mode %d', round(K/2)));
         % store handles as client properties so ReadParams can retrieve them
         ctrl.jParams.putClientProperty(['slider_' nm], js);
         ctrl.jParams.putClientProperty(['vlabel_' nm], jv);
-        java_setcb(js, 'StateChangedCallback',  @(h,e) i_param_label_update(ctrl.hFig, nm));
-        java_setcb(js, 'MouseReleasedCallback', @(h,e) Refresh('FilterDesigner'));
+        java_setcb(js, 'StateChangedCallback', @(h,e) OnParamSlider('FilterDesigner', nm, h));
         names{end+1} = nm; %#ok<AGROW>
     end
     ctrl.jParams.revalidate(); ctrl.jParams.repaint();
     S.ParamNames = names;
     setappdata(hFig, 'FilterDesignerState', S);
-    for i = 1:numel(names); i_param_label_update(hFig, names{i}); end
 end
 
 function params = ReadParams(S, ctrl)
@@ -233,10 +227,10 @@ function lab = i_param_label(name)
     end
 end
 
-function i_param_label_update(hFig, name)
-    ctrl = bst_get('PanelControls', 'FilterDesigner');
+function i_param_label_update(panelName, name)
+    ctrl = bst_get('PanelControls', panelName);
     if isempty(ctrl); return; end
-    S = getappdata(hFig, 'FilterDesignerState');
+    S = getappdata(ctrl.hFig, 'FilterDesignerState');
     js = ctrl.jParams.getClientProperty(['slider_' name]);
     jv = ctrl.jParams.getClientProperty(['vlabel_' name]);
     if isempty(js) || isempty(jv); return; end
@@ -359,20 +353,29 @@ function OnSelectTile(panelName, j) %#ok<DEFNU>
 end
 
 
-%% ===== SMALL LIVE LABELS =====
-function i_tiles_label(panelName)
-    [S, ctrl] = GetState(panelName); %#ok<ASGLU>
-    if isempty(ctrl); return; end
-    n = double(ctrl.jTiles.getValue());
-    if n <= 1; ctrl.jTilesVal.setText('1 (single wavelet)');
-    else;      ctrl.jTilesVal.setText(sprintf('%d tiles', n)); end
+%% ===== GATED SLIDER HANDLERS (label live; recompute on settle) =====
+function OnParamSlider(panelName, nm, js)
+    i_param_label_update('FilterDesigner', nm);
+    if ~js.getValueIsAdjusting(); Refresh(panelName); end
 end
 
-function i_dir_label(panelName)
+function OnTilesSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
-    if isempty(ctrl) || isempty(ctrl.jAz); return; end
-    ctrl.jAzVal.setText(sprintf('%d&deg;', double(ctrl.jAz.getValue())));
-    ctrl.jElVal.setText(sprintf('%d&deg;', double(ctrl.jEl.getValue())));
+    if ~isempty(ctrl)
+        n = double(ctrl.jTiles.getValue());
+        if n <= 1; ctrl.jTilesVal.setText('1 (single wavelet)');
+        else;      ctrl.jTilesVal.setText(sprintf('%d tiles', n)); end
+    end
+    if ~js.getValueIsAdjusting(); Refresh(panelName); end
+end
+
+function OnDirSlider(panelName, js)
+    [S, ctrl] = GetState(panelName); %#ok<ASGLU>
+    if ~isempty(ctrl) && ~isempty(ctrl.jAz)
+        ctrl.jAzVal.setText(sprintf('%d&deg;', double(ctrl.jAz.getValue())));
+        ctrl.jElVal.setText(sprintf('%d&deg;', double(ctrl.jEl.getValue())));
+    end
+    if ~js.getValueIsAdjusting(); ReseedAndRefresh(panelName); end
 end
 
 

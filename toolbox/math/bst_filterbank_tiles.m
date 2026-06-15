@@ -58,7 +58,11 @@ function Tiles = bst_filterbank_tiles(base)
         for j = 1:N
             t = t + 1;
             p = base.Params;
-            p.(scaleName) = centerToParam(centers(j));
+            % N==1 is the user's single designed wavelet: keep its scale param as-is.
+            % N>1 tiles the spectrum: each tile's scale is set from its spectral center.
+            if N > 1
+                p.(scaleName) = centerToParam(centers(j));
+            end
             Tiles(t) = struct('Kernel', base.Kernel, 'Params', p, ...
                 'Direction', base.Direction(:).', 'Chirality', signs(s), 'Axis', base.Axis(:).');
         end
