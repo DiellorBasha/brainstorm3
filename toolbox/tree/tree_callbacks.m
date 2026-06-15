@@ -2570,10 +2570,24 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@EigenView_Callback, filenameFull));
+                    % === DESIGN FILTERBANK ===
+                    gui_component('MenuItem', jPopup, [], 'Design filterbank...', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_filter_designer, filenameRelative));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
                         gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@EigenDelete_Callback, filenameRelative));
+                    end
+                end
+
+%% ===== POPUP: FILTERBANK =====
+            case 'filterbank'
+                if (length(bstNodes) == 1)
+                    % === EDIT / RE-OPEN ===
+                    gui_component('MenuItem', jPopup, [], 'Edit / re-open', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_filter_designer, filenameRelative));
+                    % === DELETE ===
+                    if ~bst_get('ReadOnly')
+                        AddSeparator(jPopup);
+                        gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@FilterbankDelete_Callback, filenameRelative));
                     end
                 end
         end
@@ -4101,9 +4115,47 @@ function EigenDelete_Callback(filenameRelative)
     if ~isempty(iSubject)
         ProtocolSubjects = bst_get('ProtocolSubjects');
         if iSubject == 0
-            ProtocolSubjects.DefaultSubject.Surface(iSurface).Eigen(iEigen) = [];
+            sSurf = ProtocolSubjects.DefaultSubject.Surface(iSurface);
         else
-            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Eigen(iEigen) = [];
+            sSurf = ProtocolSubjects.Subject(iSubject).Surface(iSurface);
+        end
+        % Cascade: delete filterbanks nested under this eigen node (ParentEigen match)
+        if isfield(sSurf,'Filterbank') && ~isempty(sSurf.Filterbank)
+            isChild = arrayfun(@(f) file_compare(f.ParentEigen, file_short(filenameRelative)), sSurf.Filterbank);
+            for f = find(isChild)
+                try, file_delete(file_fullpath(sSurf.Filterbank(f).FileName), 1); catch, end %#ok<CTCH>
+            end
+            sSurf.Filterbank(isChild) = [];
+        end
+        % Remove the eigen entry itself
+        sSurf.Eigen(iEigen) = [];
+        if iSubject == 0
+            ProtocolSubjects.DefaultSubject.Surface(iSurface) = sSurf;
+        else
+            ProtocolSubjects.Subject(iSubject).Surface(iSurface) = sSurf;
+        end
+        bst_set('ProtocolSubjects', ProtocolSubjects);
+        db_save();
+        panel_protocols('UpdateNode', 'Subject', iSubject);
+    end
+end
+
+%% ===== FILTERBANK: DELETE =====
+function FilterbankDelete_Callback(filenameRelative)
+    % Confirm deletion
+    if ~java_dialog('confirm', ['Delete filterbank?' 10 filenameRelative], 'Delete filterbank')
+        return;
+    end
+    % Resolve to full path and delete the file
+    file_delete(file_fullpath(filenameRelative), 1);
+    % Find the filterbank entry in the DB and remove it
+    [~, iSubject, iSurface, iFb] = bst_get('FilterbankFile', filenameRelative);
+    if ~isempty(iSubject)
+        ProtocolSubjects = bst_get('ProtocolSubjects');
+        if iSubject == 0
+            ProtocolSubjects.DefaultSubject.Surface(iSurface).Filterbank(iFb) = [];
+        else
+            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Filterbank(iFb) = [];
         end
         bst_set('ProtocolSubjects', ProtocolSubjects);
         db_save();

@@ -160,6 +160,21 @@ else
                         iE, iSubject, iSearch);
                     if chCreated
                         nodeSurface.add(chNode);
+                        % Nest filterbank child nodes under THIS eigen node
+                        if isfield(sSubject.Surface(iSurface), 'Filterbank')
+                            eigName = char(sSubject.Surface(iSurface).Eigen(iE).FileName);
+                            fbs = sSubject.Surface(iSurface).Filterbank;
+                            for iFb = 1:numel(fbs)
+                                if file_compare(fbs(iFb).ParentEigen, eigName)
+                                    [fbCreated, fbNode] = CreateNode('filterbank', ...
+                                        char(fbs(iFb).Comment), char(fbs(iFb).FileName), ...
+                                        iFb, iSubject, iSearch);
+                                    if fbCreated
+                                        chNode.add(fbNode);
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end
