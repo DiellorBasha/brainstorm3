@@ -1377,7 +1377,7 @@ switch contextName
             end
         end
 
-    case 'FilterbankFile'
+    case 'WaveletFile'
         % No protocol in database
         if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
             return;
@@ -1390,40 +1390,40 @@ switch contextName
 
         % Parse inputs
         if (nargin == 2)
-            FilterbankFile = varargin{2};
+            WaveletFile = varargin{2};
         else
             error('Invalid call to bst_get().');
         end
 
-        % Remove SUBJECTS path from FilterbankFile
-        FilterbankFile = file_short(FilterbankFile);
-        % Look for filterbank file in DefaultSubject
+        % Remove SUBJECTS path from WaveletFile
+        WaveletFile = file_short(WaveletFile);
+        % Look for wavelet file in DefaultSubject
         if ~isempty(ProtocolSubjects.DefaultSubject)
             for iSurf = 1:length(ProtocolSubjects.DefaultSubject.Surface)
-                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Filterbank') && ...
-                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Filterbank)
-                    iFb = find(file_compare(FilterbankFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Filterbank.FileName}), 1);
-                    if ~isempty(iFb)
+                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Wavelet') && ...
+                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Wavelet)
+                    iW = find(file_compare(WaveletFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Wavelet.FileName}), 1);
+                    if ~isempty(iW)
                         argout1 = ProtocolSubjects.DefaultSubject;
                         argout2 = 0;
                         argout3 = iSurf;
-                        argout4 = iFb;
+                        argout4 = iW;
                         return
                     end
                 end
             end
         end
-        % Look for filterbank file in all subjects
+        % Look for wavelet file in all subjects
         for iSubj = 1:length(ProtocolSubjects.Subject)
             for iSurf = 1:length(ProtocolSubjects.Subject(iSubj).Surface)
-                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Filterbank') && ...
-                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Filterbank)
-                    iFb = find(file_compare(FilterbankFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Filterbank.FileName}), 1);
-                    if ~isempty(iFb)
+                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Wavelet') && ...
+                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Wavelet)
+                    iW = find(file_compare(WaveletFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Wavelet.FileName}), 1);
+                    if ~isempty(iW)
                         argout1 = ProtocolSubjects.Subject(iSubj);
                         argout2 = iSubj;
                         argout3 = iSurf;
-                        argout4 = iFb;
+                        argout4 = iW;
                         return
                     end
                 end

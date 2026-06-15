@@ -1,28 +1,28 @@
-function iFilterbank = db_add_filterbank(iSubject, ParentEigenFile, FilterbankMat, Comment)
-% DB_ADD_FILTERBANK: Save a filterbank_*.mat and register it as a child of an eigen node.
+function iWavelet = db_add_wavelet(iSubject, ParentEigenFile, WaveletMat, Comment)
+% DB_ADD_WAVELET: Save a wavelet_*.mat and register it as a child of an eigen node.
 %
-% USAGE:  iFilterbank = db_add_filterbank(iSubject, ParentEigenFile, FilterbankMat, Comment)
+% USAGE:  iWavelet = db_add_wavelet(iSubject, ParentEigenFile, WaveletMat, Comment)
 %
 % INPUT:
 %    - iSubject        : Index of the subject (0 = default subject); reconciled against
 %                        the subject resolved from the parent eigen node.
 %    - ParentEigenFile : Relative or full path to the parent eigen_*.mat node.
-%    - FilterbankMat   : Structure to save (db_template('filterbankmat') schema).
-%    - Comment         : Description string for this filterbank node (default: 'Filterbank').
+%    - WaveletMat      : Structure to save (db_template('waveletmat') schema).
+%    - Comment         : Description string for this wavelet node (default: 'Wavelet').
 % OUTPUT:
-%    - iFilterbank     : Index of the new entry in sSubject.Surface(iSurface).Filterbank
+%    - iWavelet        : Index of the new entry in sSubject.Surface(iSurface).Wavelet
 %
-% The node is stored in the SURFACE's Filterbank list, keyed by ParentEigen (the eigen
+% The node is stored in the SURFACE's Wavelet list, keyed by ParentEigen (the eigen
 % node file). node_create_subject nests it under the matching eigen node in the tree.
 %
 % Authors: Diellor Basha, 2026
 
-    if (nargin < 4) || isempty(Comment); Comment = 'Filterbank'; end
+    if (nargin < 4) || isempty(Comment); Comment = 'Wavelet'; end
 
     % Resolve the parent eigen node -> its subject/surface
     [~, iSubjectE, iSurface] = bst_get('EigenFile', ParentEigenFile);
     if isempty(iSurface)
-        error('db_add_filterbank:noEigen', 'Parent eigen node not found: %s', ParentEigenFile);
+        error('db_add_wavelet:noEigen', 'Parent eigen node not found: %s', ParentEigenFile);
     end
     iSubject = iSubjectE;   % trust the resolved subject (the argument is kept for API symmetry)
 
@@ -34,16 +34,16 @@ function iFilterbank = db_add_filterbank(iSubject, ParentEigenFile, FilterbankMa
     ProtocolInfo = bst_get('ProtocolInfo');
     c = clock;
     strTime = sprintf('%02.0f%02.0f%02.0f_%02.0f%02.0f', c(1)-2000, c(2:5));
-    OutputFile = ['filterbank_' strTime '.mat'];
+    OutputFile = ['wavelet_' strTime '.mat'];
     OutputFileFull = file_unique(bst_fullfile(ProtocolInfo.SUBJECTS, bst_fileparts(sSubject.FileName), OutputFile));
 
     % Stamp required fields
-    FilterbankMat.ParentEigen = file_short(ParentEigenFile);
-    FilterbankMat.Comment     = Comment;
+    WaveletMat.ParentEigen = file_short(ParentEigenFile);
+    WaveletMat.Comment     = Comment;
 
-    bst_save(OutputFileFull, FilterbankMat, 'v7');
+    bst_save(OutputFileFull, WaveletMat, 'v7');
 
-    % Normalize the surface array to the current template (adds Filterbank if missing),
+    % Normalize the surface array to the current template (adds Wavelet if missing),
     % mirroring db_add_eigen's homogeneity fix (a fresh array is rebuilt because widening
     % the field set of one element of an existing struct array in place throws).
     templateSurface = db_template('Surface');
@@ -62,8 +62,8 @@ function iFilterbank = db_add_filterbank(iSubject, ParentEigenFile, FilterbankMa
     newEntry.FileName    = file_short(OutputFileFull);
     newEntry.Comment     = Comment;
     newEntry.ParentEigen = file_short(ParentEigenFile);
-    sSubject.Surface(iSurface).Filterbank(end+1) = newEntry;
-    iFilterbank = numel(sSubject.Surface(iSurface).Filterbank);
+    sSubject.Surface(iSurface).Wavelet(end+1) = newEntry;
+    iWavelet = numel(sSubject.Surface(iSurface).Wavelet);
 
     % Write the modified subject back via the canonical round-trip
     if (iSubject == 0); ProtocolSubjects.DefaultSubject = sSubject;

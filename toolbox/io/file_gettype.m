@@ -101,8 +101,8 @@ if ischar(fileName)
             fileType = 'operator';
         elseif ~isempty(strfind(fileName, '_eigen_'))
             fileType = 'eigen';
-        elseif ~isempty(strfind(fileName, '_filterbank_'))
-            fileType = 'filterbank';
+        elseif ~isempty(strfind(fileName, '_wavelet_'))
+            fileType = 'wavelet';
         elseif ~isempty(strfind(fileName, '_tess'))
             if ~isempty(strfind(fileName, '_cortex'))   % || ~isempty(strfind(fileName, '_brain'))
                 fileType = 'cortex';
