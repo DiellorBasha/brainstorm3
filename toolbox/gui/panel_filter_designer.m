@@ -39,16 +39,20 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     panelName = 'FilterDesigner';
     isDirac = strcmpi(EigenMat.Variant, 'Dirac');
 
-    jPanel = gui_river([4 4], [3 8 8 8]);
-    gui_component('label', jPanel, '', ['<HTML><I>Operator: ' EigenMat.Variant '</I>']);
+    % Responsive container (mirrors panel_surface / panel_scout): a BorderLayout root
+    % whose NORTH holds a BoxLayout column of titled river sub-panels. Each river resizes
+    % to the tab width, and every slider is capped by a trailing label so 'hfill' is
+    % bounded by the panel edge instead of overflowing.
+    jPanelNew = gui_component('Panel');
+    jOpt = JPanel(); jOpt.setLayout(BoxLayout(jOpt, BoxLayout.Y_AXIS));
 
     % ===== SECTION 1: INPUT (the seed / source) =====
     % The seed is the source the wavelet is built from. For Laplace-Beltrami a vertex
     % delta suffices; the Dirac operator acts on full 3D vector fields, so the input is
     % richer: a delta gets a 3D ambient DIRECTION, and (optionally) a CHIRALITY.
-    gui_component('label', jPanel, 'br', '<HTML><B>1. Input</B>');
-    jInputDelta  = gui_component('radio', jPanel, 'br tab', 'Delta (click a vertex)');
-    jInputSource = gui_component('radio', jPanel, 'br tab', 'Active source map');
+    jSec1 = gui_river([2 2], [2 8 3 6], '1. Input');
+    jInputDelta  = gui_component('radio', jSec1, 'br', 'Delta (click a vertex)');
+    jInputSource = gui_component('radio', jSec1, 'br', 'Active source map');
     jInputDelta.setSelected(true);
     grpIn = ButtonGroup(); grpIn.add(jInputDelta); grpIn.add(jInputSource);
 
@@ -56,40 +60,44 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     jChirNone = []; jChirPlus = []; jChirMinus = [];
     if isDirac
         % seed direction: azimuth + elevation -> full ambient 3D unit vector
-        % (title+value on one row; the slider gets its own full-width row)
-        gui_component('label', jPanel, 'br tab', '<HTML><I>Seed direction (ambient 3D)</I>');
-        jAzVal = gui_component('label', jPanel, 'br tab', 'Azimuth: 0&deg;');
-        jAz    = i_slider(jPanel, 'br hfill', 0, 360, 0);
-        jElVal = gui_component('label', jPanel, 'br tab', 'Elevation: 0&deg;');
-        jEl    = i_slider(jPanel, 'br hfill', -90, 90, 0);
+        gui_component('label', jSec1, 'br', '<HTML><I>Seed direction (ambient 3D)</I>');
+        [jAz, jAzVal] = i_labeled_slider(jSec1, '<HTML>Azimuth: 0&deg;',   '0',   '360', 0, 360, 0);
+        [jEl, jElVal] = i_labeled_slider(jSec1, '<HTML>Elevation: 0&deg;', '-90', '90', -90, 90, 0);
         % chirality (helicity of the reconstructed vector field; None = real field)
-        gui_component('label', jPanel, 'br tab', 'Chirality:');
-        jChirNone  = gui_component('radio', jPanel, 'tab', 'None');
-        jChirPlus  = gui_component('radio', jPanel, '', '+ right');
-        jChirMinus = gui_component('radio', jPanel, '', '- left');
+        % radios on their own row so '- left' is not clipped at the panel edge
+        gui_component('label', jSec1, 'br', 'Chirality:');
+        jChirNone  = gui_component('radio', jSec1, 'br tab', 'None');
+        jChirPlus  = gui_component('radio', jSec1, '', '+ right');
+        jChirMinus = gui_component('radio', jSec1, '', '- left');
         jChirNone.setSelected(true);
         grpCh = ButtonGroup(); grpCh.add(jChirNone); grpCh.add(jChirPlus); grpCh.add(jChirMinus);
     end
+    jOpt.add(jSec1);
 
     % ===== SECTION 2: FILTER KERNEL =====
-    gui_component('label', jPanel, 'br', '<HTML><B>2. Filter kernel</B>');
     [keys, displays] = i_kernel_list();
-    gui_component('label', jPanel, 'br tab', 'Kernel:');
-    jKernel = gui_component('combobox', jPanel, 'br tab hfill', [], {displays}, [], [], []);
-    jParams = gui_river([2 2], [0 4 0 4]);        % scale sliders, rebuilt per kernel
-    jPanel.add('br tab hfill', jParams);
+    jSec2 = gui_river([2 2], [2 8 3 6], '2. Filter kernel');
+    gui_component('label', jSec2, 'br', 'Kernel:');
+    jKernel = gui_component('combobox', jSec2, 'br hfill', [], {displays}, [], [], []);
+    jParams = gui_river([2 2], [0 2 0 2]);        % scale sliders, rebuilt per kernel
+    jSec2.add('br hfill', jParams);
+    jOpt.add(jSec2);
 
     % ===== SECTION 3: SPECTRUM TILING (optional) =====
-    gui_component('label', jPanel, 'br', '<HTML><B>3. Spectrum tiling (optional)</B>');
-    jTilesVal = gui_component('label', jPanel, 'br tab', 'Tiles: 1 (single wavelet)');
-    jTiles    = i_slider(jPanel, 'br hfill', 1, 12, 1);
-    jChiSplit = gui_component('checkbox', jPanel, 'br tab', 'Cross with both chiralities');
+    jSec3 = gui_river([2 2], [2 8 3 6], '3. Spectrum tiling (optional)');
+    [jTiles, jTilesVal] = i_labeled_slider(jSec3, 'Tiles: 1 (single wavelet)', '1', '12', 1, 12, 1);
+    jChiSplit = gui_component('checkbox', jSec3, 'br', 'Cross with both chiralities');
     if ~isDirac; jChiSplit.setEnabled(false); end
-    jActiveTile = gui_component('label', jPanel, 'br tab', '');
+    jActiveTile = gui_component('label', jSec3, 'br', '');
+    jOpt.add(jSec3);
 
     % ===== ACTIONS =====
-    jSave   = gui_component('button', jPanel, 'br right', 'Save bank');
-    jCancel = gui_component('button', jPanel, '', 'Cancel');
+    jSec4 = gui_river([2 2], [2 8 6 6]);
+    jSave   = gui_component('button', jSec4, 'br right', 'Save bank');
+    jCancel = gui_component('button', jSec4, '', 'Cancel');
+    jOpt.add(jSec4);
+
+    jPanelNew.add(jOpt, BorderLayout.NORTH);
 
     % --- collect Java handles ---
     ctrl = struct('jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
@@ -129,7 +137,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     java_setcb(jSave,   'ActionPerformedCallback', @(h,e) OnSave(panelName));
     java_setcb(jCancel, 'ActionPerformedCallback', @(h,e) OnCancel(panelName));
 
-    bstPanelNew = BstPanel(panelName, jPanel, ctrl);
+    bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
 
@@ -184,12 +192,9 @@ function BuildParamWidgets(ctrl, hFig)
         % Stagger default mode positions so multi-scale kernels (e.g. dog: t1,t2) start
         % at DISTINCT scales rather than all at K/2 (which would make t1==t2).
         defMode = max(1, min(K, round(K * i/(nP+1))));
-        % Row 1: "<label>: mode N" (title + live value together).
-        jTitle = gui_component('label', ctrl.jParams, 'br', sprintf('%s: mode %d', i_param_label(nm), defMode));
-        % Row 2: coarse [====== slider ======] fine
-        gui_component('label', ctrl.jParams, 'br', 'coarse');
-        js = i_slider(ctrl.jParams, 'hfill', 1, K, defMode);
-        gui_component('label', ctrl.jParams, '', 'fine');
+        % Title row "<label>: mode N" + a slider row capped by coarse ... fine.
+        [js, jTitle] = i_labeled_slider(ctrl.jParams, ...
+            sprintf('%s: mode %d', i_param_label(nm), defMode), 'coarse', 'fine', 1, K, defMode);
         % store handles as client properties so ReadParams / labels can retrieve them
         ctrl.jParams.putClientProperty(['slider_' nm], js);
         ctrl.jParams.putClientProperty(['title_' nm], jTitle);
@@ -413,8 +418,8 @@ end
 function OnDirSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl) && ~isempty(ctrl.jAz)
-        ctrl.jAzVal.setText(sprintf('Azimuth: %d&deg;', double(ctrl.jAz.getValue())));
-        ctrl.jElVal.setText(sprintf('Elevation: %d&deg;', double(ctrl.jEl.getValue())));
+        ctrl.jAzVal.setText(sprintf('<HTML>Azimuth: %d&deg;', double(ctrl.jAz.getValue())));
+        ctrl.jElVal.setText(sprintf('<HTML>Elevation: %d&deg;', double(ctrl.jEl.getValue())));
     end
     if ~js.getValueIsAdjusting(); ReseedAndRefresh(panelName); end
 end
@@ -517,4 +522,13 @@ function js = i_slider(jParent, constraints, mn, mx, val)
     % large preferred size is what pushed the right edge past the narrow tools-tab panel.
     js.setPreferredSize(java_scaled('dimension', 40, 22));
     jParent.add(constraints, js);
+end
+
+% Title row ("Title: value") + a slider row capped by two end labels (loLabel ... hiLabel)
+% so 'hfill' is bounded by the panel edge. Returns the slider and the (value-bearing) title.
+function [js, jTitle] = i_labeled_slider(jParent, titleText, loLabel, hiLabel, mn, mx, val)
+    jTitle = gui_component('label', jParent, 'br', titleText);
+    gui_component('label', jParent, 'br', loLabel);     % left cap
+    js = i_slider(jParent, 'hfill', mn, mx, val);        % fills between the caps
+    gui_component('label', jParent, '', hiLabel);        % right cap (bounds the fill)
 end
