@@ -600,9 +600,21 @@ function FigureMouseUpCallback(hFig, varargin)
         clickAction = [];
     end
     
-    % ===== SIMPLE CLICK ===== 
+    % ===== SIMPLE CLICK =====
     % If user did not move the mouse since the click
     if ~hasMoved
+        % === FILTER DESIGNER: seed at the clicked cortical vertex ===
+        % A filterbank design session (view_filter_designer) registers a pick callback
+        % in appdata; a plain left-click resolves the vertex and seeds the designer.
+        if isappdata(hFig, 'FilterDesignerPick') && strcmpi(clickAction, 'rotate') ...
+                && strcmpi(get(hFig, 'SelectionType'), 'normal')
+            iVertex = panel_coordinates('SelectPoint', hFig, 0);
+            if ~isempty(iVertex)
+                pickFn = getappdata(hFig, 'FilterDesignerPick');
+                pickFn(iVertex);
+            end
+            return;
+        end
         % === POPUP ===
         if strcmpi(clickAction, 'popup')
             DisplayFigurePopup(hFig);

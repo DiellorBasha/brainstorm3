@@ -279,6 +279,49 @@ function OnSelectTile(panelName, j) %#ok<DEFNU>
 end
 
 
+%% ===== LOAD A SAVED BANK INTO THE WIDGETS =====
+function LoadBank(panelName, loadBank) %#ok<DEFNU>
+    [S, ctrl] = GetState(panelName);
+    if isempty(S) || ~isfield(loadBank,'Tiling') || isempty(loadBank.Tiling); return; end
+    base = loadBank.Tiling;
+    % kernel
+    items = ctrl.jKernel.getModel();
+    for k = 0:items.getSize()-1
+        if strcmpi(char(items.getElementAt(k)), base.Kernel); ctrl.jKernel.setSelectedIndex(k); break; end
+    end
+    BuildParamWidgets(ctrl, ctrl.hFig);
+    [S, ctrl] = GetState(panelName);
+    % params
+    if isfield(base,'Params') && isstruct(base.Params)
+        pf = fieldnames(S.ParamFields);
+        for i = 1:numel(pf)
+            if isfield(base.Params, pf{i}); S.ParamFields.(pf{i}).setText(num2str(base.Params.(pf{i}))); end
+        end
+    end
+    % tiles
+    if isfield(base,'N'); ctrl.jTiles.setText(num2str(base.N)); end
+    % direction / chirality
+    if S.isDirac
+        if isfield(base,'Chirality')
+            switch base.Chirality
+                case 1,  ctrl.jChir.setSelectedItem('+ (right)');
+                case -1, ctrl.jChir.setSelectedItem('- (left)');
+                otherwise, ctrl.jChir.setSelectedItem('None');
+            end
+        end
+        if isfield(base,'Chiralities') && ~isempty(base.Chiralities); ctrl.jChiSplit.setSelected(true); end
+    end
+    % re-seed at the saved design vertex (if any) -> triggers a refresh
+    iVertex = [];
+    if isfield(loadBank,'Provenance') && isstruct(loadBank.Provenance) && isfield(loadBank.Provenance,'DesignVertex')
+        iVertex = loadBank.Provenance.DesignVertex;
+    end
+    if ~isempty(iVertex)
+        SetSeedVertex(panelName, iVertex);
+    end
+end
+
+
 %% ===== SAVE / CANCEL =====
 function OnSave(panelName) %#ok<DEFNU>
     [S, ctrl] = GetState(panelName);
