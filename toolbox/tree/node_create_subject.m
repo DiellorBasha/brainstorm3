@@ -160,17 +160,17 @@ else
                         iE, iSubject, iSearch);
                     if chCreated
                         nodeSurface.add(chNode);
-                        % Nest filterbank child nodes under THIS eigen node
-                        if isfield(sSubject.Surface(iSurface), 'Filterbank')
+                        % Nest wavelet child nodes under THIS eigen node
+                        if isfield(sSubject.Surface(iSurface), 'Wavelet')
                             eigName = char(sSubject.Surface(iSurface).Eigen(iE).FileName);
-                            fbs = sSubject.Surface(iSurface).Filterbank;
-                            for iFb = 1:numel(fbs)
-                                if file_compare(fbs(iFb).ParentEigen, eigName)
-                                    [fbCreated, fbNode] = CreateNode('filterbank', ...
-                                        char(fbs(iFb).Comment), char(fbs(iFb).FileName), ...
-                                        iFb, iSubject, iSearch);
-                                    if fbCreated
-                                        chNode.add(fbNode);
+                            ws = sSubject.Surface(iSurface).Wavelet;
+                            for iW = 1:numel(ws)
+                                if file_compare(ws(iW).ParentEigen, eigName)
+                                    [wCreated, wNode] = CreateNode('wavelet', ...
+                                        char(ws(iW).Comment), char(ws(iW).FileName), ...
+                                        iW, iSubject, iSearch);
+                                    if wCreated
+                                        chNode.add(wNode);
                                     end
                                 end
                             end

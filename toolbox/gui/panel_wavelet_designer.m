@@ -1,12 +1,12 @@
-function varargout = panel_filter_designer(varargin)
+function varargout = panel_wavelet_designer(varargin)
 % PANEL_FILTER_DESIGNER: Transient control panel for the spatial filterbank designer.
 %
 % Owns the design state and the live-preview controller for a filterbank design
-% session. Shown by view_filter_designer via gui_show(...,'BrainstormTab',...) and
-% torn down by gui_hide('FilterDesigner'). Java control handles are stored in the
-% panel's sControls (bst_get('PanelControls','FilterDesigner')); the mutable MATLAB
-% session state lives in the preview figure's appdata ('FilterDesignerState'), which
-% the orchestrator (view_filter_designer) creates and links via ctxFn callbacks.
+% session. Shown by view_wavelet_designer via gui_show(...,'BrainstormTab',...) and
+% torn down by gui_hide('WaveletDesigner'). Java control handles are stored in the
+% panel's sControls (bst_get('PanelControls','WaveletDesigner')); the mutable MATLAB
+% session state lives in the preview figure's appdata ('WaveletDesignerState'), which
+% the orchestrator (view_wavelet_designer) creates and links via ctxFn callbacks.
 %
 % Workflow: the user designs ONE wavelet (kernel + scale + direction + chirality) and
 % sees it live on the cortex; optionally they then tile the spectrum into a small bank
@@ -15,7 +15,7 @@ function varargout = panel_filter_designer(varargin)
 % (the ambient 3D seed vector, set by azimuth/elevation sliders), and CHIRALITY (helicity
 % projector). Source vectors are full 3D ambient fields (never normal/tangent components).
 %
-% Dispatched subfunctions (panel_filter_designer('Name', args...)):
+% Dispatched subfunctions (panel_wavelet_designer('Name', args...)):
 %   CreatePanel(EigenMat, EigenFile, hFig, ctxFn) -> bstPanel
 %   SetSeedVertex(panelName, iVertex)   seed a delta at a clicked vertex
 %   SetSeedSource(panelName, J)         seed the active loaded source frame [3nV x 1]
@@ -23,7 +23,7 @@ function varargout = panel_filter_designer(varargin)
 %   OnSelectTile(panelName, j)          make tile j the displayed tile
 %   OnSave(panelName) / OnCancel(panelName)
 %
-% SEE ALSO: view_filter_designer, bst_filterbank_tiles, bst_dirac_eigenmodes_filter,
+% SEE ALSO: view_wavelet_designer, bst_filterbank_tiles, bst_dirac_eigenmodes_filter,
 %           bst_eigfilter_kernel, view_eigfilter_response
 %
 % Authors: Diellor Basha, 2026
@@ -36,7 +36,7 @@ end
 function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     import java.awt.*;
     import javax.swing.*;
-    panelName = 'FilterDesigner';
+    panelName = 'WaveletDesigner';
     isDirac = strcmpi(EigenMat.Variant, 'Dirac');
 
     % Responsive container (mirrors panel_surface / panel_scout): a BorderLayout root
@@ -115,7 +115,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
                'Op',load(file_fullpath(EigenMat.OperatorFile)), ...
                'Lambda',double(EigenMat.Lambda{1}(:)), ...
                'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[], 'ParamNames',{{}});
-    setappdata(hFig, 'FilterDesignerState', S);
+    setappdata(hFig, 'WaveletDesignerState', S);
 
     % --- build the initial scale sliders for the default kernel ---
     BuildParamWidgets(ctrl, hFig);
@@ -143,15 +143,15 @@ end
 
 %% ===== STATE ACCESS =====
 function [S, ctrl] = GetState(panelName) %#ok<DEFNU>
-    if (nargin < 1) || isempty(panelName); panelName = 'FilterDesigner'; end
+    if (nargin < 1) || isempty(panelName); panelName = 'WaveletDesigner'; end
     ctrl = bst_get('PanelControls', panelName);
     S = [];
     if isempty(ctrl) || ~isfield(ctrl,'hFig') || ~ishandle(ctrl.hFig); return; end
-    S = getappdata(ctrl.hFig, 'FilterDesignerState');
+    S = getappdata(ctrl.hFig, 'WaveletDesignerState');
 end
 
 function SetState(ctrl, S)
-    setappdata(ctrl.hFig, 'FilterDesignerState', S);
+    setappdata(ctrl.hFig, 'WaveletDesignerState', S);
 end
 
 
@@ -181,7 +181,7 @@ function BuildParamWidgets(ctrl, hFig)
     import javax.swing.*;
     key  = i_current_kernel(ctrl);
     meta = bst_eigfilter_kernel('info', key);
-    S = getappdata(hFig, 'FilterDesignerState');
+    S = getappdata(hFig, 'WaveletDesignerState');
     K = numel(S.Lambda);
     ctrl.jParams.removeAll();
     pf = fieldnames(meta.params);
@@ -198,12 +198,12 @@ function BuildParamWidgets(ctrl, hFig)
         % store handles as client properties so ReadParams / labels can retrieve them
         ctrl.jParams.putClientProperty(['slider_' nm], js);
         ctrl.jParams.putClientProperty(['title_' nm], jTitle);
-        java_setcb(js, 'StateChangedCallback', @(h,e) OnParamSlider('FilterDesigner', nm, h));
+        java_setcb(js, 'StateChangedCallback', @(h,e) OnParamSlider('WaveletDesigner', nm, h));
         names{end+1} = nm; %#ok<AGROW>
     end
     ctrl.jParams.revalidate(); ctrl.jParams.repaint();
     S.ParamNames = names;
-    setappdata(hFig, 'FilterDesignerState', S);
+    setappdata(hFig, 'WaveletDesignerState', S);
 end
 
 function params = ReadParams(S, ctrl)
@@ -248,7 +248,7 @@ end
 function i_param_label_update(panelName, name)
     ctrl = bst_get('PanelControls', panelName);
     if isempty(ctrl); return; end
-    S = getappdata(ctrl.hFig, 'FilterDesignerState');
+    S = getappdata(ctrl.hFig, 'WaveletDesignerState');
     js = ctrl.jParams.getClientProperty(['slider_' name]);
     jt = ctrl.jParams.getClientProperty(['title_' name]);
     if isempty(js) || isempty(jt); return; end
@@ -401,7 +401,7 @@ end
 
 %% ===== GATED SLIDER HANDLERS (label live; recompute on settle) =====
 function OnParamSlider(panelName, nm, js)
-    i_param_label_update('FilterDesigner', nm);
+    i_param_label_update('WaveletDesigner', nm);
     if ~js.getValueIsAdjusting(); Refresh(panelName); end
 end
 
@@ -497,14 +497,14 @@ function OnSave(panelName) %#ok<DEFNU>
     else
         Tiles = wavelet;                                % single wavelet
     end
-    fb = db_template('filterbankmat');
+    fb = db_template('waveletmat');
     fb.ParentEigen = S.EigenFile;
     fb.Variant     = S.Variant;
     fb.Tiles       = Tiles;                              % materialized bank (1 or N recipes)
     fb.Tiling      = struct('Wavelet', wavelet, 'Opts', opts);   % regenerable: design + tiling
     fb.Provenance  = struct('DesignVertex', S.iVertex, 'ComputeDate', datestr(now,'yyyy-mm-dd HH:MM:SS'));
     Comment = sprintf('%s filterbank (%d tile(s))', wavelet.Kernel, numel(Tiles));
-    db_add_filterbank(S.iSubject, S.EigenFile, fb, Comment);
+    db_add_wavelet(S.iSubject, S.EigenFile, fb, Comment);
     S.ctxFn.Close();
 end
 

@@ -1,15 +1,15 @@
-function hFig = view_filter_designer(NodeFile)
+function hFig = view_wavelet_designer(NodeFile)
 % VIEW_FILTER_DESIGNER: Open a transient Dirac/eigenmode filterbank design session.
 %
-% USAGE:  view_filter_designer(EigenFile)        % design a new bank on this eigenbasis
-%         view_filter_designer(FilterbankFile)   % re-open a saved bank for editing
+% USAGE:  view_wavelet_designer(EigenFile)        % design a new bank on this eigenbasis
+%         view_wavelet_designer(WaveletFile)   % re-open a saved bank for editing
 %
 % Opens a figure_3d cortex preview (a temporary unconstrained results file) and docks
-% panel_filter_designer. Clicking the cortex seeds a delta; the panel filters the seed
+% panel_wavelet_designer. Clicking the cortex seeds a delta; the panel filters the seed
 % live and pushes the field back to the preview. On Save/Cancel/figure-close the panel
 % undocks and the preview figure + spectrum strip close (a transient session).
 %
-% SEE ALSO: panel_filter_designer, tess_eigen, db_add_filterbank, view_eigfilter_response
+% SEE ALSO: panel_wavelet_designer, tess_eigen, db_add_wavelet, view_eigfilter_response
 %
 % Authors: Diellor Basha, 2026
 
@@ -21,7 +21,7 @@ function hFig = view_filter_designer(NodeFile)
         EigenMat  = load(file_fullpath(NodeFile));
         EigenFile = NodeFile;  loadBank = [];
     else
-        [~,~,~,iFb] = bst_get('FilterbankFile', NodeFile);
+        [~,~,~,iFb] = bst_get('WaveletFile', NodeFile);
         if isempty(iFb)
             bst_error('Node is neither an eigen nor a filterbank file.', 'Filter designer', 0);
             return;
@@ -33,7 +33,7 @@ function hFig = view_filter_designer(NodeFile)
     SurfaceFile = EigenMat.ParentSurface;
 
     % --- singleton: close any existing session ---
-    gui_hide('FilterDesigner');
+    gui_hide('WaveletDesigner');
     view_eigfilter_response('close');
 
     % --- preview figure: a transient unconstrained results node on the parent cortex,
@@ -43,9 +43,9 @@ function hFig = view_filter_designer(NodeFile)
     [tmpResultsFile, iStudyPrev] = i_create_preview(SurfaceFile, nV);
     [hFig, iDS, iResult] = i_open_preview(SurfaceFile, tmpResultsFile);
     if isempty(hFig); return; end
-    setappdata(hFig, 'FilterDesignerTemp',  tmpResultsFile);
-    setappdata(hFig, 'FilterDesignerStudy', iStudyPrev);
-    setappdata(hFig, 'FilterDesignerDS',    [iDS iResult]);
+    setappdata(hFig, 'WaveletDesignerTemp',  tmpResultsFile);
+    setappdata(hFig, 'WaveletDesignerStudy', iStudyPrev);
+    setappdata(hFig, 'WaveletDesignerDS',    [iDS iResult]);
 
     % --- context callbacks handed to the panel ---
     ctxFn = struct();
@@ -53,20 +53,20 @@ function hFig = view_filter_designer(NodeFile)
     ctxFn.Close     = @() i_teardown(hFig);
 
     % --- build + dock the panel, make it the active tab ---
-    bstPanel = panel_filter_designer('CreatePanel', EigenMat, EigenFile, hFig, ctxFn);
+    bstPanel = panel_wavelet_designer('CreatePanel', EigenMat, EigenFile, hFig, ctxFn);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
-    try, gui_brainstorm('SetSelectedTab', 'FilterDesigner', 0); catch, end %#ok<CTCH>
+    try, gui_brainstorm('SetSelectedTab', 'WaveletDesigner', 0); catch, end %#ok<CTCH>
 
     % --- show the full 3D source vectors by default (Dirac design is vector-native) ---
     try, figure_3d('SetShowSourceVectors', hFig, 1, 1); catch, end %#ok<CTCH>
 
     % --- link: closing the figure ends the session; clicks seed the delta ---
     set(hFig, 'CloseRequestFcn', @(h,e) i_teardown(h));
-    setappdata(hFig, 'FilterDesignerPick', @(iVertex) panel_filter_designer('SetSeedVertex', 'FilterDesigner', iVertex));
+    setappdata(hFig, 'WaveletDesignerPick', @(iVertex) panel_wavelet_designer('SetSeedVertex', 'WaveletDesigner', iVertex));
 
     % --- if re-opening a saved bank, restore its design + seed ---
     if ~isempty(loadBank)
-        panel_filter_designer('LoadBank', 'FilterDesigner', loadBank);
+        panel_wavelet_designer('LoadBank', 'WaveletDesigner', loadBank);
     end
 end
 
@@ -101,7 +101,7 @@ end
 function i_push_field(hFig, J)
     global GlobalData;
     if isempty(hFig) || ~ishandle(hFig); return; end
-    dsr = getappdata(hFig, 'FilterDesignerDS');
+    dsr = getappdata(hFig, 'WaveletDesignerDS');
     if isempty(dsr); return; end
     iDS = dsr(1); iResult = dsr(2);
     % normalize to [3nV x 2] (two identical time frames so the time slider is happy)
@@ -125,14 +125,14 @@ end
 %% ===== TEARDOWN (idempotent) =====
 function i_teardown(hFig)
     if isempty(hFig) || ~ishandle(hFig)
-        gui_hide('FilterDesigner'); view_eigfilter_response('close'); return;
+        gui_hide('WaveletDesigner'); view_eigfilter_response('close'); return;
     end
-    if isappdata(hFig, 'FilterDesignerClosing'); return; end     % guard re-entry
-    setappdata(hFig, 'FilterDesignerClosing', true);
-    gui_hide('FilterDesigner');
+    if isappdata(hFig, 'WaveletDesignerClosing'); return; end     % guard re-entry
+    setappdata(hFig, 'WaveletDesignerClosing', true);
+    gui_hide('WaveletDesigner');
     view_eigfilter_response('close');
-    tmpFile = getappdata(hFig, 'FilterDesignerTemp');
-    iStudy  = getappdata(hFig, 'FilterDesignerStudy');
+    tmpFile = getappdata(hFig, 'WaveletDesignerTemp');
+    iStudy  = getappdata(hFig, 'WaveletDesignerStudy');
     % close the figure via Brainstorm's bookkeeping
     try, bst_figures('DeleteFigure', hFig, []); catch, delete(hFig); end %#ok<CTCH>
     % remove the transient preview node + file

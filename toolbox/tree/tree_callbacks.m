@@ -2570,8 +2570,8 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@EigenView_Callback, filenameFull));
-                    % === DESIGN FILTERBANK ===
-                    gui_component('MenuItem', jPopup, [], 'Design filterbank...', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_filter_designer, filenameRelative));
+                    % === DESIGN WAVELET ===
+                    gui_component('MenuItem', jPopup, [], 'Design wavelet...', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_wavelet_designer, filenameRelative));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -2579,15 +2579,15 @@ switch (lower(action))
                     end
                 end
 
-%% ===== POPUP: FILTERBANK =====
-            case 'filterbank'
+%% ===== POPUP: WAVELET =====
+            case 'wavelet'
                 if (length(bstNodes) == 1)
                     % === EDIT / RE-OPEN ===
-                    gui_component('MenuItem', jPopup, [], 'Edit / re-open', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_filter_designer, filenameRelative));
+                    gui_component('MenuItem', jPopup, [], 'Edit / re-open', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_wavelet_designer, filenameRelative));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
-                        gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@FilterbankDelete_Callback, filenameRelative));
+                        gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@WaveletDelete_Callback, filenameRelative));
                     end
                 end
         end
@@ -4119,13 +4119,13 @@ function EigenDelete_Callback(filenameRelative)
         else
             sSurf = ProtocolSubjects.Subject(iSubject).Surface(iSurface);
         end
-        % Cascade: delete filterbanks nested under this eigen node (ParentEigen match)
-        if isfield(sSurf,'Filterbank') && ~isempty(sSurf.Filterbank)
-            isChild = arrayfun(@(f) file_compare(f.ParentEigen, file_short(filenameRelative)), sSurf.Filterbank);
+        % Cascade: delete wavelets nested under this eigen node (ParentEigen match)
+        if isfield(sSurf,'Wavelet') && ~isempty(sSurf.Wavelet)
+            isChild = arrayfun(@(f) file_compare(f.ParentEigen, file_short(filenameRelative)), sSurf.Wavelet);
             for f = find(isChild)
-                try, file_delete(file_fullpath(sSurf.Filterbank(f).FileName), 1); catch, end %#ok<CTCH>
+                try, file_delete(file_fullpath(sSurf.Wavelet(f).FileName), 1); catch, end %#ok<CTCH>
             end
-            sSurf.Filterbank(isChild) = [];
+            sSurf.Wavelet(isChild) = [];
         end
         % Remove the eigen entry itself
         sSurf.Eigen(iEigen) = [];
@@ -4140,22 +4140,22 @@ function EigenDelete_Callback(filenameRelative)
     end
 end
 
-%% ===== FILTERBANK: DELETE =====
-function FilterbankDelete_Callback(filenameRelative)
+%% ===== WAVELET: DELETE =====
+function WaveletDelete_Callback(filenameRelative)
     % Confirm deletion
-    if ~java_dialog('confirm', ['Delete filterbank?' 10 filenameRelative], 'Delete filterbank')
+    if ~java_dialog('confirm', ['Delete wavelet?' 10 filenameRelative], 'Delete wavelet')
         return;
     end
     % Resolve to full path and delete the file
     file_delete(file_fullpath(filenameRelative), 1);
-    % Find the filterbank entry in the DB and remove it
-    [~, iSubject, iSurface, iFb] = bst_get('FilterbankFile', filenameRelative);
+    % Find the wavelet entry in the DB and remove it
+    [~, iSubject, iSurface, iW] = bst_get('WaveletFile', filenameRelative);
     if ~isempty(iSubject)
         ProtocolSubjects = bst_get('ProtocolSubjects');
         if iSubject == 0
-            ProtocolSubjects.DefaultSubject.Surface(iSurface).Filterbank(iFb) = [];
+            ProtocolSubjects.DefaultSubject.Surface(iSurface).Wavelet(iW) = [];
         else
-            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Filterbank(iFb) = [];
+            ProtocolSubjects.Subject(iSubject).Surface(iSurface).Wavelet(iW) = [];
         end
         bst_set('ProtocolSubjects', ProtocolSubjects);
         db_save();
