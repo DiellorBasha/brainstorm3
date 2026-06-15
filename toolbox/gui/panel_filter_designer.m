@@ -180,11 +180,15 @@ function BuildParamWidgets(ctrl, hFig)
     ctrl.jParams.removeAll();
     pf = fieldnames(meta.params);
     names = {};
-    for i = 1:numel(pf)
+    nP = numel(pf);
+    for i = 1:nP
         nm = pf{i};
+        % Stagger default mode positions so multi-scale kernels (e.g. dog: t1,t2) start
+        % at DISTINCT scales rather than all at K/2 (which would make t1==t2).
+        defMode = max(1, min(K, round(K * i/(nP+1))));
         ctrl.jParams.add('br', JLabel([i_param_label(nm) ':']));
-        js = i_slider(ctrl.jParams, 'tab hfill', 1, K, round(K/2));
-        jv = gui_component('label', ctrl.jParams, '', sprintf('mode %d', round(K/2)));
+        js = i_slider(ctrl.jParams, 'tab hfill', 1, K, defMode);
+        jv = gui_component('label', ctrl.jParams, '', sprintf('mode %d', defMode));
         % store handles as client properties so ReadParams can retrieve them
         ctrl.jParams.putClientProperty(['slider_' nm], js);
         ctrl.jParams.putClientProperty(['vlabel_' nm], jv);
@@ -206,6 +210,14 @@ function params = ReadParams(S, ctrl)
         k = max(1, min(K, double(js.getValue())));
         params.(nm) = i_param_value(nm, S.Lambda(k));
     end
+    % dog (difference of Gaussians) requires t1 < t2; the two sliders are independent,
+    % so order them and guarantee a strict separation regardless of slider positions.
+    if isfield(params,'t1') && isfield(params,'t2')
+        lo = min(params.t1, params.t2);
+        hi = max(params.t1, params.t2);
+        if hi <= lo * (1 + 1e-3); hi = lo * 1.5; end
+        params.t1 = lo; params.t2 = hi;
+    end
 end
 
 function v = i_param_value(name, lamk)
@@ -220,8 +232,8 @@ end
 function lab = i_param_label(name)
     switch lower(name)
         case 't',    lab = 'Scale (coarse-fine)';
-        case 't1',   lab = 'Coarse edge';
-        case 't2',   lab = 'Fine edge';
+        case 't1',   lab = 'Band edge 1';      % dog passband ends (mode space); math
+        case 't2',   lab = 'Band edge 2';      % orders them so t1 < t2 automatically
         case 'beta', lab = 'Scale (coarse-fine)';
         otherwise,   lab = name;
     end
