@@ -4,6 +4,7 @@ function test_filter_designer_session()
 % Authors: Diellor Basha, 2026
     nFail = 0;
     EigenFile = bst_get('Subject',1).Surface(5).Eigen(1).FileName;
+    nFbStart = numel(bst_get('Subject',1).Surface(5).Filterbank);   % isolation: count before
 
     hFig = view_filter_designer(EigenFile); drawnow;
     nFail = nFail + chk('session figure opens', ishandle(hFig));
@@ -32,7 +33,9 @@ function test_filter_designer_session()
         ProtocolSubjects.Subject(iSub).Surface(iSurf).Filterbank(iFb) = [];
         bst_set('ProtocolSubjects', ProtocolSubjects); db_save();
     end
-    nFail = nFail + chk('delete removes the node', isempty(bst_get('Subject',1).Surface(5).Filterbank));
+    nFbEnd = numel(bst_get('Subject',1).Surface(5).Filterbank);
+    nFail = nFail + chk('delete removes the test node (count restored)', nFbEnd == nFbStart);
+    nFail = nFail + chk('test node file gone', ~file_exist(file_fullpath(newFile)));
 
     fprintf('\n==== test_filter_designer_session: %d failed ====\n', nFail);
     if nFail > 0, error('test_filter_designer_session FAILED'); end
