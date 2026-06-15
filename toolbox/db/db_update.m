@@ -429,6 +429,33 @@ if (CurrentDbVersion < 5.05)
     end
 end
 
+if (CurrentDbVersion < 5.06)
+    isSurfFixed = 0;
+    templateSurface = db_template('Surface');
+    for iProt = 1:length(ProtocolsListSubjects)
+        subjFields = fieldnames(ProtocolsListSubjects(iProt));
+        for iField = 1:length(subjFields)
+            subjField = subjFields{iField};
+            for iSubj = 1:length(ProtocolsListSubjects(iProt).(subjField))
+                sSurf = ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface;
+                if isempty(sSurf)
+                    continue;
+                end
+                [sSurf, isFix] = NormalizeSurfaceArray(sSurf, templateSurface);
+                if isFix
+                    ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface = sSurf;
+                    isSurfFixed = 1;
+                end
+            end
+        end
+    end
+    if isSurfFixed
+        disp('BST> Database structure: Adding wavelet support to surfaces...');
+        SaveProtocolSubjects();
+        disp('BST> Database structure: Done.');
+    end
+end
+
 %% ===== JUST BEFORE RETURNING TO STARTUP FUNCTION =====
 % Save the new database version
 if saveMetadata

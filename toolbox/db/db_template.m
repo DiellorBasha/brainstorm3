@@ -36,7 +36,7 @@ switch lower(structureName)
                           'Manifold',    struct('FileName',{},'Comment',{}), ...
                           'Eigen',       struct('FileName',{},'Comment',{},'Variant',{}), ...
                           'Operator',    struct('FileName',{},'Comment',{},'Variant',{}), ...
-                          'Filterbank',  struct('FileName',{},'Comment',{},'ParentEigen',{}));
+                          'Wavelet',     struct('FileName',{},'Comment',{},'ParentEigen',{}));
     case 'channel'
         template = struct('FileName',        '', ...
                           'Comment',         '', ...
@@ -153,13 +153,13 @@ switch lower(structureName)
               'GlobalVertices', [], ...   % 1x2 per-hemi cell: scatter maps
               'Provenance',     []);
 
-    case 'filterbankmat'
+    case 'waveletmat'
         template = struct(...
               'Comment',     '', ...
-              'ParentEigen', '', ...   % file_short of the eigen_ node this bank applies in
+              'ParentEigen', '', ...   % file_short of the eigen_ node this wavelet applies in
               'Variant',     '', ...   % operator variant inherited from eigen (e.g. 'Dirac')
               'Tiles',       [], ...   % 1xN struct array (Kernel,Params,Direction,Chirality,Axis)
-              'Tiling',      [], ...   % generator meta (Kernel,N,Spacing,LambdaRange,Chiralities)
+              'Tiling',      [], ...   % struct(Wavelet, Opts) - single design + tiling options
               'Provenance',  []);
 
     case 'fibersmat'
