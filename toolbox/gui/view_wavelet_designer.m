@@ -45,6 +45,14 @@ function hFig = view_wavelet_designer(NodeFile)
     bst_progress('text', 'Loading cortical frame (manifold)...');
     ManifoldMat = tess_manifold(SurfaceFile);   % find-or-load-or-create
     Frame = view_manifold('DeriveVertexFrame', ManifoldMat.Embedded, ManifoldMat.Gauge, nV);
+    % The manifold normal N = cross(U,V) has an arbitrary sign (the tangent comb is not
+    % consistently oriented). Flip it per-vertex to agree with the surface's OUTWARD
+    % vertex normals, so 'tilt to normal' = the outward cortical direction everywhere.
+    sSurf = in_tess_bst(SurfaceFile, 0);
+    if isfield(sSurf,'VertNormals') && ~isempty(sSurf.VertNormals) && size(sSurf.VertNormals,1) == size(Frame.N,1)
+        flip = sum(Frame.N .* double(sSurf.VertNormals), 2) < 0;
+        Frame.N(flip,:) = -Frame.N(flip,:);
+    end
 
     [tmpResultsFile, iStudyPrev] = i_create_preview(SurfaceFile, nV);
     [hFig, iDS, iResult] = i_open_preview(SurfaceFile, tmpResultsFile);
@@ -56,6 +64,7 @@ function hFig = view_wavelet_designer(NodeFile)
     % --- context callbacks handed to the panel ---
     ctxFn = struct();
     ctxFn.PushField = @(J) i_push_field(hFig, J);
+    ctxFn.DrawSeed  = @(iVertex, d) i_draw_seed_vector(hFig, iVertex, d);
     ctxFn.Close     = @() i_teardown(hFig);
 
     % --- build + dock the panel, make it the active tab ---
@@ -125,6 +134,43 @@ function i_push_field(hFig, J)
     panel_surface('UpdateSurfaceColormap', hFig);
     % re-plot the source-vector quiver from the new field (reads the override)
     try, figure_3d('SetShowSourceVectors', hFig, 1, 1); catch, end %#ok<CTCH>
+end
+
+
+%% ===== SEED-VECTOR MARKER (a cyan arrow at the clicked vertex) =====
+% Drawn with low-level line() primitives (NOT quiver3/plot3) so it never triggers
+% newplot, which would reset the figure_3d Axes3D and delete the cortex patch.
+% Re-drawn on every (re)seed so it tracks the in-plane/tilt sliders live.
+function i_draw_seed_vector(hFig, iVertex, d)
+    if isempty(hFig) || ~ishandle(hFig); return; end
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
+    if isempty(hAxes); return; end
+    hAxes = hAxes(1);
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || ~ishandle(TessInfo(1).hPatch); return; end
+    Vert = get(TessInfo(1).hPatch, 'Vertices');
+    if isempty(Vert) || iVertex > size(Vert,1); return; end
+    P = Vert(iVertex, :);
+    d = d(:).';  nd = norm(d);  if nd > 0; d = d / nd; end
+    bb = max(Vert,[],1) - min(Vert,[],1);
+    L  = 0.06 * norm(bb);                 % arrow length ~6% of the cortex extent
+    tip = P + L*d;
+    col = [0 1 1];                        % cyan, distinct from cortex/quiver/yellow pick
+
+    delete(findobj(hAxes, 'Tag', 'WaveletSeedVector'));   % clear the previous arrow
+    line('Parent',hAxes, 'XData',[P(1) tip(1)], 'YData',[P(2) tip(2)], 'ZData',[P(3) tip(3)], ...
+        'Color',col, 'LineWidth',3, 'Tag','WaveletSeedVector', 'Clipping','off');
+    % 4-barb arrowhead (a cone built from line segments)
+    ref = [1 0 0];  if abs(d*ref') > 0.9; ref = [0 1 0]; end
+    p1 = cross(d, ref); p1 = p1/norm(p1);
+    p2 = cross(d, p1);  p2 = p2/norm(p2);
+    base = tip - 0.35*L*d;
+    barbs = [p1; -p1; p2; -p2];
+    for k = 1:4
+        b = base + 0.18*L*barbs(k,:);
+        line('Parent',hAxes, 'XData',[tip(1) b(1)], 'YData',[tip(2) b(2)], 'ZData',[tip(3) b(3)], ...
+            'Color',col, 'LineWidth',3, 'Tag','WaveletSeedVector', 'Clipping','off');
+    end
 end
 
 

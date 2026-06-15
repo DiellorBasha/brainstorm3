@@ -365,6 +365,9 @@ function SetSeedVertex(panelName, iVertex) %#ok<DEFNU>
     S.iVertex = iVertex;                 % SeedDirection reads the vertex's local frame
     nV = double(max(cellfun(@(x) max(x(:)), S.EigenMat.GlobalVertices)));
     d = SeedDirection(S, ctrl);
+    if isfield(S.ctxFn,'DrawSeed') && ~isempty(S.ctxFn.DrawSeed)
+        S.ctxFn.DrawSeed(iVertex, d);    % cyan seed-vector marker that tracks the sliders
+    end
     Jdelta = zeros(3*nV, 1);
     Jdelta(3*(iVertex-1) + (1:3)) = d(:);
     [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, Jdelta, 'custom', ...
