@@ -45,6 +45,32 @@ else
     hFig = hFig(1);
 end
 ax = getappdata(hFig, 'Axes');
+
+% --- bank mode: g is a struct describing several tiles (a filterbank) ---
+%     g.Kernels {cell of @(l)} ; g.Active (active tile index) ; g.OnSelect @(j) (curve click)
+if isstruct(g) && isfield(g, 'Kernels')
+    lambdas = double(lambdas(:));
+    lmax = max([lambdas; eps]);
+    xg = linspace(0, lmax, 400)';
+    cla(ax); hold(ax, 'on');
+    % faint ticks at the real eigenvalues
+    plot(ax, [lambdas lambdas]', repmat([0;1], 1, numel(lambdas)), '-', 'Color',[.9 .9 .9]);
+    nT  = numel(g.Kernels);
+    act = 1; if isfield(g,'Active') && ~isempty(g.Active); act = g.Active; end
+    for j = 1:nT
+        yj = g.Kernels{j}(xg);
+        if (j == act); col = [.85 .2 .2]; lw = 2.5; else; col = [.6 .6 .6]; lw = 1; end
+        hL = plot(ax, xg, real(yj(:)), '-', 'Color', col, 'LineWidth', lw);
+        if isfield(g,'OnSelect') && ~isempty(g.OnSelect)
+            set(hL, 'ButtonDownFcn', @(h,e) g.OnSelect(j), 'HitTest','on', 'PickableParts','visible');
+        end
+    end
+    xlim(ax, [0 lmax]);
+    xlabel(ax, '\lambda (eigenvalue)'); ylabel(ax, 'g(\lambda)'); grid(ax, 'on');
+    if (nargin >= 3) && ~isempty(titleStr); title(ax, titleStr, 'Interpreter','none'); end
+    return;
+end
+
 lambdas = double(lambdas(:));
 lmax = max([lambdas; eps]);
 xg = linspace(0, lmax, 400)';
