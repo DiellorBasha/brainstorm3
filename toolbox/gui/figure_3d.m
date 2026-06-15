@@ -1699,16 +1699,6 @@ function DisplayFigurePopup(hFig)
                 end
             end
         end
-        % === HELMHOLTZ / VORTICITY (unconstrained Dirac source) ===
-        if ~isempty(ResultsFile)
-            iTessSrc = find(arrayfun(@(t) ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
-            if ~isempty(iTessSrc)
-                [iDSh, iResh] = bst_memory('GetDataSetResult', TessInfo(iTessSrc).DataSource.FileName);
-                if ~isempty(iResh) && isequal(GlobalData.DataSet(iDSh).Results(iResh).nComponents, 3)
-                    gui_component('MenuItem', jPopup, [], 'Helmholtz / vorticity (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_helmholtz, ResultsFile));
-                end
-            end
-        end
         % === VIEW SPECTRUM ===
         if strcmpi(FigureType, 'Topography') && strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.SubType, '2DLayout') && getappdata(hFig, 'isStatic')
             jItem = gui_component('MenuItem', jPopup, [], [Modality ' Spectrum'], IconLoader.ICON_SPECTRUM, [], @(h,ev)view_spectrum(TfFile, 'Spectrum'));

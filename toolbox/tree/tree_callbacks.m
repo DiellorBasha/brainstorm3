@@ -1879,6 +1879,10 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue image', IconLoader.ICON_IMAGE, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'image'));
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'trace'));
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenspectrum (single time)', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
+                    % Helmholtz/vorticity decomposition of the (unconstrained) Dirac source
+                    % field (curl/divergence/stream/potential + vortex cores). Opens its own
+                    % figure + panel; nComponents==3 is validated in view_helmholtz.
+                    gui_component('MenuItem', jMenuActivations, [], 'Helmholtz / vorticity (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_helmholtz, filenameRelative));
                 end
 
                 % === MENU: SIMULATE DATA ===

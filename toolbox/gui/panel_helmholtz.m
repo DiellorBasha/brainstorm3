@@ -37,18 +37,21 @@ function bstPanelNew = CreatePanel(hFig) %#ok<DEFNU>
 end
 
 function OnScalar(panelName, scalarName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if isempty(ctrl); return; end
+    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
     view_helmholtz('SetScalar', ctrl.hFig, scalarName);
 end
 function OnLayers(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if isempty(ctrl); return; end
+    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
     view_helmholtz('SetLayers', ctrl.hFig, ctrl.jCores.isSelected(), ctrl.jQuiver.isSelected());
+end
+function tf = i_valid(ctrl)
+    tf = ~isempty(ctrl) && isfield(ctrl,'hFig') && ~isempty(ctrl.hFig) && all(ishandle(ctrl.hFig));
 end
 function SetReadout(text) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', 'Helmholtz'); if isempty(ctrl); return; end
     ctrl.jReadout.setText(text);
 end
 function OnClose(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if isempty(ctrl); return; end
-    if ishandle(ctrl.hFig); view_helmholtz('Close', ctrl.hFig); end
+    ctrl = bst_get('PanelControls', panelName);
+    if i_valid(ctrl); view_helmholtz('Close', ctrl.hFig); else; gui_hide(panelName); end
 end

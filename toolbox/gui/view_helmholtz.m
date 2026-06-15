@@ -15,15 +15,36 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    % dispatch string-first calls (from the panel / the overlay hook)
+    % dispatch string-first calls (from the panel / the overlay hook). The frame/overlay
+    % updaters need a live figure: ignore stale calls whose handle is gone (panel outliving
+    % a deleted figure). Close runs regardless (it tears the panel down).
     if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetScalar','SetLayers','Close','UpdateFrame'}))
+        if any(strcmp(SrcResultsFile, {'SetScalar','SetLayers','UpdateFrame'})) && ...
+                (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
+            return;
+        end
         feval(SrcResultsFile, varargin{:});
         return;
     end
 
+    % Resolve the source results; load it if it is not already in a DataSet (the view is
+    % launched from the database tree node). Use the FULL loader so kernel links resolve
+    % their imaging kernel + recordings (the light loader leaves nComponents/kernel unset).
+    % A bare shared kernel has no recordings -> LoadResultsFileFull errors (no time); we
+    % catch that and tell the user to open a recordings link instead.
     [iDS, iResult] = bst_memory('GetDataSetResult', SrcResultsFile);
     if isempty(iResult)
-        bst_error('Could not resolve the source results.', 'Helmholtz view', 0); return;
+        try
+            [iDS, iResult] = bst_memory('LoadResultsFileFull', SrcResultsFile);
+        catch
+            iResult = [];
+        end
+    end
+    if isempty(iResult)
+        bst_error(['Could not load this source over time.' 10 ...
+            'For a Dirac source, open the Helmholtz view on a recordings link (under a data block), not the shared kernel.'], ...
+            'Helmholtz view', 0);
+        return;
     end
     R = GlobalData.DataSet(iDS).Results(iResult);
     if isempty(R.nComponents) || (R.nComponents ~= 3)
@@ -49,6 +70,10 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     [~, iT0] = bst_memory('GetTimeVector', iDS, iResult, 'CurrentTimeIndex');
     if isempty(iT0) || iT0 < 1; iT0 = 1; end
     Jt0 = double(bst_memory('GetResultsValues', iDS, iResult, [], iT0, 0));   % [3nV x 1]
+    if size(Jt0,1) ~= 3*nV
+        bst_progress('stop');
+        bst_error('Source field does not match the surface (vertex count).', 'Helmholtz view', 0); return;
+    end
     Ht0 = bst_dirac_helmholtz('Frame', Op, Jt0);
     bst_progress('stop');
 
@@ -72,7 +97,9 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     set(hFig, 'CloseRequestFcn', @(h,e) Close(h));
     UpdateFrame(hFig);
 
-    % dock the control panel
+    % dock the control panel (clear any stale prior instance first so its controls do not
+    % linger pointing at a deleted figure)
+    gui_hide('Helmholtz');
     bstPanel = panel_helmholtz('CreatePanel', hFig);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Helmholtz', 0); catch, end %#ok<CTCH>
@@ -143,7 +170,7 @@ end
 
 %% ===== close (delete figure first while registered, then the temp node) =====
 function Close(hFig) %#ok<DEFNU>
-    St = getappdata(hFig, 'HelmholtzState');
+    if ~isempty(hFig) && all(ishandle(hFig)); St = getappdata(hFig, 'HelmholtzState'); else; St = []; end
     try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     try, rmappdata(hFig, 'CustomOverlayFcn'); catch, end %#ok<CTCH>
     try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>

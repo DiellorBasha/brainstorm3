@@ -11,10 +11,11 @@ function test_helmholtz_view()
     R.ImageGridAmp = randn(3*nV,3)*1e-9; R.nComponents=3; R.Time=0:2;
     R.HeadModelType='surface'; R.SurfaceFile=file_short(SurfaceFile); R.Comment='SYN helmholtz src';
     srcFile = db_add(-3, R);
-    [hSrc,~] = view_surface_data(SurfaceFile, srcFile, [], 'NewFigure'); drawnow;
 
+    % launch like the database-tree node does: the results file is NOT loaded/displayed;
+    % view_helmholtz must load it itself and open its own figure
     hFig = view_helmholtz(srcFile); drawnow;
-    nFail = nFail + chk('view opens', ishandle(hFig));
+    nFail = nFail + chk('view opens (loads unshown results)', ishandle(hFig));
     St = getappdata(hFig,'HelmholtzState');
     nFail = nFail + chk('default scalar is Curl', strcmp(St.Scalar,'Curl'));
 
@@ -46,8 +47,12 @@ function test_helmholtz_view()
     view_helmholtz('Close', hFig); drawnow;
     nFail = nFail + chk('panel closed', isempty(bst_get('PanelControls','Helmholtz')));
     nFail = nFail + chk('figure closed', ~ishandle(hFig));
+    % stale-handle guard: a dispatched updater call on the now-deleted figure must no-op
+    okGuard = true;
+    try, view_helmholtz('SetLayers', hFig, true, true); catch; okGuard = false; end
+    try, view_helmholtz('SetScalar', hFig, 'Div'); catch; okGuard = false; end
+    nFail = nFail + chk('stale dispatch is ignored (no error)', okGuard);
     % cleanup synthetic source
-    try, bst_figures('DeleteFigure', hSrc, []); catch, end
     [~,iSt] = bst_get('AnyFile', srcFile); file_delete(file_fullpath(srcFile),1); db_reload_studies(iSt);
 
     fprintf('\n==== test_helmholtz_view: %d failed ====\n', nFail);
