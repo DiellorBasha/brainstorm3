@@ -173,6 +173,35 @@ function Close(panelName) %#ok<DEFNU>
     gui_hide(panelName);
 end
 
+%% ===== SAVE the filtered series as a new results node =====
+function SaveFiltered(panelName) %#ok<DEFNU>
+    global GlobalData;
+    [St, ctrl] = GetState(panelName);
+    if isempty(St); return; end
+    name   = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    params = bst_eigfilter_panel('ReadParams', ctrl.jParams, St.Lambda);
+    Jf = ComputeFiltered(St, name, params);
+
+    % copy the source results metadata, replace the data with the filtered series
+    srcFile = GlobalData.DataSet(St.iDS).Results(St.iResult).FileName;
+    R = in_bst_results(srcFile, 0);                 % full struct (no kernel reconstruction)
+    R.ImageGridAmp  = Jf;
+    R.ImagingKernel = [];
+    R.Comment       = [R.Comment ' | dirac filter(' name ')'];
+    R = bst_history('add', R, 'filter', ['Spatial filter: dirac ' name]);
+
+    % save into the same study as the source
+    [sStudy, iStudy] = bst_get('AnyFile', srcFile);
+    ProtocolInfo = bst_get('ProtocolInfo');
+    c = clock; strTime = sprintf('%02.0f%02.0f%02.0f_%02.0f%02.0f', c(1)-2000, c(2:5));
+    OutFile = bst_fullfile(ProtocolInfo.STUDIES, bst_fileparts(sStudy.FileName), ['results_diracfilt_' strTime '.mat']);
+    OutFile = file_unique(OutFile);
+    bst_save(OutFile, R, 'v6');
+    db_add_data(iStudy, OutFile, R);
+    panel_protocols('UpdateNode', 'Study', iStudy);
+    bst_progress('text', 'Saved filtered source map.');
+end
+
 %% ===== materialize the full displayed field as [3nVert x nT] =====
 function J = i_full_field(iDS, iResult, nVert)
     global GlobalData;
