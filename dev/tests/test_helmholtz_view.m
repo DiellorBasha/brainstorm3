@@ -37,6 +37,12 @@ function test_helmholtz_view()
     nMarkers = numel(findobj(hAx,'Tag','HelmholtzCore'));
     nFail = nFail + chk('core markers match active frame', nMarkers == numel(Ht.Cores));
 
+    % field quiver toggles on/off without error (one NaN-separated line object)
+    view_helmholtz('SetLayers', hFig, true, true); drawnow;
+    nFail = nFail + chk('quiver renders when on', numel(findobj(hAx,'Tag','HelmholtzQuiver')) == 1);
+    view_helmholtz('SetLayers', hFig, true, false); drawnow;
+    nFail = nFail + chk('quiver removed when off', isempty(findobj(hAx,'Tag','HelmholtzQuiver')));
+
     % time-following: not static, and a cursor move decomposes the new frame on demand
     nFail = nFail + chk('figure not static (follows time)', ~isequal(getappdata(hFig,'isStatic'),1));
     panel_time('SetCurrentTime', 2.0); drawnow;

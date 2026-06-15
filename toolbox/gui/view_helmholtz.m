@@ -149,8 +149,12 @@ function UpdateFrame(hFig)
         d = [Jt(3*(vi-1)+1), Jt(3*(vi-1)+2), Jt(3*(vi-1)+3)];
         nd = sqrt(sum(d.^2,2)); d = d ./ max(nd,eps);
         P = V(vi,:); Q = P + L*d;
-        line('Parent',hAx, 'XData',[P(:,1) Q(:,1) nan(numel(vi),1)]', ...
-             'YData',[P(:,2) Q(:,2) nan(numel(vi),1)]', 'ZData',[P(:,3) Q(:,3) nan(numel(vi),1)]', ...
+        % one line object, segments NaN-separated: flatten [start; end; NaN] column-major
+        nanv = nan(numel(vi),1);
+        Xd = reshape([P(:,1) Q(:,1) nanv]', 1, []);
+        Yd = reshape([P(:,2) Q(:,2) nanv]', 1, []);
+        Zd = reshape([P(:,3) Q(:,3) nanv]', 1, []);
+        line('Parent',hAx, 'XData',Xd, 'YData',Yd, 'ZData',Zd, ...
              'Color',[.2 .2 .2], 'Tag','HelmholtzQuiver', 'Clipping','off');
     end
 end
