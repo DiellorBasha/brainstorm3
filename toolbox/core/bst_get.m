@@ -1377,6 +1377,59 @@ switch contextName
             end
         end
 
+    case 'FilterbankFile'
+        % No protocol in database
+        if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
+            return;
+        end
+        % Get list of current protocol subjects
+        ProtocolSubjects = GlobalData.DataBase.ProtocolSubjects(GlobalData.DataBase.iProtocol);
+        if isempty(ProtocolSubjects)
+            return
+        end
+
+        % Parse inputs
+        if (nargin == 2)
+            FilterbankFile = varargin{2};
+        else
+            error('Invalid call to bst_get().');
+        end
+
+        % Remove SUBJECTS path from FilterbankFile
+        FilterbankFile = file_short(FilterbankFile);
+        % Look for filterbank file in DefaultSubject
+        if ~isempty(ProtocolSubjects.DefaultSubject)
+            for iSurf = 1:length(ProtocolSubjects.DefaultSubject.Surface)
+                if isfield(ProtocolSubjects.DefaultSubject.Surface(iSurf), 'Filterbank') && ...
+                        ~isempty(ProtocolSubjects.DefaultSubject.Surface(iSurf).Filterbank)
+                    iFb = find(file_compare(FilterbankFile, {ProtocolSubjects.DefaultSubject.Surface(iSurf).Filterbank.FileName}), 1);
+                    if ~isempty(iFb)
+                        argout1 = ProtocolSubjects.DefaultSubject;
+                        argout2 = 0;
+                        argout3 = iSurf;
+                        argout4 = iFb;
+                        return
+                    end
+                end
+            end
+        end
+        % Look for filterbank file in all subjects
+        for iSubj = 1:length(ProtocolSubjects.Subject)
+            for iSurf = 1:length(ProtocolSubjects.Subject(iSubj).Surface)
+                if isfield(ProtocolSubjects.Subject(iSubj).Surface(iSurf), 'Filterbank') && ...
+                        ~isempty(ProtocolSubjects.Subject(iSubj).Surface(iSurf).Filterbank)
+                    iFb = find(file_compare(FilterbankFile, {ProtocolSubjects.Subject(iSubj).Surface(iSurf).Filterbank.FileName}), 1);
+                    if ~isempty(iFb)
+                        argout1 = ProtocolSubjects.Subject(iSubj);
+                        argout2 = iSubj;
+                        argout3 = iSurf;
+                        argout4 = iFb;
+                        return
+                    end
+                end
+            end
+        end
+
 %% ==== SURFACE FILE BY TYPE ====
     % Usage : [sSurface, iSurface] = bst_get('SurfaceFileByType', iSubject,    SurfaceType)
     %         [sSurface, iSurface] = bst_get('SurfaceFileByType', SubjectFile, SurfaceType)
