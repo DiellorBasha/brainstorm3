@@ -41,8 +41,12 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     H = bst_dirac_helmholtz(Dirac, LBO, Surf, J);
     bst_progress('stop');
 
-    % dedicated figure: show the default scalar (Curl) as a 1-comp results node
-    tmpFile = i_make_scalar_results(SurfaceFile, H.Curl, R.Time);
+    % dedicated figure: show the default scalar (Curl) as a 1-comp results node.
+    % Use the FULL expanded time vector (GlobalData stores Results.Time compressed to
+    % [start end]); a 2-value Time against an nT-column scalar makes the figure "static"
+    % (NumberOfSamples<=2) and the time cursor would no longer drive UpdateSurfaceData.
+    fullTime = bst_memory('GetTimeVector', iDS, iResult);
+    tmpFile = i_make_scalar_results(SurfaceFile, H.Curl, fullTime);
     [hFig, iDSp, iResp] = i_open(SurfaceFile, tmpFile);
     if isempty(hFig); return; end
     St = struct('srcField',J, 'H',H, 'Scalar','Curl', 'ShowCores',true, 'ShowQuiver',false, ...
@@ -120,11 +124,15 @@ function Close(hFig) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState');
     try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     try, rmappdata(hFig, 'CustomOverlayFcn'); catch, end %#ok<CTCH>
+    % Delete the figure FIRST (while still registered) so bst_figures deregisters it
+    % cleanly; removing the temp results node before this would reload the default study
+    % and drop the figure from GlobalData, leaving a dangling handle.
+    try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>
+    try, bst_figures('DeleteFigure', hFig, []); catch, delete(hFig); end %#ok<CTCH>
+    % Then remove the transient scalar results node.
     if ~isempty(St) && isfield(St,'TmpFile') && ~isempty(St.TmpFile)
         try, file_delete(file_fullpath(St.TmpFile), 1); db_reload_studies(-3); catch, end %#ok<CTCH>
     end
-    try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>
-    try, bst_figures('DeleteFigure', hFig, []); catch, delete(hFig); end %#ok<CTCH>
 end
 
 %% ===== helpers =====
