@@ -43,6 +43,19 @@ function test_dirac_helmholtz()
     nFail = nFail + chk('Frame Psi  == Decompose col 1', isequal(Ht.Psi,  H.Psi(:,1)));
     nFail = nFail + chk('Frame cores match col 1', numel(Ht.Cores)==numel(H.Cores{1}));
 
+    % --- (5) Hodge decomposition: component fields, exact reconstruction, dominance ---
+    Op2 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Ht  = bst_dirac_helmholtz('Frame', Op2, J(:,1));
+    nFail = nFail + chk('component fields are [nV x 3]', isequal(size(Ht.Virr),[size(V,1) 3]) && isequal(size(Ht.Vsol),[size(V,1) 3]));
+    recon = Ht.Virr + Ht.Vsol + Ht.Vharm;
+    nFail = nFail + chk('exact reconstruction Virr+Vsol+Vharm == J', max(abs(recon(:)-Ht.Vtot(:))) < 1e-9*max(abs(Ht.Vtot(:))));
+    Hirr = bst_dirac_helmholtz('Frame', Op2, reshape(Ht.Virr',[],1));
+    Hsol = bst_dirac_helmholtz('Frame', Op2, reshape(Ht.Vsol',[],1));
+    nFail = nFail + chk('irrotational is divergence-dominated', sum(Hirr.Div.^2) > sum(Hirr.Curl.^2));
+    nFail = nFail + chk('solenoidal is curl-dominated',         sum(Hsol.Curl.^2) > sum(Hsol.Div.^2));
+    nFail = nFail + chk('Cores + Sources are struct arrays', isstruct(Ht.Cores) && isstruct(Ht.Sources));
+    nFail = nFail + chk('HarmFrac in [0,1]', isscalar(Ht.HarmFrac) && Ht.HarmFrac >= 0 && Ht.HarmFrac <= 1.0001);
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end
