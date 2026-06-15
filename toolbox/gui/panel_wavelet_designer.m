@@ -57,8 +57,10 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok
     if isDirac
         % seed direction: azimuth + elevation -> full ambient 3D unit vector
         gui_component('label', jSec1, 'br', '<HTML><I>Seed direction (local frame)</I>');
-        [jAz, jAzVal] = i_labeled_slider(jSec1, '<HTML>In-plane angle: 0&deg;',  '0',  '360', 0, 360, 0);
-        [jEl, jElVal] = i_labeled_slider(jSec1, '<HTML>Tilt to normal: 90&deg;', '-90','90', -90, 90, 90);
+        [jAz, jAzVal] = i_labeled_slider(jSec1, '<HTML>In-plane angle: 0&deg;', '0', '360', 0, 360, 0);
+        % Tilt spans pure tangent (0 deg, in the cortical plane) to pure outward normal
+        % (90 deg). No inward (negative) tilt: a cortical source never points into the sheet.
+        [jEl, jElVal] = i_labeled_slider(jSec1, '<HTML>Tilt: 90&deg;', 'tangent', 'normal', 0, 90, 90);
         % chirality (helicity of the reconstructed vector field; None = real field)
         % radios on their own row so '- left' is not clipped at the panel edge
         gui_component('label', jSec1, 'br', 'Chirality:');
@@ -417,7 +419,7 @@ function OnDirSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl) && ~isempty(ctrl.jAz)
         ctrl.jAzVal.setText(sprintf('<HTML>In-plane angle: %d&deg;', double(ctrl.jAz.getValue())));
-        ctrl.jElVal.setText(sprintf('<HTML>Tilt to normal: %d&deg;', double(ctrl.jEl.getValue())));
+        ctrl.jElVal.setText(sprintf('<HTML>Tilt: %d&deg;', double(ctrl.jEl.getValue())));
     end
     if ~js.getValueIsAdjusting(); ReseedAndRefresh(panelName); end
 end
