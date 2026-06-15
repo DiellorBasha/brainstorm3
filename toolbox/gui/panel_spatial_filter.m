@@ -101,6 +101,78 @@ function [St, ctrl] = GetState(panelName) %#ok<DEFNU>
     St = getappdata(ctrl.hFig, 'SpatialFilterState');
 end
 
+%% ===== PURE: filter the whole series with a kernel =====
+function Jf = ComputeFiltered(St, kernelName, params) %#ok<DEFNU>
+    g  = bst_eigfilter_kernel(kernelName, params);
+    Jf = real(bst_dirac_eigenmodes_filter(St.EigenMat, St.Mass, St.Orig, 'custom', 'TransferFn', g));
+end
+
+%% ===== APPLY (swap in the filtered series) =====
+function Apply(panelName)
+    global GlobalData;
+    [St, ctrl] = GetState(panelName);
+    if isempty(St); return; end
+    name   = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    params = bst_eigfilter_panel('ReadParams', ctrl.jParams, St.Lambda);
+    Jf = ComputeFiltered(St, name, params);
+    GlobalData.DataSet(St.iDS).Results(St.iResult).ImageGridAmp  = Jf;
+    GlobalData.DataSet(St.iDS).Results(St.iResult).ImagingKernel = [];
+    St.isOn = true; setappdata(ctrl.hFig, 'SpatialFilterState', St);
+    i_refresh(ctrl.hFig, St.iTess);
+end
+
+%% ===== RESTORE (put the original back) =====
+function Restore(panelName)
+    global GlobalData;
+    [St, ctrl] = GetState(panelName);
+    if isempty(St) || ~ishandle(ctrl.hFig); return; end
+    GlobalData.DataSet(St.iDS).Results(St.iResult).ImageGridAmp  = St.Orig;
+    GlobalData.DataSet(St.iDS).Results(St.iResult).ImagingKernel = St.OrigKernel;
+    St.isOn = false; setappdata(ctrl.hFig, 'SpatialFilterState', St);
+    i_refresh(ctrl.hFig, St.iTess);
+end
+
+function OnToggle(panelName) %#ok<DEFNU>
+    [St, ctrl] = GetState(panelName);
+    if isempty(St); return; end
+    if ctrl.jFilterOn.isSelected(); Apply(panelName); else; Restore(panelName); end
+end
+
+function OnKernelChanged(panelName) %#ok<DEFNU>
+    [St, ctrl] = GetState(panelName); %#ok<ASGLU>
+    if isempty(ctrl); return; end
+    key = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    bst_eigfilter_panel('BuildSliders', ctrl.jParams, key, St.Lambda, @() OnKernelOrScale(panelName));
+    OnKernelOrScale(panelName);
+end
+
+% kernel/scale changed: re-apply only if the filter is currently on
+function OnKernelOrScale(panelName)
+    [St, ctrl] = GetState(panelName); %#ok<ASGLU>
+    if ~isempty(ctrl) && ctrl.jFilterOn.isSelected(); Apply(panelName); end
+end
+
+%% ===== refresh the figure display =====
+function i_refresh(hFig, iTess)
+    TessInfo = getappdata(hFig, 'Surface');
+    for k = 1:numel(TessInfo); TessInfo(k).DataMinMax = []; end
+    setappdata(hFig, 'Surface', TessInfo);
+    panel_surface('UpdateSurfaceData', hFig);
+    panel_surface('UpdateSurfaceColormap', hFig);
+    try, figure_3d('SetShowSourceVectors', hFig, iTess, 1); catch, end %#ok<CTCH>
+end
+
+%% ===== CLOSE (restore original, undock) =====
+function Close(panelName) %#ok<DEFNU>
+    [St, ctrl] = GetState(panelName);
+    if ~isempty(St) && ~isempty(ctrl) && ishandle(ctrl.hFig)
+        if St.isOn; Restore(panelName); end
+        try, set(ctrl.hFig, 'DeleteFcn', ''); catch, end %#ok<CTCH>
+        try, rmappdata(ctrl.hFig, 'SpatialFilterState'); catch, end %#ok<CTCH>
+    end
+    gui_hide(panelName);
+end
+
 %% ===== materialize the full displayed field as [3nVert x nT] =====
 function J = i_full_field(iDS, iResult, nVert)
     global GlobalData;
