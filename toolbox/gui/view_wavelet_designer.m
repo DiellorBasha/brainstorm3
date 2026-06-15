@@ -40,6 +40,12 @@ function hFig = view_wavelet_designer(NodeFile)
     %     registered in the global default study (always exists) so view_surface_data
     %     can resolve it; removed on teardown ---
     nV = double(max(cellfun(@(x) max(x(:)), EigenMat.GlobalVertices)));
+
+    % --- local cortical frame (U,V,N) per vertex from the manifold node ---
+    bst_progress('text', 'Loading cortical frame (manifold)...');
+    ManifoldMat = tess_manifold(SurfaceFile);   % find-or-load-or-create
+    Frame = view_manifold('DeriveVertexFrame', ManifoldMat.Embedded, ManifoldMat.Gauge, nV);
+
     [tmpResultsFile, iStudyPrev] = i_create_preview(SurfaceFile, nV);
     [hFig, iDS, iResult] = i_open_preview(SurfaceFile, tmpResultsFile);
     if isempty(hFig); return; end
@@ -53,7 +59,7 @@ function hFig = view_wavelet_designer(NodeFile)
     ctxFn.Close     = @() i_teardown(hFig);
 
     % --- build + dock the panel, make it the active tab ---
-    bstPanel = panel_wavelet_designer('CreatePanel', EigenMat, EigenFile, hFig, ctxFn);
+    bstPanel = panel_wavelet_designer('CreatePanel', EigenMat, EigenFile, hFig, ctxFn, Frame);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'WaveletDesigner', 0); catch, end %#ok<CTCH>
 

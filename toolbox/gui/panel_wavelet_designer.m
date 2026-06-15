@@ -32,7 +32,7 @@ end
 
 
 %% ===== CREATE PANEL =====
-function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
+function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok<DEFNU>
     import java.awt.*;
     import javax.swing.*;
     panelName = 'WaveletDesigner';
@@ -56,9 +56,9 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
     jChirNone = []; jChirPlus = []; jChirMinus = [];
     if isDirac
         % seed direction: azimuth + elevation -> full ambient 3D unit vector
-        gui_component('label', jSec1, 'br', '<HTML><I>Seed direction (ambient 3D)</I>');
-        [jAz, jAzVal] = i_labeled_slider(jSec1, '<HTML>Azimuth: 0&deg;',   '0',   '360', 0, 360, 0);
-        [jEl, jElVal] = i_labeled_slider(jSec1, '<HTML>Elevation: 0&deg;', '-90', '90', -90, 90, 0);
+        gui_component('label', jSec1, 'br', '<HTML><I>Seed direction (local frame)</I>');
+        [jAz, jAzVal] = i_labeled_slider(jSec1, '<HTML>In-plane angle: 0&deg;',  '0',  '360', 0, 360, 0);
+        [jEl, jElVal] = i_labeled_slider(jSec1, '<HTML>Tilt to normal: 90&deg;', '-90','90', -90, 90, 90);
         % chirality (helicity of the reconstructed vector field; None = real field)
         % radios on their own row so '- left' is not clipped at the panel edge
         gui_component('label', jSec1, 'br', 'Chirality:');
@@ -110,6 +110,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn) %#ok<DEFNU>
                'Variant',EigenMat.Variant, 'isDirac',isDirac, 'ctxFn',ctxFn, ...
                'Op',load(file_fullpath(EigenMat.OperatorFile)), ...
                'Lambda',double(EigenMat.Lambda{1}(:)), ...
+               'FrameU',Frame.U, 'FrameV',Frame.V, 'FrameN',Frame.N, ...
                'SeedCoeffs',[], 'ActiveTile',1, 'iVertex',[], 'Tiles',[], 'ParamNames',{{}});
     setappdata(hFig, 'WaveletDesignerState', S);
 
@@ -298,13 +299,20 @@ function tf = i_is_tiling(opts)
     tf = (opts.N > 1) || ~isempty(opts.Chiralities);
 end
 
+%% ===== PURE: embed a local-frame direction into an ambient 3-vector =====
+function d = EmbedDirection(phiDeg, thetaDeg, U, V, N) %#ok<DEFNU>
+    d = cosd(thetaDeg) * (cosd(phiDeg)*U(:).' + sind(phiDeg)*V(:).') + sind(thetaDeg)*N(:).';
+    nrm = norm(d); if nrm > 0; d = d / nrm; end
+end
+
 function d = SeedDirection(S, ctrl)
     d = [1 0 0];
-    if ~S.isDirac || isempty(ctrl.jAz); return; end
-    az = double(ctrl.jAz.getValue());   % degrees
-    el = double(ctrl.jEl.getValue());
-    d = [cosd(el)*cosd(az), cosd(el)*sind(az), sind(el)];
-    nrm = norm(d); if nrm > 0; d = d / nrm; end
+    if ~S.isDirac || isempty(ctrl.jAz) || isempty(S.iVertex); return; end
+    v = S.iVertex;
+    if v > size(S.FrameU,1); return; end
+    phi = double(ctrl.jAz.getValue());   % in-plane angle (deg)
+    th  = double(ctrl.jEl.getValue());   % tilt toward normal (deg)
+    d = EmbedDirection(phi, th, S.FrameU(v,:), S.FrameV(v,:), S.FrameN(v,:));
 end
 
 
@@ -354,13 +362,14 @@ end
 function SetSeedVertex(panelName, iVertex) %#ok<DEFNU>
     [S, ctrl] = GetState(panelName);
     if isempty(S); return; end
+    S.iVertex = iVertex;                 % SeedDirection reads the vertex's local frame
     nV = double(max(cellfun(@(x) max(x(:)), S.EigenMat.GlobalVertices)));
     d = SeedDirection(S, ctrl);
     Jdelta = zeros(3*nV, 1);
     Jdelta(3*(iVertex-1) + (1:3)) = d(:);
     [~,~,c] = bst_dirac_eigenmodes_filter(S.EigenMat, S.Op.Mass, Jdelta, 'custom', ...
                   'TransferFn', @(l) ones(size(l)), 'ReturnCoeffs', true);
-    S.SeedCoeffs = c;  S.iVertex = iVertex;
+    S.SeedCoeffs = c;
     SetState(ctrl, S);
     Refresh(panelName);
 end
@@ -404,8 +413,8 @@ end
 function OnDirSlider(panelName, js)
     [S, ctrl] = GetState(panelName); %#ok<ASGLU>
     if ~isempty(ctrl) && ~isempty(ctrl.jAz)
-        ctrl.jAzVal.setText(sprintf('<HTML>Azimuth: %d&deg;', double(ctrl.jAz.getValue())));
-        ctrl.jElVal.setText(sprintf('<HTML>Elevation: %d&deg;', double(ctrl.jEl.getValue())));
+        ctrl.jAzVal.setText(sprintf('<HTML>In-plane angle: %d&deg;', double(ctrl.jAz.getValue())));
+        ctrl.jElVal.setText(sprintf('<HTML>Tilt to normal: %d&deg;', double(ctrl.jEl.getValue())));
     end
     if ~js.getValueIsAdjusting(); ReseedAndRefresh(panelName); end
 end
