@@ -1689,16 +1689,6 @@ function DisplayFigurePopup(hFig)
             jItem = gui_component('MenuItem', jPopup, [], 'View sources', IconLoader.ICON_RESULTS, [], @(h,ev)bst_figures('ViewResults',hFig));
             jItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_MASK));
         end
-        % === SPATIAL FILTER (unconstrained Dirac source) ===
-        if ~isempty(ResultsFile)
-            iTessSrc = find(arrayfun(@(t) ~isempty(t.DataSource) && strcmpi(t.DataSource.Type,'Source'), TessInfo), 1);
-            if ~isempty(iTessSrc)
-                [iDSr, iResr] = bst_memory('GetDataSetResult', TessInfo(iTessSrc).DataSource.FileName);
-                if ~isempty(iResr) && isequal(GlobalData.DataSet(iDSr).Results(iResr).nComponents, 3)
-                    gui_component('MenuItem', jPopup, [], 'Spatial filter (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@panel_spatial_filter, 'Start', hFig));
-                end
-            end
-        end
         % === VIEW SPECTRUM ===
         if strcmpi(FigureType, 'Topography') && strcmpi(GlobalData.DataSet(iDS).Figure(iFig).Id.SubType, '2DLayout') && getappdata(hFig, 'isStatic')
             jItem = gui_component('MenuItem', jPopup, [], [Modality ' Spectrum'], IconLoader.ICON_SPECTRUM, [], @(h,ev)view_spectrum(TfFile, 'Spectrum'));
