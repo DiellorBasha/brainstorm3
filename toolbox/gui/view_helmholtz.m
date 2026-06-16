@@ -136,10 +136,14 @@ function UpdateFrame(hFig)
     delete(findobj(hAx,'Tag','HelmholtzCore'));
     if St.ShowMarkers && ~isempty(mk)
         V = get(TessInfo(St.iTess).hPatch, 'Vertices');
+        prA = [mk.persistence];
+        mxf = max([prA(isfinite(prA)), eps]);              % frame max finite persistence
         for k = 1:numel(mk)
             v = mk(k).iVertex; col = [1 0 0]; if mk(k).charge < 0; col = [0 0 1]; end
+            pk = mk(k).persistence; if ~isfinite(pk); pk = mxf; end   % globals -> max size
+            sz = 5 + 11 * max(0, min(1, pk/mxf));          % marker size 5..16 by persistence
             line('Parent',hAx,'XData',V(v,1),'YData',V(v,2),'ZData',V(v,3), 'Marker','o', ...
-                'MarkerSize',9,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
+                'MarkerSize',sz,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
                 'Tag','HelmholtzCore','Clipping','off');
         end
     end
