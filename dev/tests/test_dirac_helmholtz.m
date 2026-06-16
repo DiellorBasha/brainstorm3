@@ -73,6 +73,13 @@ function test_dirac_helmholtz()
     cL = cr([cr.iVertex]==vL);
     nFail = nFail + chk('sub-vertex pos near planted peak', ~isempty(cL) && norm(cL(1).pos - V(vL,:)) < 0.004);
 
+    % --- (7) Decompose emits per-frame Sources matching Frame ---
+    H7 = bst_dirac_helmholtz(Dirac, LBO, Surf, J);
+    nFail = nFail + chk('Decompose has Sources cell', isfield(H7,'Sources') && iscell(H7.Sources) && numel(H7.Sources)==2);
+    Op7 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Ht7 = bst_dirac_helmholtz('Frame', Op7, J(:,1));
+    nFail = nFail + chk('Decompose Sources col1 == Frame', numel(H7.Sources{1})==numel(Ht7.Sources));
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end

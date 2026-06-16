@@ -157,10 +157,11 @@ function H = Decompose(DiracOp, LBO, Surf, J)
     H = struct('Curl',zeros(nVtot,nT), 'Div',zeros(nVtot,nT), ...
                'Psi',zeros(nVtot,nT),  'Phi',zeros(nVtot,nT),  'Fmag',zeros(nVtot,nT));
     H.Cores = cell(1, nT);
+    H.Sources = cell(1, nT);
     for t = 1:nT
         Ht = Frame(Op, J(:,t));
         H.Curl(:,t)=Ht.Curl; H.Div(:,t)=Ht.Div; H.Psi(:,t)=Ht.Psi;
-        H.Phi(:,t)=Ht.Phi;   H.Fmag(:,t)=Ht.Fmag;  H.Cores{t}=Ht.Cores;
+        H.Phi(:,t)=Ht.Phi;   H.Fmag(:,t)=Ht.Fmag;  H.Cores{t}=Ht.Cores;  H.Sources{t}=Ht.Sources;
     end
 end
 
