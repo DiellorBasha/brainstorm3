@@ -80,6 +80,16 @@ function test_dirac_helmholtz()
     Ht7 = bst_dirac_helmholtz('Frame', Op7, J(:,1));
     nFail = nFail + chk('Decompose Sources col1 == Frame', numel(H7.Sources{1})==numel(Ht7.Sources));
 
+    % --- (8) cores carry a hemisphere tag consistent with Op.vH ---
+    Op8 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Ht8 = bst_dirac_helmholtz('Frame', Op8, J(:,1));
+    nFail = nFail + chk('cores have hemi field', isfield(Ht8.Cores,'hemi'));
+    okHemi = true;
+    for c = Ht8.Cores
+        okHemi = okHemi && ismember(c.iVertex, Op8.vH{c.hemi});
+    end
+    nFail = nFail + chk('hemi matches Op.vH membership', okHemi);
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end

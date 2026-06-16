@@ -196,7 +196,7 @@ function cores = FindCoresOp(field, Op, omega) %#ok<DEFNU>
             vloc = C.vertex(k);  vg = vH(vloc);
             cores(end+1) = i_make_core(vg, omega(vg), C.chirality(k), C.persistence(k), ...
                 C.isGlobal(k), C.birth(k), C.death(k), ...
-                i_subvertex(vloc, fl, nb, Vloc, Vn)); %#ok<AGROW>
+                i_subvertex(vloc, fl, nb, Vloc, Vn), hh); %#ok<AGROW>
         end
     end
     if ~isempty(cores)
@@ -215,21 +215,21 @@ function cores = FindCores(field, VertConn, omega) %#ok<DEFNU>
     for k = 1:numel(C.vertex)
         v = C.vertex(k);
         cores(end+1) = i_make_core(v, omega(v), C.chirality(k), C.persistence(k), ...
-            C.isGlobal(k), C.birth(k), C.death(k), nan(1,3)); %#ok<AGROW>
+            C.isGlobal(k), C.birth(k), C.death(k), nan(1,3), 1); %#ok<AGROW>
     end
 end
 
 function s = i_empty_cores()
     s = struct('iVertex',{},'charge',{},'chirality',{},'omega',{},'persistence',{}, ...
-               'isGlobal',{},'birth',{},'death',{},'pos',{});
+               'isGlobal',{},'birth',{},'death',{},'pos',{},'hemi',{});
 end
 
-function s = i_make_core(vg, om, chirality, persistence, isGlobal, birth, death, pos)
+function s = i_make_core(vg, om, chirality, persistence, isGlobal, birth, death, pos, hemi)
     % charge = vorticity sign (display continuity); chirality = topological sweep sign.
     if om ~= 0, ch = sign(om); else, ch = -chirality; end   % preserve legacy fallback
     s = struct('iVertex',vg, 'charge',ch, 'chirality',chirality, 'omega',om, ...
                'persistence',persistence, 'isGlobal',logical(isGlobal), ...
-               'birth',birth, 'death',death, 'pos',pos);
+               'birth',birth, 'death',death, 'pos',pos, 'hemi',hemi);
 end
 
 % Sub-vertex localization: quadratic fit of FIELD over the 1-ring in a tangent chart.

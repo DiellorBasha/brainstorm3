@@ -20,8 +20,8 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','Close','UpdateFrame'}))
-        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','UpdateFrame'})) && ...
+    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','Close','UpdateFrame'}))
+        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','UpdateFrame'})) && ...
                 (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
             return;
         end
@@ -71,7 +71,10 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
                 'ShowVectors',true, 'ShowMarkers',true, 'iTess',iTess, 'nV',nV, ...
                 'EigenMat',EigenMat, 'Mass',{OpMat.Mass}, 'Lambda',Lambda, ...
                 'Smooth',struct('on',false,'name','heat','params',struct()), 'GateFrac',0, ...
-                'Cache',containers.Map('KeyType','double','ValueType','any'));
+                'Cache',containers.Map('KeyType','double','ValueType','any'), ...
+                'Track',false, 'LastIT',[], 'Tracks',[], 'Graph',[], 'Ctx',{cell(1,numel(Op.vH))}, ...
+                'V2H',[], 'Vertices',Surf.Vertices, 'Faces',double(Surf.Faces), ...
+                'TrackComp','', 'TrackSmooth',false);
     setappdata(hFig, 'HelmholtzState', St);
     setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));
     set(hFig, 'CloseRequestFcn', @(h,e) Close(h));
@@ -123,15 +126,11 @@ function UpdateFrame(hFig)
     else
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
     end
-    % --- component markers, pruned by the persistence gate (fraction of frame max
-    %     persistence); the never-merging global core of each hemisphere is always kept ---
+    % --- component markers, pruned PER HEMISPHERE by the persistence gate;
+    %     each hemisphere's global core is always kept ---
     mk = comp.Markers;
     if ~isempty(mk) && St.GateFrac > 0
-        pr  = [mk.persistence];
-        mxf = max([pr(isfinite(pr)), 0]);
-        if mxf > 0
-            mk = mk(isinf(pr) | (pr >= St.GateFrac * mxf));
-        end
+        mk = bst_persistence_gate(mk, St.GateFrac);
     end
     delete(findobj(hAx,'Tag','HelmholtzCore'));
     if St.ShowMarkers && ~isempty(mk)
@@ -148,6 +147,10 @@ function UpdateFrame(hFig)
         end
     end
     i_readout(comp.Kind, mk, Ht);
+    if St.Track
+        St = i_track_update(hFig, St, hAx, mk, iT);
+        setappdata(hFig, 'HelmholtzState', St);
+    end
 end
 
 %% ===== panel actions =====
@@ -165,6 +168,20 @@ end
 function SetMarkers(hFig, show) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
     St.ShowMarkers = show; setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
+end
+function SetTrack(hFig, isOn) %#ok<DEFNU>
+    St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
+    St.Track = logical(isOn);
+    if ~St.Track
+        hAx = findobj(hFig,'-depth',1,'Tag','Axes3D');
+        if ~isempty(hAx)
+            delete(findobj(hAx(1),'Tag','HelmholtzTrack'));
+            delete(findobj(hAx(1),'Tag','HelmholtzCentroid'));
+        end
+        St.Tracks = []; St.LastIT = [];
+    end
+    setappdata(hFig, 'HelmholtzState', St);
+    UpdateFrame(hFig);
 end
 function SetSmoothing(hFig, isOn, name, params) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
@@ -220,20 +237,154 @@ end
 function i_readout(kind, mk, Ht)
     switch kind
         case 'vortex'
-            if isempty(mk); txt = '0 vortices, 0 antivortices';
-            else
-                np=sum([mk.charge]>0); nn=sum([mk.charge]<0);
-                pr=[mk.persistence]; tp=max(pr(isfinite(pr)));
-                if isempty(tp); tp=0; end
-                txt=sprintf('%d vortices (+), %d antivortices (-), net %+d; top persistence %.2g', np, nn, np-nn, tp);
-            end
+            txt = i_count_str(mk, 'vortices', 'antivortices', Ht);
         case 'source'
-            if isempty(mk); txt = '0 sources, 0 sinks';
-            else; np=sum([mk.charge]>0); nn=sum([mk.charge]<0); txt=sprintf('%d sources (+), %d sinks (-), net %+d', np, nn, np-nn); end
+            txt = i_count_str(mk, 'sources', 'sinks', []);
         case 'harm'
             txt = sprintf('harmonic energy: %.1f%% of |J|^2', 100*Ht.HarmFrac);
         otherwise
             txt = 'total field |J|';
     end
     try, panel_helmholtz('SetReadout', txt); catch, end %#ok<CTCH>
+end
+
+function txt = i_count_str(mk, posName, negName, Ht)
+    if isempty(mk)
+        txt = sprintf('0 %s, 0 %s', posName, negName);
+    else
+        hh = [mk.hemi];  parts = {};
+        for h = unique(hh)
+            m = mk(hh==h);
+            np = sum([m.charge] > 0);  nn = sum([m.charge] < 0);
+            parts{end+1} = sprintf('H%d: %d(+), %d(-)', h, np, nn); %#ok<AGROW>
+        end
+        txt = strjoin(parts, '  |  ');
+        if ~isempty(Ht)
+            pr = [mk.persistence];  tp = max(pr(isfinite(pr)));  if isempty(tp), tp = 0; end
+            txt = sprintf('%s  (top persistence %.2g)', txt, tp);
+        end
+    end
+end
+
+%% ===== trajectory tracking (accumulated over contiguous forward play) =====
+function St = i_track_update(hFig, St, hAx, mk, iT) %#ok<INUSL>
+    MAXJUMP = 0.012;                                  % m, max core jump per frame
+    V = St.Vertices;
+    if isempty(St.Graph),  St.Graph = i_build_graph(V, St.Faces);  end
+    if isempty(St.V2H)
+        St.V2H = zeros(size(V,1),1);
+        for h = 1:numel(St.Op.vH), St.V2H(St.Op.vH{h}) = h; end
+    end
+    % reset on toggle-on, non-contiguous time, backward step, or component/smoothing change
+    reset = isempty(St.LastIT) || (iT ~= St.LastIT + 1) ...
+            || ~strcmp(St.TrackComp, St.Component) || (St.TrackSmooth ~= St.Smooth.on);
+    if reset
+        St.Tracks = i_seed_tracks(mk, St.V2H);
+    else
+        heads = i_heads(St.Tracks, V);
+        cur   = i_cores_struct(mk, St.V2H, V);
+        match = bst_vortex_link_step(heads.s, cur, MAXJUMP);
+        usedC = false(1, numel(cur));
+        for hi = 1:numel(match)
+            ti = heads.idx(hi);
+            if match(hi) > 0
+                c = match(hi);  usedC(c) = true;
+                p = shortestpath(St.Graph, St.Tracks(ti).coreVerts(end), cur(c).iVertex);
+                if numel(p) >= 2, St.Tracks(ti).path = [St.Tracks(ti).path, p(2:end)]; end
+                St.Tracks(ti).coreVerts(end+1) = cur(c).iVertex;
+                St.Tracks(ti).persist = cur(c).persistence;
+            else
+                St.Tracks(ti).open = false;
+            end
+        end
+        born = i_seed_tracks(mk(~usedC), St.V2H);
+        St.Tracks = [St.Tracks, born];
+    end
+    % draw accumulated polylines
+    delete(findobj(hAx,'Tag','HelmholtzTrack'));
+    for t = St.Tracks
+        if numel(t.path) < 2, continue; end
+        col = [1 0 0]; if t.chirality < 0, col = [0 0 1]; end
+        line('Parent',hAx,'XData',V(t.path,1),'YData',V(t.path,2),'ZData',V(t.path,3), ...
+             'Color',col,'LineWidth',2,'Tag','HelmholtzTrack','Clipping','off');
+    end
+    % --- Karcher-mean centroids for the top-N longest-lived, strongest tracks ---
+    delete(findobj(hAx,'Tag','HelmholtzCentroid'));
+    openT = find([St.Tracks.open] & arrayfun(@(t)numel(t.coreVerts), St.Tracks) >= 3);
+    if ~isempty(openT)
+        [~, ord] = sort(arrayfun(@(i)St.Tracks(i).persist, openT), 'descend');
+        openT = openT(ord(1:min(5, numel(ord))));            % cap to top-5
+        for i = openT
+            hh = St.Tracks(i).hemi;
+            [ctx, loc] = i_hemi_context(St, hh);
+            lv = loc(St.Tracks(i).coreVerts);  lv = lv(lv > 0);
+            if numel(lv) < 3, continue; end
+            try
+                c = nxr.manifold.query.center(ctx, lv(:));
+            catch
+                continue;
+            end
+            if isscalar(c), p = St.Vertices(St.Op.vH{hh}(c), :); else, p = c(:)'; end
+            col = [1 0 0]; if St.Tracks(i).chirality < 0, col = [0 0 1]; end
+            line('Parent',hAx,'XData',p(1),'YData',p(2),'ZData',p(3),'Marker','d', ...
+                 'MarkerSize',12,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
+                 'Tag','HelmholtzCentroid','Clipping','off');
+        end
+    end
+    St.LastIT = iT;  St.TrackComp = St.Component;  St.TrackSmooth = St.Smooth.on;
+end
+
+function [ctx, loc] = i_hemi_context(St, hh)
+% Cache one nxr context per hemisphere (in root appdata, keyed by hemisphere -- survives
+% the per-call St; rebuilt once per session) + a global->local vertex map.
+    key = sprintf('HelmCtx%d', hh);
+    ctx = getappdata(0, key);
+    if isempty(ctx)
+        vH = St.Op.vH{hh};  nVh = numel(vH);
+        isV = false(size(St.Vertices,1),1); isV(vH) = true;
+        fMask = all(isV(St.Faces), 2);
+        mapV = zeros(size(St.Vertices,1),1); mapV(vH) = 1:nVh;
+        Floc = mapV(St.Faces(fMask,:));  Vloc = St.Vertices(vH,:);
+        ctx = nxr.manifold.context(Vloc, int32(Floc));
+        setappdata(0, key, ctx);
+    end
+    loc = zeros(size(St.Vertices,1),1);
+    loc(St.Op.vH{hh}) = 1:numel(St.Op.vH{hh});
+end
+
+function G = i_build_graph(V, F)
+    E = [F(:,[1 2]); F(:,[2 3]); F(:,[3 1])];
+    E = unique(sort(E,2), 'rows');
+    w = sqrt(sum((V(E(:,1),:) - V(E(:,2),:)).^2, 2));
+    G = graph(E(:,1), E(:,2), w, size(V,1));
+end
+
+function T = i_seed_tracks(mk, V2H)
+    T = i_empty_track();
+    for k = 1:numel(mk)
+        v = mk(k).iVertex;
+        T(end+1) = struct('coreVerts',v, 'path',v, 'chirality',sign(mk(k).charge), ...
+                          'hemi',V2H(v), 'open',true, 'persist',mk(k).persistence, ...
+                          'centroid',[]); %#ok<AGROW>
+    end
+end
+function t = i_empty_track()
+    t = struct('coreVerts',{},'path',{},'chirality',{},'hemi',{},'open',{},'persist',{},'centroid',{});
+end
+function h = i_heads(Tracks, V)
+    h.idx = find([Tracks.open]);
+    s = struct('pos',{},'charge',{},'hemi',{});
+    for i = h.idx
+        v = Tracks(i).coreVerts(end);
+        s(end+1) = struct('pos',V(v,:), 'charge',Tracks(i).chirality, 'hemi',Tracks(i).hemi); %#ok<AGROW>
+    end
+    h.s = s;
+end
+function cur = i_cores_struct(mk, V2H, V)
+    cur = struct('pos',{},'charge',{},'hemi',{},'iVertex',{},'persistence',{});
+    for k = 1:numel(mk)
+        v = mk(k).iVertex;
+        cur(end+1) = struct('pos',V(v,:), 'charge',mk(k).charge, 'hemi',V2H(v), ...
+                            'iVertex',v, 'persistence',mk(k).persistence); %#ok<AGROW>
+    end
 end

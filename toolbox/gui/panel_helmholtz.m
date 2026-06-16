@@ -49,6 +49,8 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
     jSec.add('br hfill', jThresh);
     java_setcb(jThresh, 'StateChangedCallback', @(h,e) OnGate(panelName));
 
+    jTrack = gui_component('checkbox', jSec, 'br', 'Track trajectory');
+    java_setcb(jTrack, 'ActionPerformedCallback', @(h,e) OnTrack(panelName));
     jReadout = gui_component('label', jSec, 'br', '');
     jClose  = gui_component('button', jSec, 'br', 'Close');
     java_setcb(jClose, 'ActionPerformedCallback', @(h,e) OnClose(panelName));
@@ -56,7 +58,7 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
     jOpt.add(jSec); jPanelNew.add(jOpt, java.awt.BorderLayout.NORTH);
     ctrl = struct('hFig',hFig, 'jVec',jVec, 'jMark',jMark, 'jReadout',jReadout, ...
                   'jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
-                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda, 'jThresh',jThresh);
+                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda, 'jThresh',jThresh, 'jTrack',jTrack);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
@@ -71,6 +73,10 @@ end
 function OnMarkers(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
     view_helmholtz('SetMarkers', ctrl.hFig, ctrl.jMark.isSelected());
+end
+function OnTrack(panelName) %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
+    view_helmholtz('SetTrack', ctrl.hFig, ctrl.jTrack.isSelected());
 end
 function OnKernel(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
