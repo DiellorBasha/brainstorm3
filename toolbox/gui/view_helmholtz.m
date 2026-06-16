@@ -105,9 +105,10 @@ function UpdateFrame(hFig)
     setappdata(hFig,'Surface',TessInfo);
     panel_surface('UpdateSurfaceColormap', hFig);
     TessInfo = getappdata(hFig,'Surface');
-    % --- component vector field as the native quiver ---
+    % --- quiver is ALWAYS the (smoothed) total source field, regardless of component;
+    %     switching component changes only the scalar colormap + markers ---
     if St.ShowVectors
-        setappdata(hFig, 'QuiverVectorOverride', comp.Vec);
+        setappdata(hFig, 'QuiverVectorOverride', Ht.Vtot);
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 1); catch, end %#ok<CTCH>
         try, figure_3d('PlotSourceVectors', hFig, St.iTess); catch, end %#ok<CTCH>
     else

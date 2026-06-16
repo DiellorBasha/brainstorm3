@@ -26,20 +26,20 @@ function test_helmholtz_view()
     nFail = nFail + chk('Total quiver = J', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));
     nFail = nFail + chk('Total colormap source', strcmpi(getappdata(hFig,'Colormap').Type,'source'));
 
-    % Solenoidal: quiver = Vsol, colormap stat2, markers = vortex cores
+    % Solenoidal: quiver STAYS the total field, colormap -> psi (stat2), markers = vortex cores
     view_helmholtz('SetComponent', hFig, 'Solen'); drawnow;
-    nFail = nFail + chk('Solen quiver = Vsol', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vsol));
+    nFail = nFail + chk('Solen quiver stays = total field', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));
     nFail = nFail + chk('Solen colormap stat2', strcmpi(getappdata(hFig,'Colormap').Type,'stat2'));
     nFail = nFail + chk('Solen markers = vortex cores', numel(findobj(hAx,'Tag','HelmholtzCore'))==numel(Ht.Cores));
 
-    % Irrotational: quiver = Virr, markers = sources/sinks
+    % Irrotational: quiver STAYS the total field, markers = sources/sinks
     view_helmholtz('SetComponent', hFig, 'Irrot'); drawnow;
-    nFail = nFail + chk('Irrot quiver = Virr', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Virr));
+    nFail = nFail + chk('Irrot quiver stays = total field', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));
     nFail = nFail + chk('Irrot markers = sources/sinks', numel(findobj(hAx,'Tag','HelmholtzCore'))==numel(Ht.Sources));
 
-    % Harmonic: quiver = Vharm, no markers, source colormap
+    % Harmonic: quiver STAYS the total field, no markers
     view_helmholtz('SetComponent', hFig, 'Harm'); drawnow;
-    nFail = nFail + chk('Harm quiver = Vharm', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vharm));
+    nFail = nFail + chk('Harm quiver stays = total field', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));
     nFail = nFail + chk('Harm has no markers', isempty(findobj(hAx,'Tag','HelmholtzCore')));
 
     % toggles
