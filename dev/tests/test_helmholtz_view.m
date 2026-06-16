@@ -54,6 +54,25 @@ function test_helmholtz_view()
     [~, iT2] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     nFail = nFail + chk('cursor move decomposed a new frame', isKey(St.Cache, iT2) && (St.Cache.Count >= 2));
 
+    % --- smoothing: a heat low-pass on the active frame thins the vortex cores ---
+    view_helmholtz('SetComponent', hFig, 'Solen'); view_helmholtz('SetMarkers', hFig, true);
+    view_helmholtz('SetGate', hFig, 0); drawnow;
+    nRaw = numel(findobj(hAx,'Tag','HelmholtzCore'));
+    St = getappdata(hFig,'HelmholtzState');  Lam = St.Lambda;
+    tt = 1 / Lam(max(1, round(numel(Lam)/3)));               % heat scale at a low-ish mode
+    view_helmholtz('SetSmoothing', hFig, true, 'heat', struct('t',tt)); drawnow;
+    nSmooth = numel(findobj(hAx,'Tag','HelmholtzCore'));
+    nFail = nFail + chk('smoothing thins vortex cores', nSmooth < nRaw);
+    St2 = getappdata(hFig,'HelmholtzState');
+    nFail = nFail + chk('smoothing change cleared the cache', St2.Cache.Count <= 1);
+
+    % --- magnitude gate is monotonic (more pruning -> fewer markers) ---
+    view_helmholtz('SetGate', hFig, 0);   drawnow; g0 = numel(findobj(hAx,'Tag','HelmholtzCore'));
+    view_helmholtz('SetGate', hFig, 0.5); drawnow; g5 = numel(findobj(hAx,'Tag','HelmholtzCore'));
+    view_helmholtz('SetGate', hFig, 0.95);drawnow; g9 = numel(findobj(hAx,'Tag','HelmholtzCore'));
+    nFail = nFail + chk('gate monotonic (g0>=g5>=g9)', (g0>=g5) && (g5>=g9));
+    view_helmholtz('SetSmoothing', hFig, false, 'heat', struct('t',tt)); view_helmholtz('SetGate', hFig, 0); drawnow;
+
     % close + stale guard
     view_helmholtz('Close', hFig); drawnow;
     nFail = nFail + chk('panel closed', isempty(bst_get('PanelControls','Helmholtz')));
