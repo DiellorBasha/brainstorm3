@@ -123,11 +123,15 @@ function UpdateFrame(hFig)
     else
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
     end
-    % --- component markers, pruned by the magnitude gate (fraction of frame max |omega|) ---
+    % --- component markers, pruned by the persistence gate (fraction of frame max
+    %     persistence); the never-merging global core of each hemisphere is always kept ---
     mk = comp.Markers;
     if ~isempty(mk) && St.GateFrac > 0
-        om = abs([mk.omega]);  mx = max(om);
-        if mx > 0; mk = mk(om >= St.GateFrac * mx); end
+        pr  = [mk.persistence];
+        mxf = max([pr(isfinite(pr)), 0]);
+        if mxf > 0
+            mk = mk(isinf(pr) | (pr >= St.GateFrac * mxf));
+        end
     end
     delete(findobj(hAx,'Tag','HelmholtzCore'));
     if St.ShowMarkers && ~isempty(mk)
@@ -213,7 +217,12 @@ function i_readout(kind, mk, Ht)
     switch kind
         case 'vortex'
             if isempty(mk); txt = '0 vortices, 0 antivortices';
-            else; np=sum([mk.charge]>0); nn=sum([mk.charge]<0); txt=sprintf('%d vortices (+), %d antivortices (-), net %+d', np, nn, np-nn); end
+            else
+                np=sum([mk.charge]>0); nn=sum([mk.charge]<0);
+                pr=[mk.persistence]; tp=max(pr(isfinite(pr)));
+                if isempty(tp); tp=0; end
+                txt=sprintf('%d vortices (+), %d antivortices (-), net %+d; top persistence %.2g', np, nn, np-nn, tp);
+            end
         case 'source'
             if isempty(mk); txt = '0 sources, 0 sinks';
             else; np=sum([mk.charge]>0); nn=sum([mk.charge]<0); txt=sprintf('%d sources (+), %d sinks (-), net %+d', np, nn, np-nn); end

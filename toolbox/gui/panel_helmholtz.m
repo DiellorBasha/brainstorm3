@@ -2,8 +2,8 @@ function varargout = panel_helmholtz(varargin)
 % PANEL_HELMHOLTZ: Controls for the Helmholtz components view (view_helmholtz). A Smoothing
 % section (shared Dirac-eigenmode kernel + scale, on/off) low-passes the active frame before
 % the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal / Harmonic)
-% swaps the cortex colormap + markers (the quiver stays the total field); a Marker threshold
-% slider prunes weak singular points. Plus Show vectors, Show singular points, a readout, and
+% swaps the cortex colormap + markers (the quiver stays the total field); a persistence gate
+% slider prunes low-persistence singular points. Plus Show vectors, Show singular points, a readout, and
 % Close.
 % Authors: Diellor Basha, 2026
     eval(macro_method);
@@ -43,8 +43,8 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
     java_setcb(jVec,  'ActionPerformedCallback', @(h,e) OnVectors(panelName));
     java_setcb(jMark, 'ActionPerformedCallback', @(h,e) OnMarkers(panelName));
 
-    % --- Marker threshold (magnitude gate) ---
-    gui_component('label', jSec, 'br', 'Marker threshold:');
+    % --- Marker threshold (persistence gate) ---
+    gui_component('label', jSec, 'br', 'Persistence gate:');
     jThresh = JSlider(0, 100, 0);  jThresh.setPreferredSize(java_scaled('dimension', 120, 22));
     jSec.add('br hfill', jThresh);
     java_setcb(jThresh, 'StateChangedCallback', @(h,e) OnGate(panelName));

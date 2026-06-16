@@ -56,6 +56,23 @@ function test_dirac_helmholtz()
     nFail = nFail + chk('Cores + Sources are struct arrays', isstruct(Ht.Cores) && isstruct(Ht.Sources));
     nFail = nFail + chk('HarmFrac in [0,1]', isscalar(Ht.HarmFrac) && Ht.HarmFrac >= 0 && Ht.HarmFrac <= 1.0001);
 
+    % --- (6) persistence schema + per-hemisphere globals ---
+    Op6 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    % plant one positive psi bump per hemisphere; check each hemisphere yields a global core
+    vL = Op6.vH{1}(round(numel(Op6.vH{1})/2));
+    vR = Op6.vH{2}(round(numel(Op6.vH{2})/2));
+    psi6 = zeros(size(V,1),1);
+    psi6 = psi6 + exp(-sum((V-V(vL,:)).^2,2)/(2*0.01^2));
+    psi6 = psi6 + exp(-sum((V-V(vR,:)).^2,2)/(2*0.01^2));
+    cr = bst_dirac_helmholtz('FindCoresOp', psi6, Op6, zeros(size(V,1),1));
+    nFail = nFail + chk('cores carry persistence field', isfield(cr,'persistence') && isfield(cr,'pos') && isfield(cr,'isGlobal'));
+    glob = cr(logical([cr.isGlobal]));
+    nFail = nFail + chk('one +global per hemisphere (>=2 globals)', sum([glob.chirality]==1) >= 2);
+    nFail = nFail + chk('both planted bumps are cores', ismember(vL,[cr.iVertex]) && ismember(vR,[cr.iVertex]));
+    nFail = nFail + chk('cores sorted by persistence desc', issorted([cr.persistence],'descend'));
+    cL = cr([cr.iVertex]==vL);
+    nFail = nFail + chk('sub-vertex pos near planted peak', ~isempty(cL) && norm(cL(1).pos - V(vL,:)) < 0.004);
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end
