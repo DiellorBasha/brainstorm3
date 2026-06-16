@@ -1,16 +1,20 @@
 function hFig = view_helmholtz(SrcResultsFile, varargin)
 % VIEW_HELMHOLTZ: Helmholtz/Hodge component view of a Dirac source map. Opens the NATIVE
 % unconstrained-source display and lets a panel choose which COMPONENT of the decomposition
-% to show -- Total |J| / Irrotational grad(phi) / Solenoidal curl(psi) / Harmonic h. Each
-% state swaps the quiver to that component's vector field and the cortex colormap to its
-% scalar potential, with component-aware singular-point markers. Active frame only (cached
-% Cholesky factor; recomputed as the cursor moves).
+% to show -- Total |J| / Irrotational grad(phi) / Solenoidal curl(psi) / Harmonic h.
+% Switching component swaps the cortex SCALAR colormap (to that component's potential) and
+% the component-aware singular-point markers; the quiver always shows the (smoothed) TOTAL
+% source field. An optional Dirac-eigenmode smoothing low-passes the active frame before the
+% decomposition, and a magnitude gate prunes weak markers. Active frame only (cached Cholesky
+% factor; recomputed as the cursor moves).
 %
 % USAGE:
 %   hFig = view_helmholtz(SrcResultsFile)
-%   view_helmholtz('SetComponent', hFig, name)   % 'Total'|'Irrot'|'Solen'|'Harm'
+%   view_helmholtz('SetComponent', hFig, name)             % 'Total'|'Irrot'|'Solen'|'Harm'
 %   view_helmholtz('SetVectors', hFig, show)
 %   view_helmholtz('SetMarkers', hFig, show)
+%   view_helmholtz('SetSmoothing', hFig, isOn, name, params)  % Dirac-eigenmode low-pass
+%   view_helmholtz('SetGate', hFig, frac)                  % marker magnitude gate (0..1)
 %   view_helmholtz('Close', hFig)
 %   view_helmholtz('UpdateFrame', hFig)
 % Authors: Diellor Basha, 2026

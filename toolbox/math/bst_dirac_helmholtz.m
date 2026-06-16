@@ -14,21 +14,27 @@ function varargout = bst_dirac_helmholtz(varargin)
 %       tessellation (.Vertices, .Faces, .VertConn, .VertNormals).
 %
 %   Ht = bst_dirac_helmholtz('Frame', Op, Jt)
-%       Decomposes a single frame Jt [3nV x 1] -> struct with per-vertex [nV x 1] fields
-%       .Curl .Div .Psi .Phi .Fmag and .Cores (struct array (iVertex, charge, omega)).
+%       Decomposes a single frame Jt [3nV x 1] into the Hodge components. Returns per-vertex
+%       [nV x 1] scalars .Curl (vorticity) .Div .Psi .Phi .Fmag .Hmag; component vector
+%       fields [nV x 3] .Vtot .Virr (grad phi) .Vsol (curl psi) .Vharm (residual); the
+%       harmonic energy fraction .HarmFrac; and singular points .Cores (psi extrema) /
+%       .Sources (phi extrema), each a struct array (iVertex, charge, omega).
 %
 %   H = bst_dirac_helmholtz(DiracOp, LBO, Surf, J)
-%       Whole-series convenience (Prepare once, Frame per column). J [3nV x nT]; returns
-%       H.Curl/Div/Psi/Phi/Fmag [nV x nT] and H.Cores (1 x nT cell). (Batch primitive.)
+%       Whole-series convenience (Prepare once, Frame per column). J [3nV x nT]; returns the
+%       scalar fields H.Curl/Div/Psi/Phi/Fmag [nV x nT] and H.Cores (1 x nT cell). (Batch
+%       primitive; the per-frame component vector fields are produced by Frame.)
 %
 %   psi   = bst_dirac_helmholtz('PoissonSolve', K, M, omega)   % K psi = M omega, mean-zero
 %   cores = bst_dirac_helmholtz('FindCores', psi, VertConn, omega)
 %
-% Math (per hemisphere h): embed J as a pure-imaginary quaternion; q = D_int * psi gives
-% per-face divergence (w-part) + curl (imag part); omega = curl . n_face (face normals
-% reconstructed from the same Floc ordering tess_operators uses). Area-weighted face->vertex
-% averaging; Poisson K psi = M omega, K phi = M div. Cores = local extrema of psi over the
-% 1-ring (max or min = a vortex center; handedness = sign(omega) at the core).
+% Math (per hemisphere h): embed J as a pure-imaginary quaternion; q = D_int * psi gives, per
+% face, the VORTICITY (the w-part) and -- via the imaginary part dotted with the face normal
+% -- the DIVERGENCE (validated against pure gradient/rotational fields; NOT the reverse).
+% Area-weighted face->vertex averaging; Poisson K psi = M omega (stream psi from vorticity),
+% K phi = M div (potential phi from divergence); component fields grad(phi), n x grad(psi),
+% and the harmonic residual J - grad(phi) - n x grad(psi). Cores = local extrema of psi over
+% the 1-ring (a max or a min is a vortex center; handedness = sign(omega) at the core).
 %
 % Authors: Diellor Basha, 2026
     if ischar(varargin{1})

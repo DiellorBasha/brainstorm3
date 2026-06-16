@@ -2,8 +2,9 @@ function varargout = panel_helmholtz(varargin)
 % PANEL_HELMHOLTZ: Controls for the Helmholtz components view (view_helmholtz). A Smoothing
 % section (shared Dirac-eigenmode kernel + scale, on/off) low-passes the active frame before
 % the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal / Harmonic)
-% swaps the quiver + colormap; a Marker threshold slider prunes weak singular points. Plus
-% Show vectors, Show singular points, a readout, and Close.
+% swaps the cortex colormap + markers (the quiver stays the total field); a Marker threshold
+% slider prunes weak singular points. Plus Show vectors, Show singular points, a readout, and
+% Close.
 % Authors: Diellor Basha, 2026
     eval(macro_method);
 end
