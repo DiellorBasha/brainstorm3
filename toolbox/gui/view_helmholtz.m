@@ -16,8 +16,8 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','Close','UpdateFrame'}))
-        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','UpdateFrame'})) && ...
+    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','Close','UpdateFrame'}))
+        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','UpdateFrame'})) && ...
                 (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
             return;
         end
@@ -48,6 +48,10 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     nV = size(Surf.Vertices,1);
     bst_progress('text', 'Factorizing the cotan operator...');
     Op = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    bst_progress('text', 'Loading Dirac eigenbasis...');
+    EigenMat = tess_eigen(SurfaceFile, 'Dirac');
+    OpMat    = load(file_fullpath(EigenMat.OperatorFile));
+    Lambda   = double(EigenMat.Lambda{1}(:));
     bst_progress('stop');
 
     [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResultsFile, [], 'NewFigure');
@@ -56,6 +60,8 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 
     St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
                 'ShowVectors',true, 'ShowMarkers',true, 'iTess',iTess, 'nV',nV, ...
+                'EigenMat',EigenMat, 'Mass',{OpMat.Mass}, 'Lambda',Lambda, ...
+                'Smooth',struct('on',false,'name','heat','params',struct()), 'GateFrac',0, ...
                 'Cache',containers.Map('KeyType','double','ValueType','any'));
     setappdata(hFig, 'HelmholtzState', St);
     setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));
@@ -63,7 +69,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     UpdateFrame(hFig);
 
     gui_hide('Helmholtz');
-    bstPanel = panel_helmholtz('CreatePanel', hFig);
+    bstPanel = panel_helmholtz('CreatePanel', hFig, St.Lambda);
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Helmholtz', 0); catch, end %#ok<CTCH>
 end
@@ -80,6 +86,11 @@ function UpdateFrame(hFig)
     if isempty(iT) || iT < 1; iT = 1; end
     Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
     if size(Jt,1) ~= 3*St.nV; return; end
+    % low-pass / band-limit the active frame in the Dirac eigenbasis before decomposing
+    if St.Smooth.on
+        g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
+        Jt = real(bst_dirac_eigenmodes_filter(St.EigenMat, St.Mass, Jt, 'custom', 'TransferFn', g));
+    end
     if isKey(St.Cache, iT); Ht = St.Cache(iT);
     else; Ht = bst_dirac_helmholtz('Frame', St.Op, Jt); St.Cache(iT) = Ht; end
     comp = i_component(Ht, St.Component);
@@ -102,18 +113,23 @@ function UpdateFrame(hFig)
     else
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
     end
-    % --- component-aware markers ---
+    % --- component markers, pruned by the magnitude gate (fraction of frame max |omega|) ---
+    mk = comp.Markers;
+    if ~isempty(mk) && St.GateFrac > 0
+        om = abs([mk.omega]);  mx = max(om);
+        if mx > 0; mk = mk(om >= St.GateFrac * mx); end
+    end
     delete(findobj(hAx,'Tag','HelmholtzCore'));
-    if St.ShowMarkers && ~isempty(comp.Markers)
+    if St.ShowMarkers && ~isempty(mk)
         V = get(TessInfo(St.iTess).hPatch, 'Vertices');
-        for k = 1:numel(comp.Markers)
-            v = comp.Markers(k).iVertex; col = [1 0 0]; if comp.Markers(k).charge < 0; col = [0 0 1]; end
+        for k = 1:numel(mk)
+            v = mk(k).iVertex; col = [1 0 0]; if mk(k).charge < 0; col = [0 0 1]; end
             line('Parent',hAx,'XData',V(v,1),'YData',V(v,2),'ZData',V(v,3), 'Marker','o', ...
                 'MarkerSize',9,'MarkerFaceColor',col,'MarkerEdgeColor','k','LineStyle','none', ...
                 'Tag','HelmholtzCore','Clipping','off');
         end
     end
-    i_readout(comp, Ht);
+    i_readout(comp.Kind, mk, Ht);
 end
 
 %% ===== panel actions =====
@@ -131,6 +147,16 @@ end
 function SetMarkers(hFig, show) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
     St.ShowMarkers = show; setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
+end
+function SetSmoothing(hFig, isOn, name, params) %#ok<DEFNU>
+    St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
+    St.Smooth = struct('on',logical(isOn), 'name',name, 'params',params);
+    St.Cache  = containers.Map('KeyType','double','ValueType','any');   % decompositions now stale
+    setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
+end
+function SetGate(hFig, frac) %#ok<DEFNU>
+    St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
+    St.GateFrac = max(0, min(1, frac));  setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
 end
 
 %% ===== close =====
@@ -173,20 +199,14 @@ function mm = i_minmax(scal)
     m = max(abs(scal));  if m == 0; m = eps; end
     mm = [-m, m];
 end
-function i_readout(comp, Ht)
-    switch comp.Kind
+function i_readout(kind, mk, Ht)
+    switch kind
         case 'vortex'
-            if isempty(comp.Markers); txt = '0 vortices, 0 antivortices';
-            else
-                np = sum([comp.Markers.charge] > 0); nn = sum([comp.Markers.charge] < 0);
-                txt = sprintf('%d vortices (+), %d antivortices (-), net %+d', np, nn, np-nn);
-            end
+            if isempty(mk); txt = '0 vortices, 0 antivortices';
+            else; np=sum([mk.charge]>0); nn=sum([mk.charge]<0); txt=sprintf('%d vortices (+), %d antivortices (-), net %+d', np, nn, np-nn); end
         case 'source'
-            if isempty(comp.Markers); txt = '0 sources, 0 sinks';
-            else
-                np = sum([comp.Markers.charge] > 0); nn = sum([comp.Markers.charge] < 0);
-                txt = sprintf('%d sources (+), %d sinks (-), net %+d', np, nn, np-nn);
-            end
+            if isempty(mk); txt = '0 sources, 0 sinks';
+            else; np=sum([mk.charge]>0); nn=sum([mk.charge]<0); txt=sprintf('%d sources (+), %d sinks (-), net %+d', np, nn, np-nn); end
         case 'harm'
             txt = sprintf('harmonic energy: %.1f%% of |J|^2', 100*Ht.HarmFrac);
         otherwise
