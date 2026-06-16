@@ -38,21 +38,18 @@ function varargout = bst_dirac_helmholtz(varargin)
     [varargout{1:nargout}] = Decompose(varargin{:});
 end
 
-%% ===== PREPARE: build + cache the per-face gradient, the consistent stiffness factor =====
-% Consistent discrete Hodge: the gradient G, its OWN adjoint divergence, and the stiffness
-% A = G' diag(2*area) G are one operator family -- so the decomposition residual is genuine
-% harmonic + boundary, not operator mismatch. (The Dirac node is used only to partition the
-% hemispheres via GlobalVertices; div/curl come from G's adjoint, not the Dirac.)
+%% ===== PREPARE: build + cache the static operator pieces and the Cholesky factor =====
 function Op = Prepare(DiracOp, LBO, Surf) %#ok<DEFNU>
     Vtx = Surf.Vertices;  Fcs = double(Surf.Faces);
     nVtot = size(Vtx,1);
-    nH = numel(DiracOp.GlobalVertices);
+    nH = numel(DiracOp.FirstOrder.Intrinsic);
     Op = struct();
     Op.nVtot    = nVtot;
     Op.VertConn = Surf.VertConn;
-    [Op.vH, Op.Floc, Op.Nf, Op.Af, Op.Wfv, Op.Gx, Op.Gy, Op.Gz, ...
-     Op.cholA, Op.free, Op.av] = deal(cell(1,nH));
+    [Op.D, Op.vH, Op.Nf, Op.Wfv, Op.M, Op.cholK, Op.free, Op.totMass, ...
+     Op.Gx, Op.Gy, Op.Gz] = deal(cell(1,nH));
     for hh = 1:nH
+        D  = DiracOp.FirstOrder.Intrinsic{hh};           % [4F x 4V]
         vH = double(DiracOp.GlobalVertices{hh}(:));
         nVh = numel(vH);
         % reconstruct the hemisphere's local faces in tess_operators' ordering
@@ -82,56 +79,56 @@ function Op = Prepare(DiracOp, LBO, Surf) %#ok<DEFNU>
         Gx = sparse(grows, gcols, [c1(:,1);c2(:,1);c3(:,1)], nFh, nVh);
         Gy = sparse(grows, gcols, [c1(:,2);c2(:,2);c3(:,2)], nFh, nVh);
         Gz = sparse(grows, gcols, [c1(:,3);c2(:,3);c3(:,3)], nFh, nVh);
-        % consistent stiffness A = G' diag(Af) G + its pinned (vertex 1) Cholesky factor
-        A = Gx'*(Af.*Gx) + Gy'*(Af.*Gy) + Gz'*(Af.*Gz);
-        A = (A + A')/2;                                  % kill round-off asymmetry for chol
-        free = (2:nVh)';
-        Op.vH{hh}=vH; Op.Floc{hh}=Floc; Op.Nf{hh}=Nf; Op.Af{hh}=Af; Op.Wfv{hh}=Wfv;
+        % LBO pieces + ONE Cholesky factor of the pinned (vertex 1 fixed) cotan stiffness
+        K = LBO.Operator{hh};  M = LBO.Mass{hh};
+        free = (2:size(K,1))';
+        Op.D{hh}=D; Op.vH{hh}=vH; Op.Nf{hh}=Nf; Op.Wfv{hh}=Wfv; Op.M{hh}=M;
         Op.Gx{hh}=Gx; Op.Gy{hh}=Gy; Op.Gz{hh}=Gz;
-        Op.cholA{hh} = decomposition(A(free,free), 'chol');
-        Op.free{hh}  = free;
-        Op.av{hh}    = full(sum(LBO.Mass{hh}, 2));        % lumped vertex mass (energy weights)
+        Op.cholK{hh}  = decomposition(K(free,free), 'chol');
+        Op.free{hh}   = free;
+        Op.totMass{hh}= sum(M(:));
     end
 end
 
-%% ===== FRAME: discrete Hodge projection of one frame (gradient + its adjoint divergence) =====
+%% ===== FRAME: decompose a single time frame using the cached factor =====
 function Ht = Frame(Op, Jt) %#ok<DEFNU>
     nVtot = Op.nVtot;
     z1 = zeros(nVtot,1);  z3 = zeros(nVtot,3);
     Ht = struct('Curl',z1,'Div',z1,'Psi',z1,'Phi',z1,'Fmag',z1,'Hmag',z1, ...
                 'Vtot',z3,'Virr',z3,'Vsol',z3,'Vharm',z3);
     harmNum = 0;  harmDen = 0;
-    for hh = 1:numel(Op.vH)
-        vH = Op.vH{hh};  Floc = Op.Floc{hh};  Nf = Op.Nf{hh};  Af = Op.Af{hh};  av = Op.av{hh};
-        Gx = Op.Gx{hh};  Gy = Op.Gy{hh};  Gz = Op.Gz{hh};
-        Jv = [Jt(3*(vH-1)+1), Jt(3*(vH-1)+2), Jt(3*(vH-1)+3)];          % [nVh x 3] vertex field
-        Jf = (Jv(Floc(:,1),:) + Jv(Floc(:,2),:) + Jv(Floc(:,3),:))/3;   % [nFh x 3] face field
-        % weak divergence and weak curl (gradient's own adjoint, area-weighted)
-        rhsI = Gx'*(Af.*Jf(:,1)) + Gy'*(Af.*Jf(:,2)) + Gz'*(Af.*Jf(:,3));
-        nxJ  = cross(Nf, Jf, 2);
-        rhsS = -(Gx'*(Af.*nxJ(:,1)) + Gy'*(Af.*nxJ(:,2)) + Gz'*(Af.*nxJ(:,3)));
-        phi = i_solveA(Op.cholA{hh}, rhsI, Op.free{hh}, numel(vH));     % potential   (irrotational)
-        psi = i_solveA(Op.cholA{hh}, rhsS, Op.free{hh}, numel(vH));     % stream func. (solenoidal)
-        Virr = Op.Wfv{hh} * [Gx*phi, Gy*phi, Gz*phi];                   % grad(phi) -> vertex
-        Vsol = Op.Wfv{hh} * cross(Nf, [Gx*psi, Gy*psi, Gz*psi], 2);     % n x grad(psi) -> vertex
-        Vharm = Jv - Virr - Vsol;                                       % exact residual
-        omV = rhsS ./ max(av, eps);   dvV = rhsI ./ max(av, eps);       % vorticity / divergence (marker signs)
+    for hh = 1:numel(Op.D)
+        vH = Op.vH{hh};  nVh = numel(vH);
+        Jx = Jt(3*(vH-1)+1);  Jy = Jt(3*(vH-1)+2);  Jz = Jt(3*(vH-1)+3);
+        psiQ = zeros(4*nVh,1);
+        psiQ(2:4:end) = Jx; psiQ(3:4:end) = Jy; psiQ(4:4:end) = Jz;
+        q = Op.D{hh} * psiQ;                              % [4F x 1]
+        % Dirac convention (validated against pure gradient/rotational fields): the w-part
+        % is the VORTICITY and the imaginary part . n is the DIVERGENCE (not the reverse).
+        omF   = q(1:4:end);                               % vorticity = w-part (per face)
+        imagF = [q(2:4:end), q(3:4:end), q(4:4:end)];     % imaginary part (per face)
+        divF  = sum(imagF .* Op.Nf{hh}, 2);               % divergence = imag . n_face
+        omV = Op.Wfv{hh} * omF;   dvV = Op.Wfv{hh} * divF;
+        psi = i_poisson(Op.cholK{hh}, Op.M{hh}, omV, Op.free{hh}, Op.totMass{hh});  % stream from vorticity
+        phi = i_poisson(Op.cholK{hh}, Op.M{hh}, dvV, Op.free{hh}, Op.totMass{hh});  % potential from divergence
+        % component vector fields: grad(phi) (irrotational), skew-grad(psi) (solenoidal)
+        gphi = [Op.Gx{hh}*phi, Op.Gy{hh}*phi, Op.Gz{hh}*phi];   % [nF x 3]
+        gpsi = [Op.Gx{hh}*psi, Op.Gy{hh}*psi, Op.Gz{hh}*psi];
+        skew = cross(Op.Nf{hh}, gpsi, 2);                       % n x grad(psi)
+        Virr = Op.Wfv{hh} * gphi;                               % face->vertex [nVh x 3]
+        Vsol = Op.Wfv{hh} * skew;
+        Jv   = [Jx Jy Jz];
+        Vharm = Jv - Virr - Vsol;                               % exact residual
         Ht.Curl(vH)=omV;  Ht.Div(vH)=dvV;  Ht.Psi(vH)=psi;  Ht.Phi(vH)=phi;
-        Ht.Fmag(vH)=sqrt(sum(Jv.^2,2));  Ht.Hmag(vH)=sqrt(sum(Vharm.^2,2));
+        Ht.Fmag(vH)=sqrt(Jx.^2+Jy.^2+Jz.^2);  Ht.Hmag(vH)=sqrt(sum(Vharm.^2,2));
         Ht.Vtot(vH,:)=Jv;  Ht.Virr(vH,:)=Virr;  Ht.Vsol(vH,:)=Vsol;  Ht.Vharm(vH,:)=Vharm;
+        av = full(sum(Op.M{hh},2));                            % lumped vertex mass
         harmNum = harmNum + sum(av .* sum(Vharm.^2,2));
         harmDen = harmDen + sum(av .* sum(Jv.^2,2));
     end
     Ht.HarmFrac = harmNum / max(harmDen, eps);
     Ht.Cores    = FindCores(Ht.Psi, Op.VertConn, Ht.Curl);    % vortex cores (sign = vorticity)
     Ht.Sources  = FindCores(Ht.Phi, Op.VertConn, Ht.Div);     % sources/sinks (sign = divergence)
-end
-
-%% ===== pinned solve of the consistent stiffness (vertex 1 fixed, mean-zero gauge) =====
-function x = i_solveA(cholA, rhs, free, n)
-    x = zeros(n,1);
-    x(free) = cholA \ rhs(free);
-    x = x - mean(x);
 end
 
 %% ===== whole-series convenience (Prepare once, Frame per column) =====
