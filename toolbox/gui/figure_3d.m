@@ -3135,8 +3135,13 @@ function hQuiver = PlotSourceVectors(hFig, iTess) %#ok<DEFNU>
     mag = sqrt(sum(V3.^2,2));
     ThreshVal = 0;
     if ~isempty(ovrVec) && (size(ovrVec,2) == 3)
-        % Override vector: gate by its OWN magnitude (the colored scalar is unrelated)
-        ThreshVal = 0.10 * max(mag);
+        % Override vector: gate by its OWN magnitude, scaled by the Surface-panel amplitude
+        % slider (DataThreshold) -- not a hardcoded fraction. The colored scalar is a
+        % different quantity, so we cannot reuse its colormap limits; we threshold the
+        % vector's own magnitude by the slider fraction (0 -> show the full field).
+        th = 0;
+        if isfield(sTess,'DataThreshold') && ~isempty(sTess.DataThreshold); th = sTess.DataThreshold; end
+        ThreshVal = th * max(mag);
     elseif isfield(sTess,'DataLimitValue') && ~isempty(sTess.DataLimitValue) ...
             && isfield(sTess,'DataThreshold') && ~isempty(sTess.DataThreshold)
         dl = sTess.DataLimitValue;

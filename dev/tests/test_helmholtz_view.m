@@ -42,6 +42,17 @@ function test_helmholtz_view()
     nFail = nFail + chk('Harm quiver stays = total field', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));
     nFail = nFail + chk('Harm has no markers', isempty(findobj(hAx,'Tag','HelmholtzCore')));
 
+    % --- quiver follows the Data threshold slider (not hardcoded); full field at 0 ---
+    TI = getappdata(hFig,'Surface');
+    nFail = nFail + chk('no amplitude threshold by default', TI(St.iTess).DataThreshold == 0);
+    nArr = @() numel(get(findobj(hFig,'Tag','SourceVectors'),'UData'));
+    nA0 = nArr();
+    nFail = nFail + chk('full field drawn at threshold 0', nA0 == size(get(TI(St.iTess).hPatch,'Vertices'),1));
+    panel_surface('SetDataThreshold', hFig, St.iTess, 0.5); drawnow;
+    nFail = nFail + chk('slider thresholds the quiver', nArr() < nA0);
+    panel_surface('SetDataThreshold', hFig, St.iTess, 0); drawnow;
+    nFail = nFail + chk('threshold 0 restores full field', nArr() == nA0);
+
     % toggles
     view_helmholtz('SetVectors', hFig, false); drawnow;
     nFail = nFail + chk('vectors hide when off', isempty(findobj(hFig,'Tag','SourceVectors')));

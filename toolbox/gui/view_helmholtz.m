@@ -57,6 +57,11 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResultsFile, [], 'NewFigure');
     if isempty(hFig); return; end
     iTess = i_find_tess(hFig);
+    % No amplitude threshold by default: the Data threshold slider drives the quiver +
+    % colormap (the override quiver is no longer hardcoded). Show the full field on open.
+    TI = getappdata(hFig,'Surface');
+    if iTess <= numel(TI); TI(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI); end
+    try, panel_surface('UpdateSurfaceProperties'); catch, end %#ok<CTCH>
 
     St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
                 'ShowVectors',true, 'ShowMarkers',true, 'iTess',iTess, 'nV',nV, ...
