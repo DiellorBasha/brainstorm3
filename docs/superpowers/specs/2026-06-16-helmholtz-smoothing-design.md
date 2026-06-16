@@ -28,10 +28,11 @@ Fold the Spatial Filter into the Helmholtz panel as a **Smoothing** section, so 
    (kernel + scale, the shared `bst_eigfilter_panel` section),
 2. decomposes the **smoothed** field (Total / Irrotational / Solenoidal / Harmonic),
 3. detects component-aware markers on the smoothed field, further pruned by a **magnitude
-   gate** (drop near-zero `|ω|` cores / `|div|` sources),
-4. can **save** the smoothed source as a new results node (whole-series export).
+   gate** (drop near-zero `|ω|` cores / `|div|` sources).
 
-The smoothing scale + the gate are the two knobs for optimizing vortex-core tracking.
+The smoothing scale + the gate are the two knobs for optimizing vortex-core tracking. The
+tool is purely interactive (active frame only); whole-series / batch filtering is a separate
+future development.
 
 ## Non-goals
 
@@ -41,13 +42,15 @@ The smoothing scale + the gate are the two knobs for optimizing vortex-core trac
 - Changing the Dirac decomposition math (`bst_dirac_helmholtz` unchanged — the Dirac-based
   version the user kept).
 - Keeping the standalone Spatial Filter — it is removed (folded in).
+- **Whole-series / batch filtering** (and any "save filtered file") — explicitly out of
+  scope here; a separate development. This tool only ever filters the active frame.
 
 ## Decisions (from brainstorming)
 
 | Question | Decision |
 |---|---|
 | Standalone Spatial Filter | **Fold into Helmholtz**: remove the figure-popup item and `panel_spatial_filter` (+ its test); the smoothing lives in the Helmholtz panel. `process_dirac_filter` (batch) is untouched. |
-| Smoothing scope | **Active frame, on-demand**: filter the displayed frame's field before decomposing; slider re-filters + re-decomposes the current frame; the Total quiver shows the smoothed field. A **Save smoothed file** button exports the whole filtered series. |
+| Smoothing scope | **Active frame, on-demand only**: filter the displayed frame's field before decomposing; slider re-filters + re-decomposes the current frame; the Total quiver shows the smoothed field. No whole-series swap and no save/export here (batch is a separate future development). |
 | Marker pruning | **Scale + magnitude gate**: the smoothing band-limits div/curl; a threshold slider additionally drops extrema with `|ω|`/`|div|` below a fraction of the frame max. |
 
 ## Architecture
@@ -89,18 +92,10 @@ Two stacked sections + controls:
 - **Show vectors**, **Show singular points** checkboxes.
 - **Marker threshold** slider (`τ`, 0→aggressive) → `view_helmholtz('SetGate', hFig, τ)`.
 - **Readout**: component-aware counts (post-gate) + harmonic %.
-- **Save smoothed file** button → `view_helmholtz('SaveSmoothed', hFig)`.
 - **Close**.
 
 The panel needs `Lambda` to build the scale sliders, passed in at create
 (`panel_helmholtz('CreatePanel', hFig, Lambda)`).
-
-### Save smoothed file
-
-Materialize the full series `J [3nV×nT]` from the source, filter it with the current `g`,
-and save a new results node in the source's study — reusing `panel_spatial_filter`'s
-`SaveFiltered` logic (`in_bst_results` → replace `ImageGridAmp`, `Comment = '<src> | dirac
-filter(<info>)'`, `bst_history` + `db_add_data`).
 
 ### State (`HelmholtzState`) additions
 
@@ -112,11 +107,10 @@ ShowMarkers, iTess, nV, Cache`.
 
 **Modify:**
 - `toolbox/gui/view_helmholtz.m` — load eigenbasis+mass; smooth the active frame before
-  decomposing; gate markers; dispatch `SetSmoothing`/`SetGate`/`SaveSmoothed`; cache
-  invalidation on smoothing change.
-- `toolbox/gui/panel_helmholtz.m` — add the shared **Smoothing** kernel section + on/off,
-  the **Marker threshold** slider, the **Save smoothed file** button; wire callbacks; take
-  `Lambda` at create.
+  decomposing; gate markers; dispatch `SetSmoothing`/`SetGate`; cache invalidation on
+  smoothing change.
+- `toolbox/gui/panel_helmholtz.m` — add the shared **Smoothing** kernel section + on/off and
+  the **Marker threshold** slider; wire callbacks; take `Lambda` at create.
 - `toolbox/gui/figure_3d.m` — remove the "Spatial filter (Dirac)" popup item.
 
 **Remove:**
@@ -129,8 +123,7 @@ ShowMarkers, iTess, nV, Cache`.
 **Test:**
 - `dev/tests/test_helmholtz_view.m` — extend: turning smoothing on (heat low-pass) reduces
   the vortex-core count vs raw; raising the marker threshold reduces drawn markers
-  monotonically; the decomposition cache clears on a smoothing change; `SaveSmoothed`
-  writes a 3-component results node into the source study.
+  monotonically; the decomposition cache clears on a smoothing change.
 
 ## Data flow
 
@@ -141,7 +134,6 @@ ShowMarkers, iTess, nV, Cache`.
 3. Pick **Solenoidal** → smoothed `∇⊥ψ` + vortex cores (now far fewer); nudge **Marker
    threshold** to drop the last weak ones.
 4. Scrub time → each frame is filtered + decomposed at the current setting.
-5. **Save smoothed file** → filtered source saved as a new node.
 
 ## Error handling
 
@@ -158,7 +150,6 @@ ShowMarkers, iTess, nV, Cache`.
   heat low-pass on < count with smoothing off.
 - **Gate monotonic**: drawn-marker count is non-increasing as `τ` rises; `τ=0` shows all.
 - **Cache invalidation**: changing the smoothing scale clears `St.Cache` (recomputes).
-- **Save smoothed**: the saved node loads to a 3-component series in the source study.
 - **Regression**: the component states / colormaps / vectors / time-following / close +
   stale-guard checks still pass.
 
@@ -167,6 +158,6 @@ ShowMarkers, iTess, nV, Cache`.
 1. view_helmholtz: load eigenbasis + smooth the active frame (+ cache invalidation);
    `SetSmoothing` dispatch.
 2. Marker magnitude gate (`SetGate`) + gated readout.
-3. panel_helmholtz: Smoothing kernel section + on/off + threshold slider + Save smoothed;
-   wire callbacks; extend the test.
+3. panel_helmholtz: Smoothing kernel section + on/off + threshold slider; wire callbacks;
+   extend the test.
 4. Remove the Spatial filter popup item + `panel_spatial_filter` + its test.
