@@ -79,6 +79,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));
     set(hFig, 'CloseRequestFcn', @(h,e) Close(h));
     UpdateFrame(hFig);
+    i_attach_listener(hFig);   % re-gate overlays on a hemisphere/resect toggle (Surfaces panel)
 
     gui_hide('Helmholtz');
     bstPanel = panel_helmholtz('CreatePanel', hFig, St.Lambda);
@@ -94,6 +95,11 @@ function UpdateFrame(hFig)
     hAx = hAx(1);
     TessInfo = getappdata(hFig,'Surface');
     if isempty(TessInfo) || (St.iTess > numel(TessInfo)) || ~ishandle(TessInfo(St.iTess).hPatch); return; end
+    % Per-hemisphere visibility from the cortex patch alpha (Surfaces-panel resect / hemi
+    % toggle). Every overlay below is gated by this, so a hidden hemisphere also hides its
+    % quiver, markers, tracks and centroids (mirrors view_manifold's MarkedClean sync).
+    visV = i_visibleVerts(TessInfo(St.iTess).hPatch);
+    setappdata(hFig, 'HelmholtzLastVis', visV);
     [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     if isempty(iT) || iT < 1; iT = 1; end
     k = St.Deriv;
@@ -142,7 +148,9 @@ function UpdateFrame(hFig)
     % --- quiver is ALWAYS the (smoothed) total source field, regardless of component;
     %     switching component changes only the scalar colormap + markers ---
     if St.ShowVectors
-        setappdata(hFig, 'QuiverVectorOverride', Ht.Vtot);
+        Vq = Ht.Vtot;                                    % gate the quiver per hemisphere:
+        if numel(visV) == size(Vq,1); Vq(~visV,:) = 0; end   % zero-length arrows = hidden
+        setappdata(hFig, 'QuiverVectorOverride', Vq);
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 1); catch, end %#ok<CTCH>
         try, figure_3d('PlotSourceVectors', hFig, St.iTess); catch, end %#ok<CTCH>
     else
@@ -160,7 +168,9 @@ function UpdateFrame(hFig)
         prA = [mk.persistence];
         mxf = max([prA(isfinite(prA)), eps]);              % frame max finite persistence
         for k = 1:numel(mk)
-            v = mk(k).iVertex; col = [1 0 0]; if mk(k).charge < 0; col = [0 0 1]; end
+            v = mk(k).iVertex;
+            if (v <= numel(visV)) && ~visV(v); continue; end   % skip markers on a hidden hemisphere
+            col = [1 0 0]; if mk(k).charge < 0; col = [0 0 1]; end
             pk = mk(k).persistence; if ~isfinite(pk); pk = mxf; end   % globals -> max size
             sz = 5 + 11 * max(0, min(1, pk/mxf));          % marker size 5..16 by persistence
             line('Parent',hAx,'XData',V(v,1),'YData',V(v,2),'ZData',V(v,3), 'Marker','o', ...
@@ -175,7 +185,7 @@ function UpdateFrame(hFig)
         try, panel_helmholtz('SetReadout', [pfx 'singular points hidden']); catch, end %#ok<CTCH>
     end
     if St.Track
-        St = i_track_update(hFig, St, hAx, mk, iT);
+        St = i_track_update(hFig, St, hAx, mk, iT, visV);
         setappdata(hFig, 'HelmholtzState', St);
     end
 end
@@ -233,11 +243,67 @@ end
 function Close(hFig) %#ok<DEFNU>
     try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     if ~isempty(hFig) && all(ishandle(hFig))
+        try, lh = getappdata(hFig, 'HelmholtzPatchListener'); if ~isempty(lh); delete(lh); end; catch, end %#ok<CTCH>
+        try, rmappdata(hFig, 'HelmholtzPatchListener'); catch, end %#ok<CTCH>
         try, rmappdata(hFig, 'CustomOverlayFcn'); catch, end %#ok<CTCH>
         try, rmappdata(hFig, 'QuiverVectorOverride'); catch, end %#ok<CTCH>
         try, set(hFig, 'CloseRequestFcn', ''); catch, end %#ok<CTCH>
     end
     try, bst_figures('DeleteFigure', hFig, []); catch, if ~isempty(hFig)&&all(ishandle(hFig)); delete(hFig); end; end %#ok<CTCH>
+end
+
+%% ===== per-hemisphere visibility (Surfaces-panel resect / hemi toggle) =====
+function visV = i_visibleVerts(hPatch)
+% Per-vertex visibility from the cortex patch's alpha MODE -- the same signal
+% view_manifold/SyncScalar reads. Brainstorm hides a hemisphere by switching EdgeAlpha to
+% per-element ('flat'/'interp') with zeroed FaceVertexAlphaData; a vertex is visible if any
+% incident face is visible. Returns all-visible when nothing is resected.
+    V  = get(hPatch, 'Vertices');
+    F  = get(hPatch, 'Faces');
+    A  = get(hPatch, 'FaceVertexAlphaData');
+    EA = get(hPatch, 'EdgeAlpha');
+    nV = size(V, 1);  nF = size(F, 1);
+    if ischar(EA) && ~isempty(A)
+        if numel(A) == nF                 % per-face ('flat')
+            faceVis = A > 0;
+        elseif numel(A) == nV             % per-vertex ('interp')
+            vv = A(:) > 0;  faceVis = all(vv(F), 2);
+        else
+            faceVis = true(nF, 1);
+        end
+    elseif isnumeric(EA) && isscalar(EA) && (EA <= 0)
+        faceVis = false(nF, 1);           % uniformly transparent
+    else
+        faceVis = true(nF, 1);            % opaque -> everything visible
+    end
+    visV = false(nV, 1);
+    visV(unique(F(faceVis, :))) = true;
+end
+
+%% ===== re-gate overlays when the cortex patch is redrawn (hemisphere/resect toggle) =====
+function i_attach_listener(hFig)
+% Mirror view_manifold: a MarkedClean listener re-gates the overlays whenever the cortex
+% patch is redrawn, so a Surfaces-panel hemisphere toggle hides that hemisphere's quiver /
+% markers / tracks / centroids immediately, without waiting for the time cursor to move.
+    St = getappdata(hFig, 'HelmholtzState');  if isempty(St); return; end
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (St.iTess > numel(TessInfo)) || ~ishandle(TessInfo(St.iTess).hPatch); return; end
+    lh = addlistener(TessInfo(St.iTess).hPatch, 'MarkedClean', @(s,e) i_on_patch_clean(hFig));
+    setappdata(hFig, 'HelmholtzPatchListener', lh);
+end
+
+function i_on_patch_clean(hFig)
+    if isempty(hFig) || ~ishandle(hFig); return; end
+    busy = getappdata(hFig, 'HelmholtzInSync');            % guard the re-entrant MarkedClean
+    if ~isempty(busy) && busy; return; end                %   that UpdateFrame itself triggers
+    St = getappdata(hFig, 'HelmholtzState');  if isempty(St); return; end
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (St.iTess > numel(TessInfo)) || ~ishandle(TessInfo(St.iTess).hPatch); return; end
+    visV = i_visibleVerts(TessInfo(St.iTess).hPatch);
+    if isequal(visV, getappdata(hFig, 'HelmholtzLastVis')); return; end   % visibility unchanged -> no-op
+    setappdata(hFig, 'HelmholtzInSync', true);
+    try, UpdateFrame(hFig); catch, end %#ok<CTCH>
+    setappdata(hFig, 'HelmholtzInSync', false);
 end
 
 %% ===== helpers =====
@@ -318,7 +384,7 @@ function txt = i_count_str(mk, posName, negName, Ht)
 end
 
 %% ===== trajectory tracking (accumulated over contiguous forward play) =====
-function St = i_track_update(hFig, St, hAx, mk, iT) %#ok<INUSL>
+function St = i_track_update(hFig, St, hAx, mk, iT, visV) %#ok<INUSL>
     MAXJUMP = 0.012;                                  % m, max core jump per frame
     V = St.Vertices;
     if isempty(St.Graph),  St.Graph = i_build_graph(V, St.Faces);  end
@@ -356,7 +422,11 @@ function St = i_track_update(hFig, St, hAx, mk, iT) %#ok<INUSL>
     for t = St.Tracks
         if numel(t.path) < 2, continue; end
         col = [1 0 0]; if t.chirality < 0, col = [0 0 1]; end
-        line('Parent',hAx,'XData',V(t.path,1),'YData',V(t.path,2),'ZData',V(t.path,3), ...
+        xs = V(t.path,1); ys = V(t.path,2); zs = V(t.path,3);
+        if numel(visV) >= max(t.path)                          % break the polyline at any
+            hideP = ~visV(t.path); xs(hideP) = NaN; ys(hideP) = NaN; zs(hideP) = NaN;  % hidden-hemi vertex
+        end
+        line('Parent',hAx,'XData',xs,'YData',ys,'ZData',zs, ...
              'Color',col,'LineWidth',2,'Tag','HelmholtzTrack','Clipping','off');
     end
     % --- Karcher-mean centroids for the top-N longest-lived, strongest tracks ---
@@ -367,6 +437,7 @@ function St = i_track_update(hFig, St, hAx, mk, iT) %#ok<INUSL>
         openT = openT(ord(1:min(5, numel(ord))));            % cap to top-5
         for i = openT
             hh = St.Tracks(i).hemi;
+            if (numel(visV) >= max(St.Op.vH{hh})) && ~any(visV(St.Op.vH{hh})); continue; end  % hidden hemi
             [ctx, loc] = i_hemi_context(St, hh);
             lv = loc(St.Tracks(i).coreVerts);  lv = lv(lv > 0);
             if numel(lv) < 3, continue; end
