@@ -38,6 +38,17 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
         java_setcb(jRadio(i), 'ActionPerformedCallback', @(h,e) OnComponent(panelName, names{i}));
     end
     jRadio(1).setSelected(true);   % Total: native start
+
+    % --- Derivative order ---
+    gui_component('label', jSec, 'br', 'Derivative:');
+    dnames = {'Field','Velocity','Acceleration'};
+    grpD = ButtonGroup(); jDeriv = javaArray('javax.swing.JRadioButton', numel(dnames));
+    for i = 1:numel(dnames)
+        jDeriv(i) = gui_component('radio', jSec, 'br', dnames{i});
+        grpD.add(jDeriv(i));
+        java_setcb(jDeriv(i), 'ActionPerformedCallback', @(h,e) OnDeriv(panelName, i-1));
+    end
+    jDeriv(1).setSelected(true);   % Field (order 0)
     jVec  = gui_component('checkbox', jSec, 'br', 'Show vectors');           jVec.setSelected(true);
     jMark = gui_component('checkbox', jSec, 'br', 'Show singular points');   jMark.setSelected(true);
     java_setcb(jVec,  'ActionPerformedCallback', @(h,e) OnVectors(panelName));
@@ -58,7 +69,7 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
     jOpt.add(jSec); jPanelNew.add(jOpt, java.awt.BorderLayout.NORTH);
     ctrl = struct('hFig',hFig, 'jVec',jVec, 'jMark',jMark, 'jReadout',jReadout, ...
                   'jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
-                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda, 'jThresh',jThresh, 'jTrack',jTrack);
+                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda, 'jThresh',jThresh, 'jTrack',jTrack, 'jDeriv',jDeriv);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
@@ -77,6 +88,10 @@ end
 function OnTrack(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
     view_helmholtz('SetTrack', ctrl.hFig, ctrl.jTrack.isSelected());
+end
+function OnDeriv(panelName, order) %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
+    view_helmholtz('SetDeriv', ctrl.hFig, order);
 end
 function OnKernel(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end

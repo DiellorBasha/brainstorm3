@@ -20,8 +20,8 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','Close','UpdateFrame'}))
-        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','UpdateFrame'})) && ...
+    if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','SetDeriv','Close','UpdateFrame'}))
+        if any(strcmp(SrcResultsFile, {'SetComponent','SetVectors','SetMarkers','SetSmoothing','SetGate','SetTrack','SetDeriv','UpdateFrame'})) && ...
                 (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
             return;
         end
@@ -70,7 +70,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
                 'ShowVectors',true, 'ShowMarkers',true, 'iTess',iTess, 'nV',nV, ...
                 'EigenMat',EigenMat, 'Mass',{OpMat.Mass}, 'Lambda',Lambda, ...
-                'Smooth',struct('on',false,'name','heat','params',struct()), 'GateFrac',0, ...
+                'Smooth',struct('on',false,'name','heat','params',struct()), 'GateFrac',0, 'Deriv',0, ...
                 'Cache',containers.Map('KeyType','double','ValueType','any'), ...
                 'Track',false, 'LastIT',[], 'Tracks',[], 'Graph',[], 'Ctx',{cell(1,numel(Op.vH))}, ...
                 'V2H',[], 'Vertices',Surf.Vertices, 'Faces',double(Surf.Faces), ...
@@ -94,11 +94,24 @@ function UpdateFrame(hFig)
     hAx = hAx(1);
     TessInfo = getappdata(hFig,'Surface');
     if isempty(TessInfo) || (St.iTess > numel(TessInfo)) || ~ishandle(TessInfo(St.iTess).hPatch); return; end
-    [~, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
+    [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     if isempty(iT) || iT < 1; iT = 1; end
-    Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
-    if size(Jt,1) ~= 3*St.nV; return; end
-    % low-pass / band-limit the active frame in the Dirac eigenbasis before decomposing
+    k = St.Deriv;
+    if iT <= k                                            % not enough history for this order
+        i_blank_display(hFig, St, hAx, k);
+        St.Tracks = []; St.LastIT = iT; setappdata(hFig, 'HelmholtzState', St);
+        return;
+    end
+    % fetch the (k+1) consecutive frames, oldest -> newest (last col = current)
+    F = zeros(3*St.nV, k+1);
+    for j = 0:k
+        fj = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT-(k-j), 0));
+        if size(fj,1) ~= 3*St.nV; return; end
+        F(:,j+1) = fj;
+    end
+    if k > 0, dt = TimeVec(iT) - TimeVec(iT-1); else, dt = 1; end
+    Jt = bst_time_derivative(F, dt, k);                   % D^k J(t): Field / Velocity / Acceleration
+    % spatial eigenmode smoothing (linear -> applying after the difference is equivalent)
     if St.Smooth.on
         g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
         Jt = real(bst_dirac_eigenmodes_filter(St.EigenMat, St.Mass, Jt, 'custom', 'TransferFn', g));
@@ -155,10 +168,11 @@ function UpdateFrame(hFig)
                 'Tag','HelmholtzCore','Clipping','off');
         end
     end
+    ordName = {'', 'velocity ', 'acceleration '};  pfx = ordName{St.Deriv+1};
     if needCores
-        i_readout(comp.Kind, mk, Ht);
+        i_readout(comp.Kind, mk, Ht, pfx);
     else
-        try, panel_helmholtz('SetReadout', 'singular points hidden'); catch, end %#ok<CTCH>
+        try, panel_helmholtz('SetReadout', [pfx 'singular points hidden']); catch, end %#ok<CTCH>
     end
     if St.Track
         St = i_track_update(hFig, St, hAx, mk, iT);
@@ -181,6 +195,14 @@ end
 function SetMarkers(hFig, show) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
     St.ShowMarkers = show; setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
+end
+function SetDeriv(hFig, order) %#ok<DEFNU>
+    St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
+    St.Deriv  = max(0, min(2, round(order)));
+    St.Cache  = containers.Map('KeyType','double','ValueType','any');  % decompositions now stale
+    St.Tracks = [];  St.LastIT = [];                                    % derivative field changed
+    setappdata(hFig, 'HelmholtzState', St);
+    UpdateFrame(hFig);
 end
 function SetTrack(hFig, isOn) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
@@ -247,7 +269,8 @@ function mm = i_minmax(scal)
     m = max(abs(scal));  if m == 0; m = eps; end
     mm = [-m, m];
 end
-function i_readout(kind, mk, Ht)
+function i_readout(kind, mk, Ht, pfx)
+    if nargin < 4, pfx = ''; end
     switch kind
         case 'vortex'
             txt = i_count_str(mk, 'vortices', 'antivortices', Ht);
@@ -258,7 +281,22 @@ function i_readout(kind, mk, Ht)
         otherwise
             txt = 'total field |J|';
     end
-    try, panel_helmholtz('SetReadout', txt); catch, end %#ok<CTCH>
+    try, panel_helmholtz('SetReadout', [pfx txt]); catch, end %#ok<CTCH>
+end
+
+function i_blank_display(hFig, St, hAx, k)
+    TessInfo = getappdata(hFig,'Surface');
+    TessInfo(St.iTess).Data         = zeros(St.nV,1);
+    TessInfo(St.iTess).DataMinMax   = [0 1];
+    TessInfo(St.iTess).ColormapType = 'source';
+    setappdata(hFig,'Surface',TessInfo);
+    panel_surface('UpdateSurfaceColormap', hFig);
+    try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
+    delete(findobj(hAx,'Tag','HelmholtzCore'));
+    delete(findobj(hAx,'Tag','HelmholtzTrack'));
+    delete(findobj(hAx,'Tag','HelmholtzCentroid'));
+    nm = 'velocity'; if k >= 2, nm = 'acceleration'; end
+    try, panel_helmholtz('SetReadout', sprintf('%s: needs %d earlier frame(s)', nm, k)); catch, end %#ok<CTCH>
 end
 
 function txt = i_count_str(mk, posName, negName, Ht)
