@@ -90,6 +90,11 @@ function test_dirac_helmholtz()
     end
     nFail = nFail + chk('hemi matches Op.vH membership', okHemi);
 
+    % --- (9) Frame(...,false) skips core detection (fast stepping path) ---
+    HtN = bst_dirac_helmholtz('Frame', Op8, J(:,1), false);
+    nFail = nFail + chk('withCores=false -> empty Cores/Sources', isempty(HtN.Cores) && isempty(HtN.Sources));
+    nFail = nFail + chk('withCores=false still computes Psi/Phi', all(isfinite(HtN.Psi)) && all(isfinite(HtN.Phi)));
+
     fprintf('\n==== test_dirac_helmholtz: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz FAILED'); end
 end

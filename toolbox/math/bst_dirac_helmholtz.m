@@ -110,7 +110,8 @@ function Op = Prepare(DiracOp, LBO, Surf) %#ok<DEFNU>
 end
 
 %% ===== FRAME: decompose a single time frame using the cached factor =====
-function Ht = Frame(Op, Jt) %#ok<DEFNU>
+function Ht = Frame(Op, Jt, withCores) %#ok<DEFNU>
+    if nargin < 3 || isempty(withCores), withCores = true; end   % skip core detection when false
     nVtot = Op.nVtot;
     z1 = zeros(nVtot,1);  z3 = zeros(nVtot,3);
     Ht = struct('Curl',z1,'Div',z1,'Psi',z1,'Phi',z1,'Fmag',z1,'Hmag',z1, ...
@@ -146,8 +147,13 @@ function Ht = Frame(Op, Jt) %#ok<DEFNU>
         harmDen = harmDen + sum(av .* sum(Jv.^2,2));
     end
     Ht.HarmFrac = harmNum / max(harmDen, eps);
-    Ht.Cores    = FindCoresOp(Ht.Psi, Op, Ht.Curl);          % vortex cores (sign = vorticity)
-    Ht.Sources  = FindCoresOp(Ht.Phi, Op, Ht.Div);           % sources/sinks (sign = divergence)
+    if withCores
+        Ht.Cores    = FindCoresOp(Ht.Psi, Op, Ht.Curl);      % vortex cores (sign = vorticity)
+        Ht.Sources  = FindCoresOp(Ht.Phi, Op, Ht.Div);       % sources/sinks (sign = divergence)
+    else
+        Ht.Cores    = i_empty_cores();                       % detection skipped (GUI markers/track off)
+        Ht.Sources  = i_empty_cores();
+    end
 end
 
 %% ===== whole-series convenience (Prepare once, Frame per column) =====

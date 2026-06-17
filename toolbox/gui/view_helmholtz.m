@@ -103,8 +103,17 @@ function UpdateFrame(hFig)
         g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
         Jt = real(bst_dirac_eigenmodes_filter(St.EigenMat, St.Mass, Jt, 'custom', 'TransferFn', g));
     end
-    if isKey(St.Cache, iT); Ht = St.Cache(iT);
-    else; Ht = bst_dirac_helmholtz('Frame', St.Op, Jt); St.Cache(iT) = Ht; end
+    % Detect singular points only when they are actually used (markers shown or tracking on),
+    % so plain time-stepping with both off skips the per-frame persistence computation.
+    needCores = St.ShowMarkers || St.Track;
+    if isKey(St.Cache, iT)
+        Ht = St.Cache(iT);
+        if needCores && isempty(Ht.Cores)                 % cached without detection -> fill in now
+            Ht = bst_dirac_helmholtz('Frame', St.Op, Jt, true);  St.Cache(iT) = Ht;
+        end
+    else
+        Ht = bst_dirac_helmholtz('Frame', St.Op, Jt, needCores);  St.Cache(iT) = Ht;
+    end
     comp = i_component(Ht, St.Component);
     % --- cortex scalar + colormap ---
     TessInfo(St.iTess).Data = comp.Scal;
@@ -146,7 +155,11 @@ function UpdateFrame(hFig)
                 'Tag','HelmholtzCore','Clipping','off');
         end
     end
-    i_readout(comp.Kind, mk, Ht);
+    if needCores
+        i_readout(comp.Kind, mk, Ht);
+    else
+        try, panel_helmholtz('SetReadout', 'singular points hidden'); catch, end %#ok<CTCH>
+    end
     if St.Track
         St = i_track_update(hFig, St, hAx, mk, iT);
         setappdata(hFig, 'HelmholtzState', St);
