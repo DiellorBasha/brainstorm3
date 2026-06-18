@@ -102,12 +102,15 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             Variant = 'Connection Laplacian';
         case {'dirac'}
             Variant = 'Dirac';
+        case {'dirac-face','diracface'}
+            Variant = 'Dirac-Face';
         otherwise
             error('tess_eigen:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face''.'], OperatorName);
     end
-    isDirac = strcmpi(Variant, 'Dirac');
+    isFace  = strcmpi(Variant, 'Dirac-Face');               % face-domain (modes on faces)
+    isDirac = strcmpi(Variant, 'Dirac') || isFace;          % quaternion Dirac-type: over-fetch + Rayleigh-Ritz + Tau
     isLBO   = strcmpi(Variant, 'Laplace-Beltrami');
 
     % --- guard: nxr-compute plugin (operators reach nxr transitively) ---
@@ -197,7 +200,12 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     Phi            = cell(1, 2);
     Lambda         = cell(1, 2);
     GlobalVertices = cell(1, 2);
+    GlobalFaces    = cell(1, 2);
     tags           = {'L','R'};
+    if isFace && (~isfield(Op,'GlobalFaces') || isempty(Op.GlobalFaces) || isempty(Op.GlobalFaces{1}))
+        error('tess_eigen:noGlobalFaces', ...
+            'Dirac-Face operator node is missing GlobalFaces (recompute the operator).');
+    end
 
     for hh = 1:2
         A  = Op.Operator{hh};
@@ -206,12 +214,14 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         n  = size(A, 1);
 
         if isDirac
-            nVh = numel(gv);
-            if size(A,1) ~= 4*nVh
+            % quaternion domain count: faces for 'Dirac-Face', vertices for 'Dirac'
+            if isFace, nDom = numel(Op.GlobalFaces{hh}); else, nDom = numel(gv); end
+            if size(A,1) ~= 4*nDom
                 error('tess_eigen:diracSizeMismatch', ...
-                    'Dirac operator on hemisphere %s is %dx%d, expected 4*nV=%d.', ...
-                    tags{hh}, size(A,1), size(A,2), 4*nVh);
+                    'Dirac operator on hemisphere %s is %dx%d, expected 4*nDom=%d.', ...
+                    tags{hh}, size(A,1), size(A,2), 4*nDom);
             end
+            nVh = nDom;   % reuse the over-fetch / size logic below
             if K > 4*nVh - 2
                 error('tess_eigen:tooManyModes', ...
                     'K=%d exceeds 4*nV-2=%d on hemisphere %s.', K, 4*nVh-2, tags{hh});
@@ -262,6 +272,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         Phi{hh}            = Vk;
         Lambda{hh}         = lamk;
         GlobalVertices{hh} = gv;
+        if isFace, GlobalFaces{hh} = Op.GlobalFaces{hh}; end
     end
 
     % --- assemble EigenMat ---
@@ -273,6 +284,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     EigenMat.Lambda         = Lambda;          % 1x2 cell of eigenvalue vectors [K x 1]
     EigenMat.K              = K;
     EigenMat.GlobalVertices = GlobalVertices;  % 1x2 cell of global vertex indices
+    EigenMat.GlobalFaces    = GlobalFaces;     % 1x2 cell of global face indices (face-domain variants)
     EigenMat.Provenance     = prov;
 
     % --- save / register in DB ---
