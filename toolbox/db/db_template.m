@@ -140,6 +140,7 @@ switch lower(structureName)
               'GlobalFaces',    [], ...   % face-domain variants (e.g. 'Dirac-Face'): 1x2 cell of global FACE indices; [] otherwise
               'FirstOrder',     [], ...   % Dirac only: struct(.Intrinsic{1x2}, .Extrinsic{1x2}) first-order D [4F x 4V]
               'FaceMass',       [], ...   % Dirac only: 1x2 cell of face-area mass W_F [4F x 4F] (pairs with FirstOrder)
+              'FaceAux',        [], ...   % Hodge-Face only: 1x2 struct(.ScalarMass [F x F], .GradFace [3F x F], .FaceNormal [F x 3]) for the Hodge lift
               'Provenance',     []);
 
     case 'eigenmat'

@@ -97,10 +97,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             Variant = 'Dirac';
         case {'dirac-face','diracface'}
             Variant = 'Dirac-Face';
+        case {'hodge-face','hodgeface'}
+            Variant = 'Hodge-Face';
         otherwise
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face''.'], OperatorName);
     end
 
     % --- load surface ---
@@ -170,6 +172,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     FirstOrderInt  = cell(1, 2);   % Dirac: intrinsic first-order D_int [4F x 4V] per hemisphere
     FirstOrderExt  = cell(1, 2);   % Dirac: extrinsic first-order D     [4F x 4V] per hemisphere
     FaceMass       = cell(1, 2);   % Dirac: face-area mass W_F [4F x 4F] per hemisphere
+    FaceAux        = cell(1, 2);   % Hodge-Face: struct(ScalarMass,GradFace,FaceNormal) for the Hodge lift
 
     for hh = 1:2
         vH = hemis{hh};
@@ -260,6 +263,28 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     sX = local_lambda_max(Eext, B);
                     A  = (1 - Tau) * (Eint / sI) + Tau * (Eext / sX);             % [4F x 4F]
                     diracScales{hh} = [sI, sX];
+
+                case 'Hodge-Face'
+                    % Face Hodge vector eigenbasis support: the SCALAR face Laplacian
+                    % lapFace = gradFace' W_F gradFace [F x F] (full-rank, tall gradFace
+                    % root -> smooth Weyl spectrum), its scalar eigenmodes lifted to vectors
+                    % by tess_eigen. The node carries the scalar pencil (Operator=lapFace,
+                    % FaceAux.ScalarMass=M_F) for the eigensolve, the lift operators
+                    % (gradFace, face normals) in FaceAux, and the 4-component face mass
+                    % Mass=W_F [4F x 4F] consumed by bst_dirac as B.
+                    Gf = nxr_compute('operators', h, 'gradFace');                 % [3F x F]
+                    Kf = nxr_compute('operators', h, 'lapFace');  Kf = (Kf+Kf')/2; % [F x F]
+                    nFh = size(Floc, 1);
+                    e1f = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
+                    e2f = Vloc(Floc(:,3),:) - Vloc(Floc(:,1),:);
+                    Nf  = cross(e1f, e2f, 2);  twoA = sqrt(sum(Nf.^2,2));
+                    Nf  = Nf ./ max(twoA, eps);  fArea = twoA/2;
+                    vn  = TessMat.VertNormals(vH(Floc(:,1)),:);                    % outward orientation
+                    flip = sum(Nf.*vn,2) < 0;  Nf(flip,:) = -Nf(flip,:);
+                    A = Kf;                                                        % scalar lapFace [F x F]
+                    B = kron(spdiags(fArea,0,nFh,nFh), speye(4));                  % W_F [4F x 4F] (for bst_dirac)
+                    FaceAux{hh} = struct('ScalarMass', spdiags(fArea,0,nFh,nFh), ...% M_F [F x F]
+                                         'GradFace', Gf, 'FaceNormal', Nf);
             end
         catch ME
             nxr_compute('destroy', h);
@@ -293,6 +318,9 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     OperatorMat.Mass           = Mass;            % 1x2 cell of sparse matrices
     OperatorMat.GlobalVertices = GlobalVertices;  % 1x2 cell of global vertex indices
     OperatorMat.GlobalFaces    = GlobalFaces;     % 1x2 cell of global face indices (face-domain variants)
+    if strcmpi(Variant, 'Hodge-Face')
+        OperatorMat.FaceAux = FaceAux;            % 1x2 struct: ScalarMass / GradFace / FaceNormal (Hodge lift)
+    end
     if strcmpi(Variant, 'Dirac')
         OperatorMat.FirstOrder = struct('Intrinsic', {FirstOrderInt}, 'Extrinsic', {FirstOrderExt});
         OperatorMat.FaceMass   = FaceMass;         % 1x2 cell of W_F [4F x 4F]

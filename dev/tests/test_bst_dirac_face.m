@@ -13,7 +13,7 @@ function test_bst_dirac_face()
     [Lf, FG] = bst_face_leadfield(SurfaceFile, ChanMat.Channel(iMEG), BaseHM.Param(iMEG), 'Mode','unconstrained');
     nCh = numel(iMEG);  nF = size(Lf,2)/3;
     HMf = struct('Gain',Lf, 'SurfaceFile',SurfaceFile, 'HeadModelType','surface', ...
-                 'isFaceBased',1, 'GridLoc',FG.Centroids);
+                 'isFaceBased',1, 'FaceBasis','dirac', 'GridLoc',FG.Centroids);  % validate the Dirac-Face machinery
 
     Comp = bst_dirac(HMf, 'nModes', K, 'Tau', Tau);
     nFail = nFail + chk('Transform Gain [nCh x 2K]', isequal(size(Comp.Gain),[nCh 2*K]));

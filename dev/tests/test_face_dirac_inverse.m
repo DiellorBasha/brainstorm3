@@ -12,7 +12,7 @@ function test_face_dirac_inverse()
     [Lf, FG] = bst_face_leadfield(BaseHM.SurfaceFile, ChanMat.Channel(iMEG), BaseHM.Param(iMEG), 'Mode','unconstrained');
     nF = size(Lf,2)/3;
     HMf = struct('Gain',Lf, 'SurfaceFile',BaseHM.SurfaceFile, 'HeadModelType','surface', ...
-                 'isFaceBased',1, 'GridLoc',FG.Centroids);
+                 'isFaceBased',1, 'FaceBasis','dirac', 'GridLoc',FG.Centroids);  % the Dirac-Face path (shape test)
     OPT = struct('NoiseMethod','reg','NoiseReg',0.1,'SnrMethod','fixed','SnrFixed',3, ...
                  'InverseMeasure','dspm2018','nModes',400,'Tau',0.5);
     OPT.NoiseCovMat.NoiseCov = Cn;  OPT.ChannelTypes = types(iMEG);

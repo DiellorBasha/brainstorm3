@@ -104,13 +104,17 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             Variant = 'Dirac';
         case {'dirac-face','diracface'}
             Variant = 'Dirac-Face';
+        case {'hodge-face','hodgeface'}
+            Variant = 'Hodge-Face';
         otherwise
             error('tess_eigen:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face''.'], OperatorName);
     end
-    isFace  = strcmpi(Variant, 'Dirac-Face');               % face-domain (modes on faces)
-    isDirac = strcmpi(Variant, 'Dirac') || isFace;          % quaternion Dirac-type: over-fetch + Rayleigh-Ritz + Tau
+    isDiracFace = strcmpi(Variant, 'Dirac-Face');
+    isHodgeFace = strcmpi(Variant, 'Hodge-Face');           % scalar lapFace eigensolve + Hodge vector lift
+    isFace  = isDiracFace || isHodgeFace;                   % face-domain (modes on faces)
+    isDirac = strcmpi(Variant, 'Dirac') || isDiracFace;     % quaternion Dirac-type: over-fetch + Rayleigh-Ritz + Tau
     isLBO   = strcmpi(Variant, 'Laplace-Beltrami');
 
     % --- guard: nxr-compute plugin (operators reach nxr transitively) ---
@@ -213,6 +217,16 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         gv = Op.GlobalVertices{hh};
         n  = size(A, 1);
 
+        if isHodgeFace
+            % Scalar face Laplacian eigensolve (A=lapFace [F x F]) + Hodge vector lift
+            % {grad psi_k, n x grad psi_k}/sqrt(lambda_k), W_F-orthonormalized, embedded as
+            % pure-imaginary quaternions [4F x 2K]. (Not a quaternion Dirac eigensolve.)
+            [Vk, lamk] = local_hodge_face_modes(A, Op.FaceAux{hh}, K);
+            Phi{hh} = Vk;  Lambda{hh} = lamk;
+            GlobalVertices{hh} = gv;  GlobalFaces{hh} = Op.GlobalFaces{hh};
+            continue;
+        end
+
         if isDirac
             % quaternion domain count: faces for 'Dirac-Face', vertices for 'Dirac'
             if isFace, nDom = numel(Op.GlobalFaces{hh}); else, nDom = numel(gv); end
@@ -293,6 +307,51 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         Comment = sprintf('%s eigenmodes (K=%d)', Variant, K);
         db_add_eigen(iSubject, SurfaceFile, EigenMat, Comment);
     end
+end
+
+% ----------------------------------------------------------------------------
+function [Phi, lam] = local_hodge_face_modes(lapFace, aux, Kvec)
+% Face Hodge vector eigenbasis: the scalar face Laplacian eigenmodes psi_k (smooth,
+% Weyl spectrum) lifted to vector fields {grad psi_k, n x grad psi_k}/sqrt(lambda_k),
+% Gram-Cholesky W_F-orthonormalized, embedded as pure-imaginary quaternions [4F x Kvec]
+% (w=0) so the existing bst_dirac face Transform/Reconstruct consumes them unchanged.
+    G  = aux.GradFace;            % [3F x F] gradFace
+    Nf = aux.FaceNormal;          % [F x 3] outward face normals
+    Mf = aux.ScalarMass;          % [F x F] diag(faceArea)
+    nF = size(Mf,1);
+    Ks = min(ceil(Kvec/2), nF-2);
+    % smallest Ks+1 scalar lapFace modes (drop the near-zero constant), M_f-orthonormal
+    [Psi, D] = bst_eigs_smallest(lapFace, Mf, Ks+1, struct('tol',1e-8,'maxit',1000,'disp',0));
+    lam_s = real(diag(D));  [lam_s, idx] = sort(lam_s,'ascend');  Psi = real(Psi(:,idx));
+    Psi = Psi(:, 2:Ks+1);  lam_s = lam_s(2:Ks+1);                 % [F x Ks]
+    nrm = sqrt(max(real(diag(Psi'*(Mf*Psi))), eps));  Psi = Psi * spdiags(1./nrm,0,Ks,Ks);
+    % Hodge lift: grad and skew-grad of each scalar mode, scaled by 1/sqrt(lambda)
+    fArea = full(diag(Mf));  WF3 = spdiags(repelem(fArea,3),0,3*nF,3*nF);
+    sc = 1 ./ sqrt(max(lam_s, eps));
+    U = zeros(3*nF, 2*Ks);
+    for k = 1:Ks
+        gk = G*Psi(:,k);                              % [3F] grad psi_k (x,y,z per face)
+        gm = reshape(gk, 3, [])';                     % [F x 3]
+        sk = reshape(cross(Nf, gm, 2)', [], 1);       % [3F] n x grad
+        U(:, 2*k-1) = gk * sc(k);
+        U(:, 2*k)   = sk * sc(k);
+    end
+    % W_F-orthonormalize the stacked [3F x 2Ks] set (rank-revealing)
+    Gram = U'*WF3*U;  Gram = (Gram+Gram')/2;
+    [Rc,p] = chol(Gram);
+    if p == 0
+        U = U / Rc;
+    else
+        [Vg,Dg] = eig(full(Gram));  dg = real(diag(Dg));  keep = dg > 1e-10*max(dg);
+        U = U*Vg(:,keep)*spdiags(1./sqrt(dg(keep)),0,sum(keep),sum(keep));
+    end
+    nC = min(size(U,2), Kvec);  U = U(:,1:nC);
+    % embed as pure-imaginary quaternions [4F x nC]: rows 2,3,4 of each face block = (x,y,z)
+    Phi = zeros(4*nF, nC);
+    Phi(2:4:end,:) = U(1:3:end,:);
+    Phi(3:4:end,:) = U(2:3:end,:);
+    Phi(4:4:end,:) = U(3:3:end,:);
+    lam = repelem(lam_s(:),2);  lam = lam(1:nC);       % paired scalar eigenvalue per vector mode
 end
 
 % ----------------------------------------------------------------------------

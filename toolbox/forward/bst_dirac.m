@@ -108,7 +108,16 @@ function varargout = bst_dirac(HeadModel, varargin)
     % the face Dirac eigenbasis ('Dirac-Face', modes on faces); everything else (the
     % quaternion embed, Psi'*B*Phi projection, reconstruct) is domain-agnostic.
     isFace  = isfield(HeadModel,'isFaceBased') && isequal(HeadModel.isFaceBased,1);
-    Variant = 'Dirac'; if isFace, Variant = 'Dirac-Face'; end
+    Variant = 'Dirac';
+    if isFace
+        Variant = 'Hodge-Face';                         % default face basis (smooth, full-rank, localizes)
+        if isfield(HeadModel,'FaceBasis') && ~isempty(HeadModel.FaceBasis)
+            switch lower(HeadModel.FaceBasis)
+                case {'dirac','dirac-face'}, Variant = 'Dirac-Face';   % wide-root, non-localizing (kept for study)
+                case {'hodge','hodge-face'}, Variant = 'Hodge-Face';
+            end
+        end
+    end
 
     % --- find-or-create the Dirac eigenbasis as an eigen_ DB node ---
     [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(HeadModel.SurfaceFile, nModes, Tau, Variant);
@@ -159,6 +168,7 @@ function varargout = bst_dirac(HeadModel, varargin)
     CompHM.isEigenmode        = 1;
     CompHM.isDiracEigenmode   = 1;
     CompHM.isFaceBased        = isFace;
+    CompHM.FaceBasisVariant   = Variant;                % which face basis was used (for Reconstruct fallback)
     CompHM.nModes             = 2*K;
     CompHM.Eigenvalues        = [vblk{1}; vblk{2}];     % [2K x 1]
     CompHM.ModeHemisphere     = [hblk{1}; hblk{2}];     % [2K x 1] hemisphere index per mode
@@ -234,7 +244,10 @@ function EigenMat = local_eigen_for_reconstruct(CompHM)
         end
         Kh  = CompHM.nModes / 2;
         Tau = local_default(CompHM, 'DiracTau', 0.5);
-        Variant = 'Dirac'; if isfield(CompHM,'isFaceBased') && isequal(CompHM.isFaceBased,1), Variant = 'Dirac-Face'; end
+        Variant = 'Dirac';
+        if isfield(CompHM,'isFaceBased') && isequal(CompHM.isFaceBased,1)
+            Variant = local_default(CompHM, 'FaceBasisVariant', 'Hodge-Face');
+        end
         EigenMat = local_find_dirac_eigen(CompHM.SurfaceFile, Kh, Tau, Variant);
     end
     if isempty(EigenMat) || ~isfield(EigenMat,'Phi') || isempty(EigenMat.Phi)

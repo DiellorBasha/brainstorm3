@@ -27,9 +27,10 @@ function R = bench_face_dirac_inverse(frameTime)
     HMv = HMos; HMv.Gain = Gv;
     Rv = bst_inverse_dirac(HMv, OPT);  Pv = i_pow(Rv.ImagingKernel * d);     % [nV]
 
-    % ---- (2) face Dirac inverse ----
+    % ---- (2) face Hodge-eigenbasis inverse (the working face vector basis) ----
     [Lf, FG] = bst_face_leadfield(SurfaceFile, ChanMat.Channel(iMEG), HMos.Param(iMEG), 'Mode','unconstrained');
-    HMf = struct('Gain',Lf,'SurfaceFile',SurfaceFile,'HeadModelType','surface','isFaceBased',1,'GridLoc',FG.Centroids);
+    HMf = struct('Gain',Lf,'SurfaceFile',SurfaceFile,'HeadModelType','surface','isFaceBased',1, ...
+                 'FaceBasis','hodge', 'GridLoc',FG.Centroids);
     Rf = bst_inverse_dirac(HMf, OPT);  Pf = i_pow(Rf.ImagingKernel * d);     % [nF]
 
     % ---- (3) plain face wMNE (no eigenbasis) ----
@@ -44,15 +45,15 @@ function R = bench_face_dirac_inverse(frameTime)
     sepDirac = 1000*norm(pkV-pkFd);  sepWmne = 1000*norm(pkV-pkFw);  sepFF = 1000*norm(pkFd-pkFw);
     PvF = (Pv(F(:,1))+Pv(F(:,2))+Pv(F(:,3)))/3;
     ccDV = corr(Pf, PvF);  ccDW = corr(Pf, Pw);
-    fprintf('\n=== face-Dirac inverse vs vertex-Dirac vs face-wMNE @ %.3f s ===\n', DM.Time(iT));
-    fprintf('peak: vertex-Dirac %s\n      face-Dirac   %s  (%.1f mm from vertex)\n      face-wMNE    %s  (%.1f mm from vertex)\n', ...
+    fprintf('\n=== face-Hodge inverse vs vertex-Dirac vs face-wMNE @ %.3f s ===\n', DM.Time(iT));
+    fprintf('peak: vertex-Dirac %s\n      face-Hodge   %s  (%.1f mm from vertex)\n      face-wMNE    %s  (%.1f mm from vertex)\n', ...
         mat2str(pkV,3), mat2str(pkFd,3), sepDirac, mat2str(pkFw,3), sepWmne);
-    fprintf('face-Dirac vs face-wMNE peak separation: %.1f mm\n', sepFF);
-    fprintf('corr(face-Dirac power, vertex-Dirac@faces) = %.3f   corr(face-Dirac, face-wMNE) = %.3f\n', ccDV, ccDW);
+    fprintf('face-Hodge vs face-wMNE peak separation: %.1f mm\n', sepFF);
+    fprintf('corr(face-Hodge power, vertex-Dirac@faces) = %.3f   corr(face-Hodge, face-wMNE) = %.3f\n', ccDV, ccDW);
 
     % ---- 3-panel power maps ----
     hFig = figure('Color','w','Position',[40 80 1500 480]);
-    pan = {Pv,'interp',pkV,'vertex Dirac |J|'; Pf,'flat',pkFd,'face Dirac |J|'; Pw,'flat',pkFw,'face wMNE |J|'};
+    pan = {Pv,'interp',pkV,'vertex Dirac |J|'; Pf,'flat',pkFd,'face Hodge |J|'; Pw,'flat',pkFw,'face wMNE |J|'};
     for sp=1:3
         ax=subplot(1,3,sp); hold(ax,'on'); scal=pan{sp,1};
         patch('Vertices',V,'Faces',F,'FaceVertexCData',scal,'FaceColor',pan{sp,2},'EdgeColor','none','Parent',ax);
@@ -61,7 +62,7 @@ function R = bench_face_dirac_inverse(frameTime)
         colormap(ax,hot(256)); clim(ax,[0 m]); axis(ax,'equal','off'); view(ax,[0 90]);
         camlight(ax,'headlight'); lighting(ax,'gouraud'); material(ax,'dull'); title(ax,pan{sp,4});
     end
-    sgtitle(sprintf('Face Dirac inverse @ %.2f s | peak vs vertex %.1f mm, vs wMNE %.1f mm', DM.Time(iT), sepDirac, sepFF));
+    sgtitle(sprintf('Face Hodge-eigenbasis inverse @ %.2f s | peak vs vertex %.1f mm, vs wMNE %.1f mm', DM.Time(iT), sepDirac, sepFF));
     png = fullfile(OUTDIR,'bench_face_dirac_inverse.png'); print(hFig,png,'-dpng','-r130');
     fprintf('saved %s\n', png);
     R = struct('Pv',Pv,'Pf',Pf,'Pw',Pw,'sepDirac_mm',sepDirac,'sepFF_mm',sepFF,'corrDV',ccDV,'corrDW',ccDW,'png',png);
