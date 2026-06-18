@@ -1,5 +1,6 @@
 function test_dirac_helmholtz_face()
-% Face-domain Helmholtz via the dual face-Dirac D̃: convention + reconstruction + shapes.
+% Face-NATIVE Helmholtz via the nxr dual gradient gradFace + face Laplacian lapFace:
+% convention + exact reconstruction + the strict planted-field round-trip (HarmFrac->0).
 % Author: Diellor Basha, 2026
     nFail = 0;
     SurfaceFile = bst_get('Subject',1).Surface(5).FileName;
@@ -9,39 +10,40 @@ function test_dirac_helmholtz_face()
     nV = size(Surf.Vertices,1); nF = size(Surf.Faces,1);
 
     Op = bst_dirac_helmholtz_face('Prepare', Dirac, LBO, Surf);
-    nFail = nFail + chk('Prepare has D-tilde per hemi', numel(Op.Dt)==2 && size(Op.Dt{1},1)==4*numel(Op.vH{1}));
+    nFail = nFail + chk('Prepare has G/SkewG + coupled chol per hemi', numel(Op.G)==2 && ...
+        size(Op.G{1},1)==3*numel(Op.fH{1}) && size(Op.SkewG{1},2)==numel(Op.fH{1}) && ~isempty(Op.cholA{1}));
 
     rng(2); Jf = randn(nF, 3) * 1e-9;                          % random per-face field
     Ht = bst_dirac_helmholtz_face('Frame', Op, Jf);
 
-    nFail = nFail + chk('Curl/Div are [nV x 1]', isequal(size(Ht.Curl),[nV 1]) && isequal(size(Ht.Div),[nV 1]));
+    nFail = nFail + chk('Curl/Div/Psi/Phi are [nF x 1]', isequal(size(Ht.Curl),[nF 1]) && ...
+        isequal(size(Ht.Div),[nF 1]) && isequal(size(Ht.Psi),[nF 1]) && isequal(size(Ht.Phi),[nF 1]));
     nFail = nFail + chk('component fields are [nF x 3]', isequal(size(Ht.Virr),[nF 3]) && isequal(size(Ht.Vsol),[nF 3]));
     recon = Ht.Virr + Ht.Vsol + Ht.Vharm;
     nFail = nFail + chk('exact reconstruction Virr+Vsol+Vharm == Jf', max(abs(recon(:)-Ht.Vtot(:))) < 1e-9*max(abs(Ht.Vtot(:))));
     nFail = nFail + chk('HarmFrac in [0,1]', isscalar(Ht.HarmFrac) && Ht.HarmFrac>=0 && Ht.HarmFrac<=1.0001);
 
-    % --- convention: re-decompose the component fields (validates w=vorticity, imag.n=div) ---
+    % --- convention: re-decompose the component fields; each must stay in its own channel ---
+    en = @(X) sum(X(:).^2);
     Hirr = bst_dirac_helmholtz_face('Frame', Op, Ht.Virr);
     Hsol = bst_dirac_helmholtz_face('Frame', Op, Ht.Vsol);
-    nFail = nFail + chk('irrotational is divergence-dominated', sum(Hirr.Div.^2) > sum(Hirr.Curl.^2));
-    nFail = nFail + chk('solenoidal is curl-dominated',         sum(Hsol.Curl.^2) > sum(Hsol.Div.^2));
+    nFail = nFail + chk('irrotational stays irrotational (Virr energy > Vsol)', en(Hirr.Virr) > en(Hirr.Vsol));
+    nFail = nFail + chk('solenoidal stays solenoidal (Vsol energy > Virr)',     en(Hsol.Vsol) > en(Hsol.Virr));
 
-    nFail = nFail + chk('Cores/Sources are struct arrays w/ persistence', isstruct(Ht.Cores) && isstruct(Ht.Sources) && (isempty(Ht.Cores) || isfield(Ht.Cores,'persistence')));
+    nFail = nFail + chk('Cores/Sources are struct arrays w/ persistence', isstruct(Ht.Cores) && isstruct(Ht.Sources) && ...
+        (isempty(Ht.Cores) || isfield(Ht.Cores,'persistence')));
 
-    % --- planted pure-skew-gradient (solenoidal) face field must recover (HarmFrac->0) ---
-    hh=1; vH=Op.vH{hh}; fH=Op.fH{hh};
-    c = vH(round(numel(vH)/2)); d2 = sum((Surf.Vertices(vH,:)-Surf.Vertices(c,:)).^2,2);
-    psi0 = exp(-d2/(2*0.012^2)); psi0 = psi0 - mean(psi0);
-    gp = [Op.Gx{hh}*psi0, Op.Gy{hh}*psi0, Op.Gz{hh}*psi0];
-    Vsk = cross(Op.Nf{hh}, gp, 2);                          % n x grad(psi0): pure solenoidal
-    Jsk = zeros(nF,3); Jsk(fH,:) = Vsk;
+    % --- STRICT round-trip: a field planted as SkewG*psi0 must recover exactly ---
+    hh=1; fH=Op.fH{hh};
+    Cf = Op.Cf{hh};  c = round(size(Cf,1)/2);  d2 = sum((Cf-Cf(c,:)).^2,2);
+    psi0 = exp(-d2/(2*0.012^2));  psi0 = psi0 - mean(psi0);
+    Vsol0 = reshape(Op.SkewG{hh}*psi0, 3, [])';               % pure solenoidal on faces
+    Jsk = zeros(nF,3); Jsk(fH,:) = Vsol0;
     Hsk = bst_dirac_helmholtz_face('Frame', Op, Jsk);
-    % Primary gate: the stream function is recovered (shape). HarmFrac floor ~0.10 with
-    % the intrinsic D̃_int + vertex cotan Poisson + FEM-gradient reconstruction (a Dirac-vs-FEM
-    % discretization gap); a full face-native K̃_int Poisson + dual-complex gradient would reach ~0.
-    fprintf('  [planted skew-gradient] HarmFrac=%.3g  corr(psi,psi0)=%.3f\n', Hsk.HarmFrac, corr(Hsk.Psi(vH), psi0));
-    nFail = nFail + chk('planted skew-gradient: recovered psi corr > 0.95', abs(corr(Hsk.Psi(vH), psi0)) > 0.95);
-    nFail = nFail + chk('planted skew-gradient: HarmFrac < 0.15 (sanity)', Hsk.HarmFrac < 0.15);
+    cc = corr(Hsk.Psi(fH), psi0);
+    fprintf('  [planted skew-gradient] HarmFrac=%.3g  corr(psi,psi0)=%.4f\n', Hsk.HarmFrac, cc);
+    nFail = nFail + chk('planted skew-gradient: HarmFrac < 0.02', Hsk.HarmFrac < 0.02);
+    nFail = nFail + chk('planted skew-gradient: |corr(psi,psi0)| > 0.99', abs(cc) > 0.99);
 
     fprintf('\n==== test_dirac_helmholtz_face: %d failed ====\n', nFail);
     if nFail > 0, error('test_dirac_helmholtz_face FAILED'); end

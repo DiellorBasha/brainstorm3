@@ -1,7 +1,8 @@
 function R = bench_dirac_face_helmholtz(frameTime)
-% BENCH_DIRAC_FACE_HELMHOLTZ  Compare vertex vs face-domain Helmholtz on a real Dirac frame.
+% BENCH_DIRAC_FACE_HELMHOLTZ  Compare vertex vs face-NATIVE Helmholtz on a real Dirac frame.
 % Interpolates the unconstrained vertex dSPM solution to face centroids and decomposes it
-% with bst_dirac_helmholtz_face (intrinsic dual D~_int), against bst_dirac_helmholtz (vertex).
+% with bst_dirac_helmholtz_face (face-native gradFace/lapFace coupled Hodge), against
+% bst_dirac_helmholtz (vertex). Now apples-to-apples (both self-consistent, genus-0 harmonic~0).
 % USAGE: R = bench_dirac_face_helmholtz(22.6)
 % Author: Diellor Basha, 2026
     if nargin<1 || isempty(frameTime), frameTime = 22.6; end
@@ -34,12 +35,14 @@ function R = bench_dirac_face_helmholtz(frameTime)
     OpF = bst_dirac_helmholtz_face('Prepare', Dirac, LBO, Surf);
     HtF = bst_dirac_helmholtz_face('Frame', OpF, Jf);
 
-    % ---- compare ----
-    cv = @(c) [sum([c.charge]>0) sum([c.charge]<0)];
+    % ---- compare (count only persistence-significant cores; the 3-valence face dual
+    %      yields many tiny-persistence raw extrema, so gate both sides identically) ----
+    GATE = 0.1;                                            % keep persistence >= 10% of per-hemi max
+    cv = @(c) i_count(bst_persistence_gate(c, GATE));
     fprintf('\n=== vertex vs face Helmholtz @ %.3f s ===\n', DM.Time(iT));
     fprintf('HarmFrac:   vertex %.1f%%   face %.1f%%\n', 100*HtV.HarmFrac, 100*HtF.HarmFrac);
-    fprintf('vortices(+/-): vertex %s   face %s\n', mat2str(cv(HtV.Cores)),   mat2str(cv(HtF.Cores)));
-    fprintf('sources(+/-):  vertex %s   face %s\n', mat2str(cv(HtV.Sources)), mat2str(cv(HtF.Sources)));
+    fprintf('vortices(+/-) [persist>=%.0f%%]: vertex %s   face %s\n', 100*GATE, mat2str(cv(HtV.Cores)),   mat2str(cv(HtF.Cores)));
+    fprintf('sources(+/-)  [persist>=%.0f%%]: vertex %s   face %s\n', 100*GATE, mat2str(cv(HtV.Sources)), mat2str(cv(HtF.Sources)));
     fprintf('|Curl| max: vertex %.3g  face %.3g  | |Div| max: vertex %.3g  face %.3g\n', ...
         max(abs(HtV.Curl)), max(abs(HtF.Curl)), max(abs(HtV.Div)), max(abs(HtF.Div)));
 
@@ -47,11 +50,12 @@ function R = bench_dirac_face_helmholtz(frameTime)
     hFig = figure('Color','w','Position',[60 80 1200 560]); cmap = i_divmap(256);
     for sp = 1:2
         ax = subplot(1,2,sp); hold(ax,'on');
-        if sp==1, scal=HtV.Psi; cc=HtV.Cores; ttl='vertex Helmholtz (psi)';
-        else,     scal=HtF.Psi; cc=HtF.Cores; ttl='face Helmholtz (psi, intrinsic)'; end
-        patch('Vertices',V,'Faces',F,'FaceVertexCData',scal,'FaceColor','interp', ...
+        if sp==1, scal=HtV.Psi; cc=HtV.Cores; ttl='vertex Helmholtz (psi)'; fc='interp';
+        else,     scal=HtF.Psi; cc=HtF.Cores; ttl='face Helmholtz (psi, face-native)'; fc='flat'; end
+        patch('Vertices',V,'Faces',F,'FaceVertexCData',scal,'FaceColor',fc, ...
               'EdgeColor','none','Parent',ax);
-        m=max(abs(scal)); if m<=0, m=eps; end
+        m=prctile(abs(scal(scal~=0)),99); if isempty(m)||m<=0, m=max(abs(scal)); end  % robust clim (outliers wash out max)
+        if m<=0, m=eps; end
         if ~isempty(cc)
             pr=[cc.persistence]; mxf=max([pr(isfinite(pr)),eps]); keep=cc(isinf(pr)|pr>=0.5*mxf);
             for k=1:numel(keep)
@@ -78,6 +82,9 @@ function Op = i_op(SurfaceFile, variant)
         end
     end
     if isempty(Op), tess_operators(SurfaceFile, variant); Op = i_op(SurfaceFile, variant); end
+end
+function c = i_count(mk)
+    if isempty(mk), c = [0 0]; else, c = [sum([mk.charge]>0) sum([mk.charge]<0)]; end
 end
 function m = i_divmap(n)
     t=linspace(0,1,n)'; lo=[.23 .30 .75]; mid=[.96 .96 .96]; hi=[.78 .15 .18];
