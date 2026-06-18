@@ -19,10 +19,11 @@ The face-based pipeline (Dirac/Helmholtz, and the upcoming face-Dirac eigenbasis
 Add an `'unconstrained'` Mode to both functions (and make it the default for the rigorous path). Constrained/loose modes are retained untouched for back-compat.
 
 ### `bst_face_leadfield(SurfaceFile, Channel, Param, 'Mode','unconstrained')`
-- **Skip `tess_tangents` entirely.** Compute geometry directly from the mesh:
-  - centroids `x_f = mean of the 3 vertices` `[F×3]`
-  - face normals `n̂_f` from `cross(e1,e2)`, sign-corrected outward via `VertNormals` (the same convention as `bst_dirac_helmholtz_face`) — used ONLY for `GridOrient` display, never for projection
-  - areas `A_f` `[F×1]`
+- **Geometry from `tess_manifold` (NOT `tess_tangents`, which is deprecated).** `tess_manifold(SurfaceFile)` returns the canonical nxr geometry backbone; assemble the global per-face arrays by scattering each hemisphere's data through its `GlobalFaces` map:
+  - centroids `x_f = M.Embedded(hh).face.centroid` `[F×3]` (verified == barycentric mean, exact)
+  - face normals `n̂_f = M.Embedded(hh).face.normal` `[F×3]` (gauge-consistent, **unit**, orientation verified vs geometry) — used ONLY for `GridOrient` display, never for projection
+  - areas `A_f = ½|e₁×e₂|` `[F×1]` (pure geometry; `tess_manifold` carries no face-area field) — metadata only (`GridAreas`), not applied to the gain
+  - This also makes the leadfield's face indexing/orientation match the manifold the downstream face-Dirac inverse will use.
 - **Leadfield:** block over faces, `L_face(:, 3f-2:3f) = bst_meg_sph(x_f', Channel, Param)` — i.e. the raw `[nCh × 3F]` Sarvas gain. **No area weighting** (parity with the vertex model; area/depth weighting belongs in the inverse's source prior).
 - Returns `FaceGeom` with `.Centroids .Normals .Areas` (no `.U/.V` in this mode).
 
@@ -40,7 +41,7 @@ Add an `'unconstrained'` Mode to both functions (and make it the default for the
 | Shape | `L_face` is `[nMEG × 3F]`, all finite |
 | Pure Sarvas | `L_face(:,3f-2:3f)` equals `bst_meg_sph(x_f(f,:)', …)` for a sampled face (it IS that — exactness, no frame) |
 | **Constrained consistency** | the existing `'constrained'` column `f` equals `L_unconstr(:,3f-2:3f) · n̂_f · A_f` (ties the new mode to the validated constrained one) |
-| No `tess_tangents` dependency | unconstrained path runs on a surface **without** `Reg.Sphere` (constrained path requires it) — or assert `tess_tangents` is never called (e.g. temporarily shadowed / function-call count) |
+| Geometry from `tess_manifold` | unconstrained path obtains centroids/normals from `tess_manifold` (deprecated `tess_tangents` is never called); centroids == barycentric mean (exact), normals unit |
 | Observability ceiling | the whitened face leadfield's effective rank ≈ the vertex leadfield's (~tens of DOF — the MEG physics ceiling, memory `bst_inverse_dirac`); a sanity bound, not bit-equality |
 | Head model struct | saved HM has `nComponents==3`, `isFaceBased==1`, `size(Gain,2)==3*nF`, `GridOrient` unit normals |
 
