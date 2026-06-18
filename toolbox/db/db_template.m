@@ -137,6 +137,7 @@ switch lower(structureName)
               'Operator',       [], ...
               'Mass',           [], ...
               'GlobalVertices', [], ...
+              'GlobalFaces',    [], ...   % face-domain variants (e.g. 'Dirac-Face'): 1x2 cell of global FACE indices; [] otherwise
               'FirstOrder',     [], ...   % Dirac only: struct(.Intrinsic{1x2}, .Extrinsic{1x2}) first-order D [4F x 4V]
               'FaceMass',       [], ...   % Dirac only: 1x2 cell of face-area mass W_F [4F x 4F] (pairs with FirstOrder)
               'Provenance',     []);
@@ -146,11 +147,12 @@ switch lower(structureName)
               'Comment',        '', ...
               'ParentSurface',  '', ...
               'OperatorFile',   '', ...   % path ref to the operator node solved
-              'Variant',        '', ...   % 'Laplace-Beltrami' | 'Connection Laplacian' | 'Dirac'
+              'Variant',        '', ...   % 'Laplace-Beltrami' | 'Connection Laplacian' | 'Dirac' | 'Dirac-Face'
               'Phi',            [], ...   % 1x2 per-hemi cell: eigenvectors
               'Lambda',         [], ...   % 1x2 per-hemi cell: eigenvalues [K x 1]
               'K',              [], ...   % modes requested
               'GlobalVertices', [], ...   % 1x2 per-hemi cell: scatter maps
+              'GlobalFaces',    [], ...   % face-domain variants ('Dirac-Face'): 1x2 cell of global FACE indices; [] otherwise
               'Provenance',     []);
 
     case 'waveletmat'

@@ -95,10 +95,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             Variant = 'Connection Laplacian';
         case {'dirac'}
             Variant = 'Dirac';
+        case {'dirac-face','diracface'}
+            Variant = 'Dirac-Face';
         otherwise
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face''.'], OperatorName);
     end
 
     % --- load surface ---
@@ -156,13 +158,14 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
 
     prov = struct('Backend','nxr', 'NxrVersion',nxrVer, 'Variant',Variant, ...
                   'ComputeDate',datestr(now,'yyyy-mm-dd HH:MM:SS'));
-    if strcmpi(Variant, 'Dirac')
+    if ismember(Variant, {'Dirac','Dirac-Face'})
         prov.Tau = Tau;
     end
 
     Operator       = cell(1, 2);
     Mass           = cell(1, 2);
     GlobalVertices = cell(1, 2);
+    GlobalFaces    = cell(1, 2);   % face-domain variants (e.g. 'Dirac-Face')
     diracScales    = cell(1, 2);   % [sL sE] per hemisphere (Dirac co-normalization)
     FirstOrderInt  = cell(1, 2);   % Dirac: intrinsic first-order D_int [4F x 4V] per hemisphere
     FirstOrderExt  = cell(1, 2);   % Dirac: extrinsic first-order D     [4F x 4V] per hemisphere
@@ -178,6 +181,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         % build local submesh (local indices)
         isV   = false(nVtot, 1);  isV(vH) = true;
         fMask = all(isV(Fcs), 2);
+        fGlob = find(fMask);                      % global face indices for this hemisphere
         mapV  = zeros(nVtot, 1);  mapV(vH) = 1:numel(vH);
         Vloc  = Vtx(vH, :);
         Floc  = mapV(Fcs(fMask, :));
@@ -232,6 +236,30 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     FirstOrderInt{hh} = Dint1;
                     FirstOrderExt{hh} = Dext1;
                     FaceMass{hh}      = kron(spdiags(fArea, 0, nFh, nFh), speye(4));   % [4F x 4F]
+
+                case 'Dirac-Face'
+                    % Face-domain Dirac operator (the dual of the vertex 'Dirac'):
+                    %   (1-Tau)*E~_int + Tau*E~_ext  [4F x 4F], mode mass = W_F.
+                    %   E~_int = D~_int' W_V D~_int  -- intrinsic (centroid-immersion dual),
+                    %            assembled in MATLAB (mirrors local_dirac_intrinsic_sq on the
+                    %            vertex side); its scalar block is the face cotan Laplacian.
+                    %   E~_ext = extrinsicBlockFace = D~_ext' W_V D~_ext  (nxr, Gauss map).
+                    % BOTH use the SAME vertex dual-area mass W_V (so E~_int is built exactly
+                    % as nxr builds E~_ext); co-normalized vs W_F so Tau is dimensionless.
+                    Dt_int = nxr_compute('operators', h, 'diracFaceIntrinsicD');   % [4V x 4F]
+                    Mlump  = nxr_compute('operators', h, 'mass', 'lumped');        % vertex dual area [nVh x nVh]
+                    WV     = kron(Mlump, speye(4));                                % [4V x 4V]
+                    Eint   = Dt_int' * WV * Dt_int;  Eint = (Eint + Eint')/2;      % [4F x 4F]
+                    Eext   = nxr_compute('operators', h, 'diracFace', 1);          % extrinsicBlockFace [4F x 4F]
+                    nFh    = size(Floc, 1);
+                    e1f    = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
+                    e2f    = Vloc(Floc(:,3),:) - Vloc(Floc(:,1),:);
+                    fArea  = 0.5 * sqrt(sum(cross(e1f, e2f, 2).^2, 2));
+                    B      = kron(spdiags(fArea, 0, nFh, nFh), speye(4));          % W_F [4F x 4F]
+                    sI = local_lambda_max(Eint, B);
+                    sX = local_lambda_max(Eext, B);
+                    A  = (1 - Tau) * (Eint / sI) + Tau * (Eext / sX);             % [4F x 4F]
+                    diracScales{hh} = [sI, sX];
             end
         catch ME
             nxr_compute('destroy', h);
@@ -242,6 +270,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         Operator{hh}       = A;
         Mass{hh}           = B;
         GlobalVertices{hh} = vH;
+        GlobalFaces{hh}    = fGlob;
     end
 
     % Record the Dirac block co-normalization (makes Tau dimensionless / portable and
@@ -250,6 +279,10 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         prov.Blocks        = '(1-Tau)*intrinsic_Dirac^2 (f) + Tau*extrinsic_Dirac^2 (N)';
         prov.Normalization = 'lambda_max-vs-B (per-block, co-normalized)';
         prov.DiracScale    = diracScales;   % 1x2 cell, [sL sE] per hemisphere
+    elseif strcmpi(Variant, 'Dirac-Face')
+        prov.Blocks        = '(1-Tau)*intrinsic_faceDirac^2 (D~_int'' W_V D~_int) + Tau*extrinsic_faceDirac^2 (extrinsicBlockFace)';
+        prov.Normalization = 'lambda_max-vs-W_F (per-block, co-normalized)';
+        prov.DiracScale    = diracScales;   % 1x2 cell, [sI sX] per hemisphere
     end
 
     % --- assemble OperatorMat ---
@@ -259,6 +292,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     OperatorMat.Operator       = Operator;        % 1x2 cell of sparse matrices
     OperatorMat.Mass           = Mass;            % 1x2 cell of sparse matrices
     OperatorMat.GlobalVertices = GlobalVertices;  % 1x2 cell of global vertex indices
+    OperatorMat.GlobalFaces    = GlobalFaces;     % 1x2 cell of global face indices (face-domain variants)
     if strcmpi(Variant, 'Dirac')
         OperatorMat.FirstOrder = struct('Intrinsic', {FirstOrderInt}, 'Extrinsic', {FirstOrderExt});
         OperatorMat.FaceMass   = FaceMass;         % 1x2 cell of W_F [4F x 4F]
