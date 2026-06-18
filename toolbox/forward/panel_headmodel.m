@@ -146,6 +146,11 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
     % unconstrained surface leadfield; bst_dirac transforms it into Dirac eigenmodes.
     jCheckDirac = gui_component('CheckBox', jPanelMethod, 'br', 'Dirac Transform', [], ...
         'Transform the computed leadfield into the Dirac (curvature-aware vector) eigenbasis via bst_dirac', @UpdateComment);
+    % Source space for the Dirac transform: vertices (Dirac eigenbasis) or faces
+    % (the Hodge vector eigenbasis -- sources at face centroids). Only meaningful when
+    % "Dirac Transform" is checked.
+    jCheckDiracFace = gui_component('CheckBox', jPanelMethod, 'tab', 'Face-based', [], ...
+        'Cast into the FACE Hodge vector eigenbasis (sources at face centroids) instead of vertices', @UpdateComment);
     % Attach sub panel to NewPanel
     jPanelNew.add('br hfill', jPanelMethod);
 
@@ -173,7 +178,8 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
                   'jComboMethodSEEG',    jComboMethodSEEG, ...
                   'jCheckMethodNIRS',    jCheckMethodNIRS, ...
                   'jComboMethodNIRS',    jComboMethodNIRS, ...
-                  'jCheckDirac',         jCheckDirac ...
+                  'jCheckDirac',         jCheckDirac, ...
+                  'jCheckDiracFace',     jCheckDiracFace ...
                  );
     % Create the BstPanel object that is returned by the function
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
@@ -276,8 +282,14 @@ function [bstPanelNew, panelName] = CreatePanel(isMeg, isEeg, isEcog, isSeeg, is
         end
         % Dirac transform suffix (e.g. "Overlapping spheres | Dirac basis")
         if jCheckDirac.isSelected()
-            Comment = [Comment ' | Dirac basis'];
+            if jCheckDiracFace.isSelected()
+                Comment = [Comment ' | Dirac basis (face)'];
+            else
+                Comment = [Comment ' | Dirac basis'];
+            end
         end
+        % Face-based only meaningful when Dirac transform is on
+        jCheckDiracFace.setEnabled(jCheckDirac.isSelected());
         % Update control
         jTextComment.setText(Comment);
     end
@@ -309,6 +321,13 @@ function s = GetPanelContents() %#ok<DEFNU>
     end
     % Dirac transform: post-process the computed leadfield into the Dirac eigenbasis
     s.DiracTransform = ctrl.jCheckDirac.isSelected();
+    % Source space for the Dirac transform: 'vertex' (Dirac eigenbasis) or 'face'
+    % (the Hodge vector eigenbasis on face centroids). Only used when DiracTransform=1.
+    if isfield(ctrl,'jCheckDiracFace') && ~isempty(ctrl.jCheckDiracFace) && ctrl.jCheckDiracFace.isSelected()
+        s.DiracSpace = 'face';
+    else
+        s.DiracSpace = 'vertex';
+    end
     % Get methods for MEG, EEG, ECOG, SEEG
     if ~isempty(ctrl.jCheckMethodMEG) && ctrl.jCheckMethodMEG.isSelected()
         s.MEGMethod = char(ctrl.jComboMethodMEG.getSelectedItem.getType());
@@ -780,19 +799,50 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
         % (curvature-aware vector) eigenbasis. bst_dirac fetches/creates the Dirac
         % eigen node on the cortex and projects; only the Dirac node is saved.
         if isDiracTransform
-            baseHM = OPTIONS.HeadModelMat;            % in-memory base (no file written)
+            baseHM   = OPTIONS.HeadModelMat;          % in-memory base (no file written)
+            isFaceSp = isfield(sMethod,'DiracSpace') && strcmpi(sMethod.DiracSpace,'face');
+            nodeTag  = 'headmodel_dirac_eigenmode';
             try
-                CompHM = bst_dirac(baseHM);           % default nModes=400/hemi, tau=0.5
+                if isFaceSp
+                    % FACE Hodge eigenbasis: build the full-unconstrained face leadfield
+                    % (Sarvas at face centroids) from the base sphere model, then cast it
+                    % into the face Hodge vector eigenbasis. Requires an OS/single-sphere
+                    % MEG model (sphere Param); MEG rows only (NaN elsewhere, like the base).
+                    if ~isfield(baseHM,'Param') || isempty(baseHM.Param)
+                        error('Face Dirac needs an overlapping-spheres / single-sphere MEG head model (no sphere Param found).');
+                    end
+                    iMEGcols = good_channel(OPTIONS.Channel, [], 'MEG');
+                    if isempty(iMEGcols)
+                        error('Face Dirac requires MEG channels.');
+                    end
+                    [Lf, FG] = bst_face_leadfield(baseHM.SurfaceFile, OPTIONS.Channel(iMEGcols), ...
+                                                  baseHM.Param(iMEGcols), 'Mode', 'unconstrained');
+                    Gfull = nan(size(baseHM.Gain,1), size(Lf,2));   % all-channel rows, parity with base
+                    Gfull(iMEGcols,:) = Lf;
+                    faceHM = baseHM;
+                    faceHM.Gain        = Gfull;
+                    faceHM.GridLoc     = FG.Centroids;
+                    faceHM.GridOrient  = FG.Normals;
+                    faceHM.isFaceBased = 1;
+                    faceHM.FaceBasis   = 'hodge';
+                    faceHM.nComponents = 3;
+                    CompHM  = bst_dirac(faceHM);      % -> face Hodge eigenbasis [nCh x 2K]
+                    nodeTag = 'headmodel_dirac_facehodge';
+                else
+                    CompHM = bst_dirac(baseHM);       % vertex Dirac, default nModes=400/hemi, tau=0.5
+                end
             catch ME
                 errMessage = ['Dirac transform failed: ' ME.message];
                 continue;
             end
-            CompHM.Comment = OPTIONS.Comment;         % e.g. "Overlapping spheres | Dirac basis"
+            CompHM.Comment = OPTIONS.Comment;         % e.g. "Overlapping spheres | Dirac basis (face)"
+            spaceStr = 'vertex';  if isFaceSp, spaceStr = 'face Hodge'; end
             CompHM = bst_history('add', CompHM, 'dirac_eigenmode_leadfield', ...
-                sprintf('Dirac eigenmode leadfield (%d modes) composed in Compute head model', CompHM.nModes));
+                sprintf('Dirac eigenmode leadfield (%d modes, %s) composed in Compute head model', ...
+                        CompHM.nModes, spaceStr));
             % Save only the Dirac node
             StudyDir = bst_fileparts(file_fullpath(sStudy.FileName));
-            OutputFile = bst_process('GetNewFilename', StudyDir, 'headmodel_dirac_eigenmode');
+            OutputFile = bst_process('GetNewFilename', StudyDir, nodeTag);
             bst_save(OutputFile, CompHM, 'v7');
             newHeadModel = db_template('HeadModel');
             newHeadModel.FileName      = file_short(OutputFile);
