@@ -104,17 +104,23 @@ function varargout = bst_dirac(HeadModel, varargin)
             'HeadModel has no SurfaceFile; cannot resolve the Dirac eigen node.');
     end
 
+    % FACE-domain vs vertex-domain: a face leadfield (isFaceBased=1) is expressed in
+    % the face Dirac eigenbasis ('Dirac-Face', modes on faces); everything else (the
+    % quaternion embed, Psi'*B*Phi projection, reconstruct) is domain-agnostic.
+    isFace  = isfield(HeadModel,'isFaceBased') && isequal(HeadModel.isFaceBased,1);
+    Variant = 'Dirac'; if isFace, Variant = 'Dirac-Face'; end
+
     % --- find-or-create the Dirac eigenbasis as an eigen_ DB node ---
-    [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(HeadModel.SurfaceFile, nModes, Tau);
+    [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(HeadModel.SurfaceFile, nModes, Tau, Variant);
 
     % Truncate to nModes (a reused node may carry more modes than requested).
     K = min(nModes, EigenMat.K);
     Tau = local_eigen_tau(EigenMat, Tau);
 
-    Lblk = cell(1,2); vblk = cell(1,2); hblk = cell(1,2);
+    Lblk = cell(1,2); vblk = cell(1,2); hblk = cell(1,2); gblk = cell(1,2);
     for hh = 1:2
-        vH  = EigenMat.GlobalVertices{hh}(:);
-        nVh = numel(vH);
+        if isFace, vH = EigenMat.GlobalFaces{hh}(:); else, vH = EigenMat.GlobalVertices{hh}(:); end
+        nVh = numel(vH);                          % domain elements (faces or vertices) this hemi
         Phi = double(EigenMat.Phi{hh});
         if size(Phi,1) ~= 4*nVh
             error('bst_dirac:shapeMismatch', ...
@@ -142,6 +148,7 @@ function varargout = bst_dirac(HeadModel, varargin)
         Lblk{hh} = Psi' * (B * Phi);              % [nCh x K]
         vblk{hh} = Vals;
         hblk{hh} = hh * ones(K,1);
+        gblk{hh} = vH;                            % domain scatter (faces or vertices)
     end
 
     CompHM = HeadModel;
@@ -151,10 +158,14 @@ function varargout = bst_dirac(HeadModel, varargin)
     CompHM.GridAtlas          = [];
     CompHM.isEigenmode        = 1;
     CompHM.isDiracEigenmode   = 1;
+    CompHM.isFaceBased        = isFace;
     CompHM.nModes             = 2*K;
     CompHM.Eigenvalues        = [vblk{1}; vblk{2}];     % [2K x 1]
     CompHM.ModeHemisphere     = [hblk{1}; hblk{2}];     % [2K x 1] hemisphere index per mode
     CompHM.HemiGlobalVertices = {EigenMat.GlobalVertices{1}(:), EigenMat.GlobalVertices{2}(:)};
+    if isFace
+        CompHM.HemiGlobalFaces = {gblk{1}, gblk{2}};    % face scatter for Reconstruct
+    end
     CompHM.HeadModelType      = 'surface';
     % Stamp the eigen-node provenance so Reconstruct re-fetches the exact basis.
     CompHM.DiracEigenFile     = '';
@@ -179,14 +190,16 @@ function J = local_reconstruct(CompHM, GainRows)
         error('bst_dirac:noGainRows', 'Reconstruct requires a [m x 2K] GainRows matrix.');
     end
 
+    isFace   = isfield(CompHM,'isFaceBased') && isequal(CompHM.isFaceBased,1);
     EigenMat = local_eigen_for_reconstruct(CompHM);
 
     Kh    = CompHM.nModes / 2;
-    nVert = sum(cellfun(@numel, CompHM.HemiGlobalVertices));
+    if isFace, hemiIdx = CompHM.HemiGlobalFaces; else, hemiIdx = CompHM.HemiGlobalVertices; end
+    nVert = sum(cellfun(@numel, hemiIdx));               % total domain elements (faces or vertices)
     m     = size(GainRows, 1);
     J     = zeros(m, 3*nVert);
     for hh = 1:2
-        vH   = CompHM.HemiGlobalVertices{hh}(:);
+        vH   = hemiIdx{hh}(:);
         Phi  = double(EigenMat.Phi{hh});
         if size(Phi,2) < Kh
             error('bst_dirac:shapeMismatch', ...
@@ -221,7 +234,8 @@ function EigenMat = local_eigen_for_reconstruct(CompHM)
         end
         Kh  = CompHM.nModes / 2;
         Tau = local_default(CompHM, 'DiracTau', 0.5);
-        EigenMat = local_find_dirac_eigen(CompHM.SurfaceFile, Kh, Tau);
+        Variant = 'Dirac'; if isfield(CompHM,'isFaceBased') && isequal(CompHM.isFaceBased,1), Variant = 'Dirac-Face'; end
+        EigenMat = local_find_dirac_eigen(CompHM.SurfaceFile, Kh, Tau, Variant);
     end
     if isempty(EigenMat) || ~isfield(EigenMat,'Phi') || isempty(EigenMat.Phi)
         error('bst_dirac:badBasis', ...
@@ -230,15 +244,17 @@ function EigenMat = local_eigen_for_reconstruct(CompHM)
 end
 
 % ----------------------------------------------------------------------------
-function [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(SurfaceFile, nModes, Tau)
-% Find a Dirac eigen node under the surface matching (nModes, Tau), else create
-% one via tess_eigen. Returns the loaded EigenMat, its referenced OperatorMat
-% (per-hemisphere mass matrices), and the eigen node's file path.
-    [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau);
+function [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(SurfaceFile, nModes, Tau, Variant)
+% Find a Dirac eigen node under the surface matching (Variant, nModes, Tau), else
+% create one via tess_eigen. Returns the loaded EigenMat, its referenced OperatorMat
+% (per-hemisphere mass matrices), and the eigen node's file path. Variant is 'Dirac'
+% (vertex, default) or 'Dirac-Face' (face-domain).
+    if nargin < 4 || isempty(Variant), Variant = 'Dirac'; end
+    [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant);
     if isempty(EigenMat)
-        EigenMat = tess_eigen(SurfaceFile, 'Dirac', 'K', nModes, 'Tau', Tau);
+        EigenMat = tess_eigen(SurfaceFile, Variant, 'K', nModes, 'Tau', Tau);
         % Re-find to recover the saved node's filename for provenance stamping.
-        [found, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau);
+        [found, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant);
         if ~isempty(found); EigenMat = found; end
     end
     if isempty(EigenMat) || ~isfield(EigenMat,'Phi') || isempty(EigenMat.Phi)
@@ -257,10 +273,11 @@ function [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(SurfaceFile,
 end
 
 % ----------------------------------------------------------------------------
-function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau)
-% Scan the surface's Eigen child nodes for a 'Dirac' eigenbasis with matching Tau
-% and at least nModes modes. Returns the loaded EigenMat and its file path, or
-% ([], '') if none found.
+function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant)
+% Scan the surface's Eigen child nodes for a Variant ('Dirac' or 'Dirac-Face')
+% eigenbasis with matching Tau and at least nModes modes. Returns the loaded
+% EigenMat and its file path, or ([], '') if none found.
+    if nargin < 4 || isempty(Variant), Variant = 'Dirac'; end
     EigenMat = [];
     EigenFile = '';
     [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
@@ -271,9 +288,9 @@ function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau
     end
     nodes = sSubject.Surface(iSurface).Eigen;
     for k = 1:numel(nodes)
-        % Skip nodes whose registered Variant is set and is not Dirac.
+        % Skip nodes whose registered Variant is set and does not match.
         if isfield(nodes(k),'Variant') && ~isempty(nodes(k).Variant) ...
-           && ~strcmpi(nodes(k).Variant, 'Dirac')
+           && ~strcmpi(nodes(k).Variant, Variant)
             continue;
         end
         try
@@ -281,7 +298,7 @@ function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau
         catch
             continue;   % unreadable / missing entry
         end
-        if ~isfield(E,'Variant') || ~strcmpi(E.Variant, 'Dirac'); continue; end
+        if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant); continue; end
         if ~isfield(E,'K') || isempty(E.K) || E.K < nModes;       continue; end
         if abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;            continue; end
         EigenMat  = E;
