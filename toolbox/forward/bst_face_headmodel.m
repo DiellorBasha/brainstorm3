@@ -29,9 +29,12 @@ function HeadModelFile = bst_face_headmodel(BaseHeadModelFile, varargin)
 %                      cortical surface file.
 %
 % OPTIONS (name-value):
-%   'Mode'       'constrained' (default) | 'loose'
-%                constrained: 1 column/face along n̂_f (normal current flux)
-%                loose:       3 columns/face [n̂_f*A_f, U_f, V_f]
+%   'Mode'       'constrained' (default) | 'loose' | 'unconstrained'
+%                unconstrained: 3 Cartesian columns/face = raw Sarvas at centroid
+%                               [nCh x 3F], full-3D, geometry from tess_manifold
+%                               (the rigorous full-unconstrained inverse path)
+%                constrained:   1 column/face along n̂_f (normal current flux)
+%                loose:         3 columns/face [n̂_f*A_f, U_f, V_f] (legacy frame)
 %   'BlockSize'  faces per Sarvas batch call (default 500)
 %
 % OUTPUT:
@@ -118,7 +121,7 @@ fprintf('bst_face_headmodel: %d MEG channels, surface %s, mode=%s\n', ...
     'Mode', Mode, 'BlockSize', BlockSize);
 
 nF    = size(FaceGeom.Centroids, 1);
-nComp = 1 + 2*strcmpi(Mode, 'loose');
+nComp = 1 + 2*(strcmpi(Mode, 'loose') || strcmpi(Mode, 'unconstrained'));   % 1 constrained, 3 loose/unconstrained
 
 fprintf('bst_face_headmodel: Gain = [%d x %d]  (%d faces, %d component(s))\n', ...
     size(L_face,1), size(L_face,2), nF, nComp);
@@ -128,7 +131,10 @@ fprintf('bst_face_headmodel: Gain = [%d x %d]  (%d faces, %d component(s))\n', .
 ProtocolInfo = bst_get('ProtocolInfo');
 
 % Output filename
-modeTag = iff(strcmpi(Mode,'loose'), 'loose', 'constrained');
+if     strcmpi(Mode,'loose'),         modeTag = 'loose';
+elseif strcmpi(Mode,'unconstrained'), modeTag = 'unconstrained';
+else,                                 modeTag = 'constrained';
+end
 OutFile = bst_process('GetNewFilename', bst_fileparts(sStudy.FileName), ...
     sprintf('headmodel_face_%s_%s', BaseHM.MEGMethod, modeTag));
 % GetNewFilename already appends .mat — do not add again
@@ -156,8 +162,8 @@ HM.Param         = Param_meg;
 
 % Additional face-based fields (not present in vertex headmodels)
 HM.GridAreas     = FaceGeom.Areas;    % [nF x 1]  face areas [m²]
-HM.GridU         = FaceGeom.U;        % [nF x 3]  trivial-connection tangent e1
-HM.GridV         = FaceGeom.V;        % [nF x 3]  trivial-connection tangent e2
+HM.GridU         = []; if isfield(FaceGeom,'U'), HM.GridU = FaceGeom.U; end   % [nF x 3] frame e1 (legacy modes only)
+HM.GridV         = []; if isfield(FaceGeom,'V'), HM.GridV = FaceGeom.V; end   % [nF x 3] frame e2 (legacy modes only)
 HM.isFaceBased   = 1;                 % flag: face-indexed sources, not vertex-indexed
 HM.nComponents   = nComp;
 

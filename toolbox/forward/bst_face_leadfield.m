@@ -30,10 +30,16 @@ function [L_face, FaceGeom] = bst_face_leadfield(SurfaceFile, Channel, Param, va
 %   O(h²/d²) ≈ 0.1% approximation from using centroid vs integrating over face.
 %
 % MODES:
+%   'unconstrained'         : FULL-3D, three Cartesian (x,y,z) columns per face =
+%                             the raw Sarvas gain at the centroid [nCh x 3F]. No
+%                             frame, no projection, no tess_tangents -- exact parity
+%                             with the vertex leadfield. Geometry from tess_manifold.
+%                             The rigorous path for the full-unconstrained inverse.
 %   'constrained' (default) : one leadfield column per face along n̂_f, scaled A_f
 %   'loose'                 : three columns per face [n̂_f*A_f, U_f, V_f]
 %                             Normal column scaled by A_f (flux units);
 %                             tangential columns unit (direction field units).
+%                             (constrained/loose use the legacy tess_tangents frame.)
 %
 % INPUTS:
 %   SurfaceFile  Brainstorm surface file (must have Reg.Sphere for tess_tangents)
@@ -75,6 +81,16 @@ for k = 1:2:numel(varargin)
     end
 end
 doLoose = strcmpi(Mode, 'loose');
+
+%% ── FULL-UNCONSTRAINED mode (the rigorous full-3D path) ──────────────────
+% Raw Sarvas gain at face centroids = [nCh x 3F], three Cartesian (x,y,z) columns
+% per face. No frame, no projection, no tess_tangents (deprecated) -- exact parity
+% with the vertex leadfield. Geometry comes from tess_manifold (centroids + unit
+% gauge-consistent normals); normals are GridOrient display only, never projected.
+if strcmpi(Mode, 'unconstrained')
+    [L_face, FaceGeom] = i_unconstrained(SurfaceFile, Channel, Param, BlockSize);
+    return;
+end
 
 %% ── Trivial-connection face frame (the only frame we need) ───────────────
 % tess_tangents returns per-face vectors from the FreeSurfer trivial-connection
@@ -158,4 +174,38 @@ for ib = 1:nBlocks
     end
 end
 
+end
+
+
+%% ════════════════════════════════════════════════════════════════════════
+function [L_face, FaceGeom] = i_unconstrained(SurfaceFile, Channel, Param, BlockSize)
+% Full-3D unconstrained face leadfield: raw Sarvas gain at face centroids,
+% [nCh x 3F], three Cartesian columns per face. Geometry from tess_manifold.
+
+    % --- face geometry from the canonical manifold backbone (not tess_tangents) ---
+    M = tess_manifold(SurfaceFile);                         % find-or-load-or-create
+    TessMat  = in_tess_bst(SurfaceFile);
+    Vertices = TessMat.Vertices;  Faces = double(TessMat.Faces);
+    nF = size(Faces, 1);
+    x_f   = zeros(nF, 3);  n_hat = zeros(nF, 3);
+    for hh = 1:numel(M.Embedded)
+        gf = M.Embedded(hh).GlobalFaces;
+        x_f(gf,:)   = M.Embedded(hh).face.centroid;         % == barycentric centroid (exact)
+        n_hat(gf,:) = M.Embedded(hh).face.normal;           % unit, gauge-consistent orientation
+    end
+    % face areas (pure geometry; tess_manifold carries no face-area field) -- metadata only
+    edge_a = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);
+    edge_b = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);
+    A_f    = sqrt(sum(cross(edge_a, edge_b, 2).^2, 2)) / 2;
+
+    FaceGeom = struct('Centroids', x_f, 'Normals', n_hat, 'Areas', A_f);
+
+    % --- raw Sarvas gain: [nCh x 3F], 3 Cartesian (x,y,z) columns per face, NO projection ---
+    nCh    = numel(Channel);
+    L_face = zeros(nCh, 3*nF);
+    for ib = 1:ceil(nF / BlockSize)
+        iF = ((ib-1)*BlockSize + 1) : min(ib*BlockSize, nF);
+        cols = reshape([(3*iF-2); (3*iF-1); (3*iF)], 1, []);
+        L_face(:, cols) = bst_meg_sph(x_f(iF,:)', Channel, Param);   % raw [nCh x 3*nB]
+    end
 end
