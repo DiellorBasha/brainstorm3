@@ -168,9 +168,19 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         bst_progress('text', 'Computing Dirac eigenmode inverse...');
         Rd = bst_inverse_dirac(HeadModel, OPT);
 
+        % --- FACE-based result: bst_inverse_dirac returns a per-FACE kernel [3nF x nCh];
+        %     map it to the cortex VERTICES for display (each vertex = mean of incident
+        %     faces, per x/y/z), mirroring how process_inverse_2018 displays face eigenmode
+        %     results. The estimate stays face-native; only the display grid is the cortex. ---
+        ImagingKernel = Rd.ImagingKernel;
+        isFaceRes = isfield(HeadModel,'isFaceBased') && ~isempty(HeadModel.isFaceBased) && HeadModel.isFaceBased;
+        if isFaceRes
+            ImagingKernel = local_face_kernel_to_vertices(ImagingKernel, HeadModel.SurfaceFile);
+        end
+
         % --- assemble the shared-kernel results structure ---
         ResultsMat = db_template('resultsmat');
-        ResultsMat.ImagingKernel = Rd.ImagingKernel;       % [3*nVert x nGoodChan]
+        ResultsMat.ImagingKernel = ImagingKernel;          % [3*nVert x nGoodChan]
         ResultsMat.nComponents   = 3;                      % unconstrained
         ResultsMat.Function      = local_function_name(Measure);
         ResultsMat.Comment       = ['Dirac: ' local_meas_comment(Measure)];
@@ -288,5 +298,23 @@ function c = local_meas_comment(measure)
         case 'dspm2018',  c = 'dSPM: MEG';
         case 'sloreta',   c = 'sLORETA: MEG';
         otherwise,        c = measure;
+    end
+end
+
+function Kv = local_face_kernel_to_vertices(Kf, SurfaceFile)
+% Map a per-FACE unconstrained imaging kernel [3nF x nCh] to a per-VERTEX kernel
+% [3nV x nCh] for display on the cortex: each vertex = mean of its incident faces,
+% applied independently to the x/y/z components (rows are ordered x,y,z per element).
+    Tess = in_tess_bst(SurfaceFile, 0);
+    F  = double(Tess.Faces);  nV = size(Tess.Vertices,1);  nF = size(F,1);
+    % vertex<-face incidence, row-normalized to the mean of incident faces
+    W = sparse(F(:), repmat((1:nF)',3,1), 1, nV, nF);          % [nV x nF]
+    deg = full(sum(W,2));  deg(deg==0) = 1;
+    W = spdiags(1./deg, 0, nV, nV) * W;
+    nCh = size(Kf,2);
+    Kf3 = reshape(Kf, 3, nF, nCh);                             % [3 x nF x nCh]
+    Kv  = zeros(3*nV, nCh);
+    for c = 1:3
+        Kv(c:3:end, :) = W * reshape(Kf3(c,:,:), nF, nCh);    % [nV x nCh]
     end
 end
