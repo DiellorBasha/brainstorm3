@@ -387,12 +387,23 @@ function SetMaxCustom(ColormapType, DisplayUnits, newMin, newMax)
                                 DataType = upper(ColormapInfo.Type);
                             % sLORETA: Do not use regular source scaling (pAm)
                             elseif strcmpi(DataType, 'Source')
-                                if ~isempty(strfind(lower(TessInfo(iTess).DataSource.FileName), 'sloreta'))
+                                srcFile = TessInfo(iTess).DataSource.FileName;
+                                if ~isempty(strfind(lower(srcFile), 'sloreta'))
                                     DataType = 'sLORETA';
-                                else
-                                    [~, iResult] = bst_memory('LoadResultsFile', TessInfo(iTess).DataSource.FileName, 0);
-                                    if ~isempty(strfind(lower(GlobalData.DataSet(iDS).Results(iResult).Function), 'sloreta'));
-                                        DataType = 'sLORETA';
+                                elseif ~isempty(srcFile)
+                                    % Detect sLORETA (for scaling units). A DERIVED/synthetic source
+                                    % overlay -- e.g. a view_helmholtz scalar painted on the cortex --
+                                    % may carry a DataSource.FileName that is NOT a registered results
+                                    % file; in that case skip the check (treat as regular Source) rather
+                                    % than letting bst_memory('LoadResultsFile') error and break the
+                                    % colormap "Custom..." dialog.
+                                    try
+                                        [~, iResult] = bst_memory('LoadResultsFile', srcFile, 0);
+                                        if ~isempty(iResult) && ~isempty(strfind(lower(GlobalData.DataSet(iDS).Results(iResult).Function), 'sloreta'))
+                                            DataType = 'sLORETA';
+                                        end
+                                    catch
+                                        % unregistered / non-results source overlay -> regular Source
                                     end
                                 end
                             end
