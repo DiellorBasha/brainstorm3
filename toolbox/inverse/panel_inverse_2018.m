@@ -2,7 +2,7 @@ function varargout = panel_inverse_2018(varargin)
 % PANEL_INVERSE_2018: Inverse modeling GUI
 %
 % USAGE:  bstPanel = panel_inverse_2018('CreatePanel', sProcess, sFiles)                                                 : Called from the pipeline editor
-%         bstPanel = panel_inverse_2018('CreatePanel', Modalities, isShared, HeadModelType, nSamplesNoise, nSamplesData, isEigenmode) : Called from the interactive interface
+%         bstPanel = panel_inverse_2018('CreatePanel', Modalities, isShared, HeadModelType, nSamplesNoise, nSamplesData) : Called from the interactive interface
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -29,11 +29,8 @@ end
 
 
 %% ===== CREATE PANEL =====
-function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelType, nSamplesNoise, nSamplesData, isEigenmode) %#ok<DEFNU>
+function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelType, nSamplesNoise, nSamplesData) %#ok<DEFNU>
     panelName = 'InverseOptions';
-    if (nargin < 6) || isempty(isEigenmode)
-        isEigenmode = 0;
-    end
     % Java initializations
     import java.awt.*;
     import javax.swing.*;
@@ -148,14 +145,12 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         else
             jRadioMethodMem = [];
         end
-        jRadioMethodEig = gui_component('radio', jPanelMethod, 'br', 'Eigenmode source mapping', jGroupMethod, '', @Method_Callback, []);
         % Default selection
         switch lower(OPTIONS.InverseMethod)
             case 'minnorm',  jRadioMethodMn.setSelected(1);
             case 'gls',      jRadioMethodDip.setSelected(1);
             case 'lcmv',     jRadioMethodBf.setSelected(1);
             case 'mem',      disp('BST> Warning: Running MEM from a script is not handled yet.');
-            case 'eigenmode', jRadioMethodEig.setSelected(1);
         end
         % Disable Beamformer if no data covariance
         if ~isProcess && isempty(nSamplesData)
@@ -170,19 +165,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         if ~isempty(jRadioMethodMem) && ~isProcess && (~strcmpi(HeadModelType, 'surface') || isShared)
             jRadioMethodMem.setEnabled(0);
         end
-        % DEPRECATED: the scalar "Eigenmode source mapping" (Eigen-dSPM) method has
-        % been removed from the GUI in favor of the Dirac eigenmode inverse
-        % (right-click > "Compute sources: Dirac eigenmodes"). The radio and its
-        % option sub-panel are kept in the code (dormant) but permanently hidden;
-        % the process-level 'eigenmode' branch still serves the benchmark harness.
-        jRadioMethodEig.setVisible(0);
-        jRadioMethodEig.setEnabled(0);
-        % If the selected head model is itself a scalar eigenmode model, fall back to
-        % the standard minimum-norm method (the eigenmode method is no longer offered).
-        if ~isProcess && isEigenmode && jRadioMethodEig.isSelected()
-            jRadioMethodMn.setSelected(1);
-        end
-
+        
     c.gridy = 1;
     jPanelLeft.add(jPanelMethod, c);
     
@@ -212,31 +195,7 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         jRadioMethodBfNai.setSelected(1);
     c.gridy = 2;
     jPanelLeft.add(jPanelMeasureBf, c);
-
-    % ==== PANEL: EIGENMODE (measure + spectral prior) ====
-    jPanelEig = gui_river([1,1], [0,6,6,6], 'Eigenmode');
-        % Measure
-        gui_component('label', jPanelEig, [], 'Measure:', [], '', [], []);
-        jGroupEigMeasure = ButtonGroup();
-        jRadioEigMne     = gui_component('radio', jPanelEig, [],   'MNE',     jGroupEigMeasure, '', @(h,ev)UpdatePanel(1), []);
-        jRadioEigDspm    = gui_component('radio', jPanelEig, [],   'dSPM',    jGroupEigMeasure, '', @(h,ev)UpdatePanel(1), []);
-        jRadioEigSloreta = gui_component('radio', jPanelEig, [],   'sLORETA', jGroupEigMeasure, '', @(h,ev)UpdatePanel(1), []);
-        jRadioEigDspm.setSelected(1);
-        % Spectral prior
-        gui_component('label', jPanelEig, 'br', 'Spectral prior:', [], '', [], []);
-        jGroupEigPrior = ButtonGroup();
-        jRadioEigPriorLog   = gui_component('radio', jPanelEig, [], 'Log (2026)', jGroupEigPrior, '', [], []);
-        jRadioEigPriorFlat  = gui_component('radio', jPanelEig, [], 'Flat',       jGroupEigPrior, '', [], []);
-        jRadioEigPriorPower = gui_component('radio', jPanelEig, [], 'Power (1/f)',jGroupEigPrior, '', [], []);
-        jRadioEigPriorLog.setSelected(1);
-        % Apply noise whitening (default ON: replicate the standard inverse procedure)
-        jCheckEigWhiten = gui_component('checkbox', jPanelEig, 'br', 'Apply noise whitening (recommended)', [], '', [], []);
-        jCheckEigWhiten.setSelected(1);
-        % Also save coefficients
-        jCheckEigCoeff = gui_component('checkbox', jPanelEig, 'br', 'Also save eigenmode coefficients', [], '', [], []);
-    c.gridy = 2;
-    jPanelLeft.add(jPanelEig, c);
-
+    
     % ==== PANEL: SOURCE MODEL ====
     jPanelModel = gui_river([1,1], [0,6,6,6], 'Source model: Dipole orientations');
         jGroupModel    = ButtonGroup(); 
@@ -415,21 +374,11 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
             'jRadioMethodMn',  jRadioMethodMn, ...
             'jRadioMethodBf',  jRadioMethodBf, ...
             'jRadioMethodDip', jRadioMethodDip, ...
-            'jRadioMethodEig', jRadioMethodEig, ...
             ... % ==== PANEL: MEASURE ====
             'jRadioMnCurrent',   jRadioMnCurrent, ...
             'jRadioMnDspm',      jRadioMnDspm, ...
             'jRadioMnSloreta',   jRadioMnSloreta, ...
             'jRadioMethodBfNai', jRadioMethodBfNai, ...
-            ... % ==== PANEL: EIGENMODE ====
-            'jRadioEigMne',       jRadioEigMne, ...
-            'jRadioEigDspm',      jRadioEigDspm, ...
-            'jRadioEigSloreta',   jRadioEigSloreta, ...
-            'jRadioEigPriorLog',  jRadioEigPriorLog, ...
-            'jRadioEigPriorFlat', jRadioEigPriorFlat, ...
-            'jRadioEigPriorPower',jRadioEigPriorPower, ...
-            'jCheckEigWhiten',    jCheckEigWhiten, ...
-            'jCheckEigCoeff',     jCheckEigCoeff, ...
             ... % ==== PANEL: SOURCE MODEL ====
             'jRadioConstr',   jRadioConstr, ...
             'jRadioUnconstr', jRadioUnconstr, ...
@@ -545,18 +494,16 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
         if isForced
             ExpertMode = bst_get('ExpertMode');
             % Left panels
-            isEig = jRadioMethodEig.isSelected();
-            jPanelModel.setVisible(isLinear && ~isEig);
-            jPanelMeasureMN.setVisible(isLinear && jRadioMethodMn.isSelected() && ~isEig);
-            jPanelMeasureBf.setVisible(isLinear && jRadioMethodBf.isSelected() && ~isEig);
-            jPanelEig.setVisible(isEig);
+            jPanelModel.setVisible(isLinear);
+            jPanelMeasureMN.setVisible(isLinear && jRadioMethodMn.isSelected());
+            jPanelMeasureBf.setVisible(isLinear && jRadioMethodBf.isSelected());
             jPanelMemInfo.setVisible(~isLinear);
             % Right panels (expert)
             jPanelRight.setVisible(ExpertMode);
             jPanelNoiseCov.setVisible(isLinear);
             jPanelSnr.setVisible(isLinear && ~jRadioMethodDip.isSelected() && ~jRadioMethodBf.isSelected());
-            jPanelDepth.setVisible(isLinear && jRadioMethodMn.isSelected() && ~jRadioMnSloreta.isSelected() && ~isEig);
-            jPanelOutput.setVisible(isLinear && ~isProcess && ~isEig);
+            jPanelDepth.setVisible(isLinear && jRadioMethodMn.isSelected() && ~jRadioMnSloreta.isSelected());
+            jPanelOutput.setVisible(isLinear && ~isProcess);
             % Update expert button 
             if ExpertMode
                 jButtonExpert.setText('Hide details');
@@ -594,10 +541,10 @@ function [bstPanelNew, panelName] = CreatePanel(Modalities, isShared, HeadModelT
                 case 'median', jRadioMedian.setSelected(1);
             end
             % Select default regularization method
-            if jRadioMethodMn.isSelected() || isEig
+            if jRadioMethodMn.isSelected()
                 jRadioSnrFix.setSelected(1);
                 jRadioSnrRms.setEnabled(0);
-                if strcmpi(HeadModelType, 'surface') && ~isEig
+                if strcmpi(HeadModelType, 'surface')
                     jRadioLoose.setEnabled(1);
                 end
             else
@@ -690,18 +637,6 @@ function s = GetPanelContents() %#ok<DEFNU>
     if isLinear
         % Get selected method
         [s.InverseMethod, s.InverseMeasure] = GetSelectedMethod(ctrl);
-        % Eigenmode-specific options
-        if strcmpi(s.InverseMethod, 'eigenmode')
-            if ctrl.jRadioEigPriorLog.isSelected()
-                s.EigenmodePrior = 'log';
-            elseif ctrl.jRadioEigPriorFlat.isSelected()
-                s.EigenmodePrior = 'flat';
-            elseif ctrl.jRadioEigPriorPower.isSelected()
-                s.EigenmodePrior = 'power';
-            end
-            s.SaveCoefficients = ctrl.jCheckEigCoeff.isSelected();
-            s.EigenmodeWhiten  = ctrl.jCheckEigWhiten.isSelected();
-        end
         % Source model
         if strcmpi(ctrl.HeadModelType, 'mixed')
             s.SourceOrient = [];
@@ -808,15 +743,6 @@ function [Method, Measure] = GetSelectedMethod(ctrl)
         if ctrl.jRadioMethodBfNai.isSelected()
             Measure = 'nai';
         end
-    elseif ctrl.jRadioMethodEig.isSelected()
-        Method = 'eigenmode';
-        if ctrl.jRadioEigMne.isSelected()
-            Measure = 'mne';
-        elseif ctrl.jRadioEigDspm.isSelected()
-            Measure = 'dspm';
-        elseif ctrl.jRadioEigSloreta.isSelected()
-            Measure = 'sloreta';
-        end
     end
 end
 
@@ -838,13 +764,6 @@ function Comment = GetMethodComment(Method, Measure)
             end
         case 'mem'
             Comment = 'MEM';
-        case 'eigenmode'
-            switch (lower(Measure))
-                case 'mne',     Comment = 'Eigen-MNE';
-                case 'dspm',    Comment = 'Eigen-dSPM';
-                case 'sloreta', Comment = 'Eigen-sLORETA';
-                otherwise,      Comment = 'Eigenmode';
-            end
     end
 end
 

@@ -139,11 +139,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         'DataTypes',           [], ...     % Cell array of strings: list of modality to use for the reconstruction (MEG, MEG GRAD, MEG MAG, EEG)
         'Comment',             '', ...     % Inverse solution description (optional)
         'DisplayMessages',     1, ...
-        'ComputeKernel',       1, ...      % If 1, compute MN kernel to be applied subsequently to data instead of full ImageGridAmp array
-        'EigenmodePrior',      'log', ...
-        'EigenmodeWhiten',     1, ...
-        'SaveCoefficients',    0, ...
-        'nModes',              0);
+        'ComputeKernel',       1);         % If 1, compute MN kernel to be applied subsequently to data instead of full ImageGridAmp array
     % Return default options
     if (nargin < 2)
         OutputFiles = Def_OPTIONS;
@@ -156,7 +152,8 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         % Check field names of passed OPTIONS and fill missing ones with default values
         OPTIONS = struct_copy_fields(OPTIONS, Def_OPTIONS, 0);
     end
-
+    
+    
     %% ===== GET INPUT INFORMATION =====
     isShared = isempty(iDatas);
     % Get all the study structures
@@ -188,7 +185,6 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     % Loop through all the channel files to find the available modalities and head model types
     AllMod = {};
     HeadModelType = 'surface';
-    isEigenmode = false;
     MEGMethod = [];
     nSamplesNoise = [];
     nSamplesData  = [];
@@ -211,16 +207,6 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         end
         if ~isempty(sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).MEGMethod) && isempty(MEGMethod)
             MEGMethod = sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).MEGMethod;
-        end
-        % Detect eigenmode head model (flag on the active head model file); all
-        % studies in a single Compute call must agree (no eigenmode/standard mix).
-        hmFlag_i = in_bst_headmodel(sChanStudies(i).HeadModel(sChanStudies(i).iHeadModel).FileName, 0, 'isEigenmode');
-        isEig_i  = isfield(hmFlag_i, 'isEigenmode') && ~isempty(hmFlag_i.isEigenmode) && hmFlag_i.isEigenmode;
-        if (i == 1)
-            isEigenmode = isEig_i;
-        elseif isEig_i ~= isEigenmode
-            errMessage = 'Cannot mix eigenmode and standard head models in a single Compute call.';
-            return;
         end
         % First file only: Load the number of samples from the covariance files
         if (i == 1)
@@ -257,7 +243,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     % Select method
     if OPTIONS.DisplayMessages
         % Options dialog window
-        sMethod = gui_show_dialog('Compute sources', @panel_inverse_2018, 1, [], AllMod, isShared, HeadModelType, nSamplesNoise, nSamplesData, isEigenmode);
+        sMethod = gui_show_dialog('Compute sources', @panel_inverse_2018, 1, [], AllMod, isShared, HeadModelType, nSamplesNoise, nSamplesData);
         if isempty(sMethod)
             return;
         end
@@ -301,19 +287,8 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     end
     % If no MEG and no EEG selected
     if isempty(OPTIONS.DataTypes)
-        % Headless eigenmode callers (the batch wrapper) may pass DataTypes=[]:
-        % default to MEG if available, else the remaining available modalities.
-        % All other cases still require an explicit modality selection.
-        if ~OPTIONS.DisplayMessages && strcmpi(OPTIONS.InverseMethod, 'eigenmode')
-            if any(ismember({'MEG','MEG GRAD','MEG MAG'}, AllMod))
-                OPTIONS.DataTypes = intersect(AllMod, {'MEG','MEG GRAD','MEG MAG'});
-            else
-                OPTIONS.DataTypes = AllMod;
-            end
-        else
-            errMessage = 'Please select at least one modality.';
-            return;
-        end
+        errMessage = 'Please select at least one modality.';
+        return;
     end
     % Tags corresponding to the different methods
     methodTag = panel_inverse_2018('GetMethodComment', OPTIONS.InverseMethod, OPTIONS.InverseMeasure);
@@ -328,7 +303,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
     strOptions = '';
     if isempty(OPTIONS.SourceOrient)
         strOptions = 'Mixed';
-    elseif ~strcmpi(OPTIONS.InverseMethod, 'mem') && ~strcmpi(OPTIONS.InverseMethod, 'eigenmode')
+    elseif ~strcmpi(OPTIONS.InverseMethod, 'mem')
         switch (OPTIONS.SourceOrient{1})
             case 'fixed',      strOptions = 'Constr';
             case 'loose',      strOptions = 'Loose';
@@ -724,77 +699,8 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
                 end
 
                 % Get outputs
-                DataFile = OPTIONS.DataFile;
+                DataFile = OPTIONS.DataFile; 
                 Time     = OPTIONS.DataTime;
-            case 'eigenmode'
-                % Eigenmode leadfield: solve in mode space, reconstruct to cortex.
-                % Coerce the measure to an eigenmode-valid value (guards scripted
-                % callers that inherited the standard 'dspm2018' default).
-                if ~ismember(lower(OPTIONS.InverseMeasure), {'mne','dspm','sloreta'})
-                    OPTIONS.InverseMeasure = 'dspm';
-                end
-                % L_tilde is already SSP-projected + avg-ref'd + good-channel only.
-                L_tilde = double(HeadModel.Gain);                 % [nGoodCh x K]
-                HMeig = in_bst_headmodel(HeadModelFile, 0, 'Eigenvalues', 'SurfaceFile', 'nModes', 'ModeIndices');
-                lambdas = double(HMeig.Eigenvalues(:));
-                K = size(L_tilde, 2);
-                if numel(lambdas) < K
-                    errMessage = sprintf('Eigenmode head model is inconsistent: %d eigenvalues but %d gain columns.', numel(lambdas), K);
-                    Results = []; break;
-                end
-                if isfield(OPTIONS, 'nModes') && ~isempty(OPTIONS.nModes) && OPTIONS.nModes > 0 && OPTIONS.nModes < K
-                    K = OPTIONS.nModes;
-                    L_tilde = L_tilde(:, 1:K);
-                    lambdas = lambdas(1:K);
-                end
-                % Whitener: ON by default (replicate the standard inverse procedure).
-                % When EigenmodeWhiten is off, use identity (pure sensor-space solve);
-                % SSP / bad channels / avg-ref are still folded into L_tilde + data.
-                doWhiten = ~isfield(OPTIONS, 'EigenmodeWhiten') || isempty(OPTIONS.EigenmodeWhiten) || OPTIONS.EigenmodeWhiten;
-                if doWhiten
-                    FourthMoment = [];
-                    nSmp = [];
-                    if isfield(OPTIONS.NoiseCovMat, 'FourthMoment'); FourthMoment = OPTIONS.NoiseCovMat.FourthMoment; end
-                    if isfield(OPTIONS.NoiseCovMat, 'nSamples');     nSmp = OPTIONS.NoiseCovMat.nSamples; end
-                    iW = bst_noise_whitener(OPTIONS.NoiseCovMat.NoiseCov, OPTIONS.ChannelTypes, ...
-                        OPTIONS.NoiseMethod, OPTIONS.NoiseReg, FourthMoment, nSmp);
-                else
-                    iW = eye(size(L_tilde, 1));
-                end
-                ProjEig = eye(size(L_tilde, 1));
-                if isfield(OPTIONS, 'SnrFixed') && ~isempty(OPTIONS.SnrFixed)
-                    snrVal = OPTIONS.SnrFixed;
-                else
-                    snrVal = 3;
-                end
-                if isfield(OPTIONS, 'SnrMethod') && strcmpi(OPTIONS.SnrMethod, 'rms')
-                    bst_report('Warning', 'process_inverse_2018', [], 'Eigenmode solver uses fixed SNR only; RMS method ignored, using SnrFixed value.');
-                end
-                ModeKernel = bst_inverse_eigenmodes('SolvePure', L_tilde, lambdas, iW, ProjEig, ...
-                    OPTIONS.InverseMeasure, OPTIONS.EigenmodePrior, 1, snrVal, false);   % [K x nGoodCh]
-                Results = struct();
-                % ModeIndices: which Phi columns the leadfield used, in solve order
-                % (records the across-hemisphere selection). Old head models lack it
-                % -> reconstruct falls back to Phi(:,1:K) and must be recomputed.
-                eigModeIdx = [];
-                if isfield(HMeig, 'ModeIndices') && ~isempty(HMeig.ModeIndices)
-                    eigModeIdx = HMeig.ModeIndices;
-                end
-                % Face-based eigenmode model stores PhiVertices [nV x K] for
-                % reconstruction — use it directly when present (isFaceBased=1).
-                % Vertex-based model passes SurfaceFile so reconstruct loads Phi.
-                if isfield(HMeig,'isFaceBased') && HMeig.isFaceBased && isfield(HMeig,'PhiVertices')
-                    Results.ImagingKernel = bst_eigenmode_reconstruct(HMeig.PhiVertices, ModeKernel, eigModeIdx);
-                else
-                    Results.ImagingKernel = bst_eigenmode_reconstruct(HMeig.SurfaceFile, ModeKernel, eigModeIdx);
-                end % [nVert x nGoodCh]
-                Results.ImageGridAmp    = [];
-                Results.nComponents     = 1;
-                Results.Function        = ['eigenmode_' OPTIONS.InverseMeasure];
-                Results.EigenModeKernel = ModeKernel;
-                Results.Eigenvalues     = lambdas(1:K);
-                Results.nModes          = K;
-                OPTIONS.FunctionName    = Results.Function;
             otherwise
                 error('Unknown method');
         end
@@ -806,7 +712,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         % Copy outputs to a standard results structure
         ResultsMat = db_template('resultsmat');
         ResultsMat = struct_copy_fields(ResultsMat, Results, 1);
-
+        
         % ===== COMPUTE FULL RESULTS =====
         % Full results
         if (OPTIONS.ComputeKernel == 0) && ~isempty(ResultsMat.ImagingKernel) && ~isempty(DataFile)
@@ -887,11 +793,6 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         if ~isempty(sStudy.Result)
             ResultsMat.Comment = file_unique(ResultsMat.Comment, {sStudy.Result.Comment});
         end
-        % Strip eigenmode mode-space scratchpad before saving the cortex node
-        % (Results.EigenModeKernel is only needed for the coefficients node below)
-        if isfield(ResultsMat, 'EigenModeKernel')
-            ResultsMat = rmfield(ResultsMat, 'EigenModeKernel');
-        end
         % Save new file structure
         bst_save(ResultFile, ResultsMat, 'v6');
 
@@ -908,34 +809,7 @@ function [OutputFiles, errMessage] = Compute(iStudies, iDatas, OPTIONS)
         sStudy.Result(iResult) = newResult;
         % Update Brainstorm database
         bst_set('Study', iStudy, sStudy);
-
-        % ===== EIGENMODE COEFFICIENTS (optional) =====
-        if strcmpi(OPTIONS.InverseMethod, 'eigenmode') && isfield(OPTIONS, 'SaveCoefficients') && OPTIONS.SaveCoefficients ...
-                && isfield(Results, 'EigenModeKernel') && ~isempty(DataFile)
-            DataMatCoeff = in_bst_data(DataFile);
-            if ~isstruct(DataMatCoeff.F)   % imported (non-raw) data only
-                theta = Results.EigenModeKernel * double(DataMatCoeff.F(GoodChannel, :));  % [K x nTime]
-                MatMat = db_template('matrixmat');
-                MatMat.Value       = theta;
-                MatMat.Time        = DataMatCoeff.Time;
-                MatMat.nAvg        = nAvg;  MatMat.Leff = Leff;
-                MatMat.SurfaceFile = ResultsMat.SurfaceFile;
-                MatMat.Comment     = sprintf('EigenCoeffs %s (%d modes, %s)', upper(OPTIONS.InverseMeasure), Results.nModes, OPTIONS.EigenmodePrior);
-                RowNames = cell(Results.nModes, 1);
-                for k = 1:Results.nModes
-                    RowNames{k} = sprintf('Mode %d (lam=%.3g)', k, Results.Eigenvalues(k));
-                end
-                MatMat.Description = RowNames;
-                MatMat = bst_history('add', MatMat, 'compute', sprintf('Eigenmode coefficients %s, %d modes, prior=%s', OPTIONS.InverseMeasure, Results.nModes, OPTIONS.EigenmodePrior));
-                MatFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(sStudy.FileName)), 'matrix_eigencoeffs');
-                bst_save(MatFile, MatMat, 'v6');
-                db_add_data(iStudy, MatFile, MatMat);
-                OutputFiles{end+1} = file_short(MatFile); %#ok<AGROW>
-            else
-                bst_report('Warning', 'process_inverse_2018', [], 'Eigenmode coefficients require imported data; skipped for raw.');
-            end
-        end
-
+        
         % ===== UPDATE DISPLAY =====
         % Update tree
         panel_protocols('UpdateNode', 'Study', iStudy);
