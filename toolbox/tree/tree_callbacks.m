@@ -2558,10 +2558,6 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@OperatorView_Callback, filenameFull));
-                    % === VIEW CONNECTION PHASE (Connection Laplacian operator only) ===
-                    if ~isempty(regexp(lower(char(bstNodes(1).getComment())), 'connection laplacian', 'once'))
-                        gui_component('MenuItem', jPopup, [], 'View connection phase', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@OperatorViewConnPhase_Callback, filenameFull));
-                    end
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -4048,28 +4044,6 @@ function OperatorView_Callback(filenameFull)
             fprintf('  %s: %s\n', fnames{k}, class(val));
         end
     end
-end
-
-%% ===== OPERATOR: VIEW CONNECTION PHASE =====
-function OperatorViewConnPhase_Callback(filenameFull)
-    % Display the connection-Laplacian eigenmode phase for the operator's parent
-    % surface. Interim wiring: resolves the parent surface and reuses
-    % view_connection_phase. Reworking this to read the on-file connection
-    % operator is a separate step.
-    if ~file_exist(filenameFull)
-        bst_error('Operator file not found.', 'View connection phase', 0);
-        return;
-    end
-    S = load(filenameFull, 'ParentSurface', 'Variant');
-    if ~isfield(S, 'ParentSurface') || isempty(S.ParentSurface)
-        bst_error('Operator file has no ParentSurface reference.', 'View connection phase', 0);
-        return;
-    end
-    if ~isfield(S, 'Variant') || ~strcmpi(S.Variant, 'Connection Laplacian')
-        bst_error('Connection phase requires a Connection Laplacian operator.', 'View connection phase', 0);
-        return;
-    end
-    view_connection_phase(S.ParentSurface);
 end
 
 %% ===== OPERATOR: DELETE =====
