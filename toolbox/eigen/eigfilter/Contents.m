@@ -1,9 +1,11 @@
-% EIGFILTER  Spectral-filter kernels for Laplace-Beltrami eigenmodes (bst_eigfilter)
+% EIGFILTER  Spatial-spectral filter kernels for the eigen module (bst_eigfilter)
 %
-% Filters along the eigenvalue (spatial-frequency) axis, the spatial-spectral
-% counterpart of bst_freqfilter (temporal frequency). Each kernel is an analytic
-% factory returning a function handle g = @(lambda) ...; a vector-valued scale
-% parameter returns a cell-array filterbank.
+% The spatial "wavelet" kernel library of toolbox/eigen/ (the morlet_wavelet analogue):
+% gain shapes h(lambda) along the operator eigenvalue (spatial-frequency) axis, the
+% spatial counterpart of bst_freqfilter (temporal frequency). Operator-agnostic -- the
+% same kernels apply to any eigenvalue axis (Laplace-Beltrami / Connection Laplacian /
+% Dirac). Each kernel is an analytic factory returning a handle g = @(lambda) ...; a
+% vector-valued scale parameter returns a cell-array filterbank.
 %
 % Registry / apply:
 %   bst_eigfilter_kernel    - name string -> factory; 'list' / 'info'
@@ -22,6 +24,9 @@
 %   mexhat        - g = (t*lambda).*exp(-t*lambda)     (band-pass; bank-capable)
 %   dog           - g = exp(-t1*lambda) - exp(-t2*lambda)  (band-pass)
 %
-% Consumed by: bst_eigenmode_prior (prior R), bst_eigenmodes_filter_gain (analysis).
+% Consumed by the file-based eigen filter path (bst_eigen 'filter' -> bst_eigenfilter, planned;
+% currently bst_eigenmodes_filter_gain / bst_dirac_eigenmodes_filter). NOTE: bst_eigenmode_prior
+% is a DEPRECATED consumer (the bst_eigenmode_*/bst_inverse_eigenmodes inverses; the live
+% source mapping is bst_dirac / bst_inverse_dirac, which do not use this library).
 %
 % Authors: Diellor Basha, 2026
