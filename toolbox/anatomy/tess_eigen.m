@@ -134,12 +134,14 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 
     % --- find-or-load a cached eigen node before the (expensive) eigensolve ---
     %     Reuse an existing eigen_*.mat child of this surface whose Variant matches,
-    %     whose stored K >= the requested K, and (for Dirac) whose Tau matches. The
+    %     whose stored nModes >= the requested K, and (for Dirac) whose Tau matches. The
     %     eigenbasis is nested (ascending eigenvalues, B-orthonormal), so a node with
     %     more modes is truncated to its first K columns. ForceRecompute skips this.
+    %     bst_get resolves the match from the cache (no file load); we then load the file.
     if ~ForceRecompute
-        cached = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDirac);
-        if ~isempty(cached)
+        [sCached, ~, iSurfCached, iEigCached] = bst_get('EigenFileForSurface', SurfaceFile, Variant, K, Tau);
+        if ~isempty(iEigCached)
+            cached   = in_bst_eigen(sCached.Surface(iSurfCached).Eigen(iEigCached).FileName);
             EigenMat = local_truncate_eigen(cached, K);
             return;
         end
@@ -155,15 +157,16 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         eigenBar = onCleanup(@() bst_progress('stop'));  %#ok<NASGU>
     end
 
-    % --- find-or-create the operator node of the requested Variant ---
-    OperatorFile = local_find_operator(sSubject, iSurface, Variant);
+    % --- find-or-create the operator node of the requested Variant (Tau-aware) ---
+    %     bst_get matches Variant and, for the Dirac-type variants, Tau -- so a Dirac
+    %     operator computed at a different Tau is not wrongly reused.
+    OperatorFile = local_operator_file(SurfaceFile, Variant, Tau);
     if isempty(OperatorFile)
         % Create it (tess_operators -> nxr_safe_create -> nxr_compute('create')).
         bst_progress('text', sprintf('Computing %s operator...', Variant));
         tess_operators(SurfaceFile, OperatorName, 'Tau', Tau);
-        % Re-read the surface's Operator list from a fresh subject struct.
-        sSubject = bst_get('Subject', iSubject);
-        OperatorFile = local_find_operator(sSubject, iSurface, Variant);
+        % Re-resolve from the refreshed cache (db_add_operator updated GlobalData).
+        OperatorFile = local_operator_file(SurfaceFile, Variant, Tau);
         if isempty(OperatorFile)
             error('tess_eigen:operatorCreateFailed', ...
                 'tess_operators did not produce a ''%s'' operator node under %s.', ...
@@ -356,76 +359,13 @@ function [Phi, lam] = local_hodge_face_modes(lapFace, aux, Kvec)
 end
 
 % ----------------------------------------------------------------------------
-function OperatorFile = local_find_operator(sSubject, iSurface, Variant)
-% Find the first Operator child of the parent surface whose variant matches.
-% The DB child entry's .Variant field is not reliably populated (db_add_operator
-% only sets FileName/Comment), so fall back to loading the operator file and
-% reading its stored Variant field.
+function OperatorFile = local_operator_file(SurfaceFile, Variant, Tau)
+% Resolve the operator node of the requested Variant (and, for the Dirac-type variants,
+% Tau) from the DB cache via bst_get. Returns the node's relative FileName, or '' if none.
     OperatorFile = '';
-    if isempty(sSubject) || ~isfield(sSubject,'Surface') || isempty(sSubject.Surface) ...
-       || iSurface > numel(sSubject.Surface) ...
-       || ~isfield(sSubject.Surface(iSurface),'Operator') ...
-       || isempty(sSubject.Surface(iSurface).Operator)
-        return;
-    end
-    ops = sSubject.Surface(iSurface).Operator;
-    for k = 1:numel(ops)
-        % Prefer the entry's Variant if present and non-empty.
-        if isfield(ops(k),'Variant') && ~isempty(ops(k).Variant) ...
-           && strcmpi(ops(k).Variant, Variant)
-            OperatorFile = ops(k).FileName;
-            return;
-        end
-    end
-    % Fallback: load each operator file and read its Variant.
-    for k = 1:numel(ops)
-        try
-            f = file_fullpath(ops(k).FileName);
-            S = load(f, 'Variant');
-            if isfield(S,'Variant') && strcmpi(S.Variant, Variant)
-                OperatorFile = ops(k).FileName;
-                return;
-            end
-        catch
-            % skip unreadable/missing entries
-        end
-    end
-end
-
-% ----------------------------------------------------------------------------
-function EigenMat = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDirac)
-% Scan the parent surface's Eigen child nodes for a cached eigenbasis of the
-% requested Variant carrying at least K modes (and, for Dirac, matching Tau).
-% Returns the loaded EigenMat (with its stored OperatorFile reference) or [] if
-% none qualifies. The node may hold more than K modes; the caller truncates.
-    EigenMat = [];
-    if isempty(sSubject) || ~isfield(sSubject,'Surface') || isempty(sSubject.Surface) ...
-       || iSurface > numel(sSubject.Surface) ...
-       || ~isfield(sSubject.Surface(iSurface),'Eigen') ...
-       || isempty(sSubject.Surface(iSurface).Eigen)
-        return;
-    end
-    nodes = sSubject.Surface(iSurface).Eigen;
-    for k = 1:numel(nodes)
-        % Skip nodes whose registered Variant is set and does not match.
-        if isfield(nodes(k),'Variant') && ~isempty(nodes(k).Variant) ...
-           && ~strcmpi(nodes(k).Variant, Variant)
-            continue;
-        end
-        try
-            E = in_bst_eigen(nodes(k).FileName);
-        catch
-            continue;   % unreadable / missing entry
-        end
-        if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant);  continue; end
-        if ~isfield(E,'nModes') || isempty(E.nModes) || E.nModes < K; continue; end
-        if isDirac && abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;  continue; end
-        % The basis must actually carry usable eigen data.
-        if ~isfield(E,'Phi') || isempty(E.Phi) || ~isfield(E,'Lambda') || isempty(E.Lambda)
-            continue;
-        end
-        EigenMat = E;
-        return;
+    [sOp, ~, iSurf, iOp] = bst_get('OperatorFileForSurface', SurfaceFile, Variant, Tau);
+    if ~isempty(iOp)
+        OperatorFile = sOp.Surface(iSurf).Operator(iOp).FileName;
     end
 end
 
@@ -447,16 +387,6 @@ function E = local_truncate_eigen(E, K)
         end
     end
     E.nModes = K;
-end
-
-% ----------------------------------------------------------------------------
-function tau = local_eigen_tau(EigenMat, default)
-% Read Tau from an eigen node's Provenance, falling back to default if absent.
-    tau = default;
-    if isfield(EigenMat,'Provenance') && isstruct(EigenMat.Provenance) ...
-       && isfield(EigenMat.Provenance,'Tau') && ~isempty(EigenMat.Provenance.Tau)
-        tau = EigenMat.Provenance.Tau;
-    end
 end
 
 % ----------------------------------------------------------------------------

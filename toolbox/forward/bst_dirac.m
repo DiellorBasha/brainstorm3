@@ -287,36 +287,21 @@ end
 
 % ----------------------------------------------------------------------------
 function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant)
-% Scan the surface's Eigen child nodes for a Variant ('Dirac' or 'Dirac-Face')
-% eigenbasis with matching Tau and at least nModes modes. Returns the loaded
-% EigenMat and its file path, or ([], '') if none found.
+% Resolve a Variant ('Dirac' / 'Dirac-Face' / 'Hodge-Face') eigenbasis with matching Tau
+% and at least nModes modes from the DB cache via bst_get, then load it. Returns the loaded
+% EigenMat and its relative file path, or ([], '') if none found.
     if nargin < 4 || isempty(Variant), Variant = 'Dirac'; end
-    EigenMat = [];
+    EigenMat  = [];
     EigenFile = '';
-    [sSubject, ~, iSurface] = bst_get('SurfaceFile', SurfaceFile);
-    if isempty(sSubject) || isempty(iSurface) ...
-       || ~isfield(sSubject.Surface(iSurface),'Eigen') ...
-       || isempty(sSubject.Surface(iSurface).Eigen)
+    [sSubject, ~, iSurface, iEigen] = bst_get('EigenFileForSurface', SurfaceFile, Variant, nModes, Tau);
+    if isempty(iEigen)
         return;
     end
-    nodes = sSubject.Surface(iSurface).Eigen;
-    for k = 1:numel(nodes)
-        % Skip nodes whose registered Variant is set and does not match.
-        if isfield(nodes(k),'Variant') && ~isempty(nodes(k).Variant) ...
-           && ~strcmpi(nodes(k).Variant, Variant)
-            continue;
-        end
-        try
-            E = in_bst_eigen(nodes(k).FileName);
-        catch
-            continue;   % unreadable / missing entry
-        end
-        if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant); continue; end
-        if ~isfield(E,'nModes') || isempty(E.nModes) || E.nModes < nModes; continue; end
-        if abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;            continue; end
-        EigenMat  = E;
-        EigenFile = nodes(k).FileName;
-        return;
+    EigenFile = sSubject.Surface(iSurface).Eigen(iEigen).FileName;
+    try
+        EigenMat = in_bst_eigen(EigenFile);
+    catch
+        EigenMat = [];  EigenFile = '';
     end
 end
 
