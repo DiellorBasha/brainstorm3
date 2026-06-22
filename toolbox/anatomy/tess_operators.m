@@ -74,11 +74,13 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     Tau            = 0.5;
     NoSave         = false;
     ForceRecompute = false;  %#ok<NASGU> % accepted for API symmetry; see help
+    Interactive    = false;  % GUI: prompt Overwrite/Cancel (+ dependent-eigen cascade)
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
             case 'tau',            Tau            = varargin{i+1};
             case 'nosave',         NoSave         = logical(varargin{i+1});
             case 'forcerecompute', ForceRecompute = logical(varargin{i+1}); %#ok<NASGU>
+            case 'interactive',    Interactive    = logical(varargin{i+1});
             otherwise
                 error('tess_operators:badOption', 'Unknown option: %s', varargin{i});
         end
@@ -103,6 +105,36 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
                  '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face''.'], OperatorName);
+    end
+
+    % --- interactive overwrite: a matching operator already exists (GUI only) ---
+    % Non-interactive callers (incl. tess_eigen's find-or-create) keep the historical
+    % always-recompute behaviour. Interactive overwrite cascades to the dependent eigen
+    % nodes, which reference this operator and would be orphaned by the replacement.
+    if Interactive
+        [sOp, ~, iSurfOp, iOp] = bst_get('OperatorFileForSurface', SurfaceFile, Variant, Tau);
+        if ~isempty(iOp)
+            existFile = sOp.Surface(iSurfOp).Operator(iOp).FileName;
+            iDep      = bst_get('EigenFilesForOperator', SurfaceFile, existFile);
+            depFiles  = {};
+            depMsg    = '';
+            if ~isempty(iDep)
+                depFiles = arrayfun(@(k) sOp.Surface(iSurfOp).Eigen(k).FileName, iDep, 'UniformOutput', false);
+                depMsg   = sprintf('\n\nThis will ALSO remove %d dependent eigenbasis node(s).', numel(iDep));
+            end
+            tauStr = '';
+            if any(strcmpi(Variant, {'Dirac','Dirac-Face'})); tauStr = sprintf(', tau=%.3g', Tau); end
+            msg = sprintf(['A %s operator already exists for this surface%s.%s\n\n' ...
+                'Overwrite it (delete and recompute)?\n[No keeps and reuses the existing one.]'], ...
+                Variant, tauStr, depMsg);
+            if ~java_dialog('confirm', msg, 'Compute operator')
+                OperatorMat = in_bst_operator(existFile);
+                return;
+            end
+            % Overwrite: cascade-delete dependent eigen nodes first, then the operator.
+            if ~isempty(depFiles); db_delete_surface_node(depFiles, 1); end
+            db_delete_surface_node(existFile, 1);
+        end
     end
 
     % --- load surface ---

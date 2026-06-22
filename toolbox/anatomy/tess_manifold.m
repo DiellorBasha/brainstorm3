@@ -66,11 +66,13 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
     Gauge          = 'trivial';
     NoSave         = false;
     ForceRecompute = false;
+    Interactive    = false;  % GUI: prompt Overwrite/Cancel when a same-gauge manifold exists
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
             case 'gauge',          Gauge          = lower(varargin{i+1});
             case 'nosave',         NoSave         = logical(varargin{i+1});
             case 'forcerecompute', ForceRecompute = logical(varargin{i+1});
+            case 'interactive',    Interactive    = logical(varargin{i+1});
             otherwise
                 error('tess_manifold:badOption', 'Unknown option: %s', varargin{i});
         end
@@ -81,19 +83,24 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
     end
 
     % --- cache / skip check ---
-    % If not forcing, and this surface already has a manifold child registered,
-    % return an empty struct (the node already exists; caller can load it).
+    % If not forcing, and a manifold of the requested Gauge is already registered, load
+    % and return it (tess_manifold is the single find-or-load-or-create entry point, so it
+    % always hands back the complete ManifoldMat). bst_get resolves the match from the cache.
     if ~ForceRecompute
-        [sSubject, iSubject] = bst_get('SurfaceFile', SurfaceFile);
-        if ~isempty(sSubject)
-            iSurface = find(strcmpi({sSubject.Surface.FileName}, file_short(SurfaceFile)), 1);
-            if ~isempty(iSurface) && ...
-               isfield(sSubject.Surface(iSurface), 'Manifold') && ...
-               ~isempty(sSubject.Surface(iSurface).Manifold)
-                % Already has a manifold node — LOAD and return it (no recompute).
-                % tess_manifold is the single find-or-load-or-create entry point,
-                % so it always hands back the complete ManifoldMat.
-                ManifoldMat = in_bst_manifold(sSubject.Surface(iSurface).Manifold(1).FileName);
+        [sMan, ~, iSurfMan, iMan] = bst_get('ManifoldFileForSurface', SurfaceFile, Gauge);
+        if ~isempty(iMan)
+            existFile = sMan.Surface(iSurfMan).Manifold(iMan).FileName;
+            if Interactive
+                % Prompt Overwrite / Cancel. Cancel reuses; Overwrite deletes and recomputes.
+                msg = sprintf(['A manifold (gauge=%s) already exists for this surface.\n\n' ...
+                    'Overwrite it (delete and recompute)?\n[No keeps and reuses the existing one.]'], Gauge);
+                if ~java_dialog('confirm', msg, 'Compute manifold')
+                    ManifoldMat = in_bst_manifold(existFile);
+                    return;
+                end
+                db_delete_surface_node(existFile, 1);   % overwrite: drop the old node
+            else
+                ManifoldMat = in_bst_manifold(existFile);
                 return;
             end
         end

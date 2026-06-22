@@ -40,9 +40,13 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %                        to disk or register in the DB
 %     'ForceRecompute' : true/false (default false) — when false, an existing
 %                        eigen_*.mat child of the surface whose Variant matches,
-%                        whose stored K is at least the requested K, and (for Dirac)
-%                        whose Tau matches, is loaded and truncated to K modes
+%                        whose stored nModes is at least the requested nModes, and (for
+%                        Dirac) whose Tau matches, is loaded and truncated to nModes
 %                        instead of re-solving. Set true to force a fresh eigensolve.
+%     'Interactive'    : true/false (default false) — GUI only. When true and an
+%                        exact-spec match already exists, prompt Overwrite/Cancel:
+%                        Cancel reuses the existing node; Overwrite deletes it and
+%                        recomputes (no duplicate). Programmatic callers leave it false.
 %
 % OUTPUT:
 %     EigenMat : struct matching db_template('eigenmat'), with fields:
@@ -78,12 +82,14 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     Tau            = 0.5;
     NoSave         = false;
     ForceRecompute = false;  % when false, reuse a cached eigen node; see help
+    Interactive    = false;  % GUI: prompt Overwrite/Cancel when an exact-spec match exists
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
             case {'k','nmodes'},   K              = varargin{i+1};
             case 'tau',            Tau            = varargin{i+1};
             case 'nosave',         NoSave         = logical(varargin{i+1});
             case 'forcerecompute', ForceRecompute = logical(varargin{i+1});
+            case 'interactive',    Interactive    = logical(varargin{i+1});
             otherwise
                 error('tess_eigen:badOption', 'Unknown option: %s', varargin{i});
         end
@@ -141,9 +147,23 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     if ~ForceRecompute
         [sCached, ~, iSurfCached, iEigCached] = bst_get('EigenFileForSurface', SurfaceFile, Variant, K, Tau);
         if ~isempty(iEigCached)
-            cached   = in_bst_eigen(sCached.Surface(iSurfCached).Eigen(iEigCached).FileName);
-            EigenMat = local_truncate_eigen(cached, K);
-            return;
+            existEntry = sCached.Surface(iSurfCached).Eigen(iEigCached);
+            if Interactive
+                % Prompt Overwrite / Cancel. Cancel reuses the existing node; Overwrite
+                % deletes it and falls through to recompute (no duplicate accumulates).
+                msg = sprintf(['A %s eigenbasis already exists for this surface ' ...
+                    '(%d modes%s).\n\nOverwrite it (delete and recompute)?\n' ...
+                    '[No keeps and reuses the existing one.]'], ...
+                    Variant, existEntry.nModes, local_tau_str(existEntry.Tau));
+                if ~java_dialog('confirm', msg, 'Compute eigenmodes')
+                    EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), K);
+                    return;
+                end
+                db_delete_surface_node(existEntry.FileName, 1);   % overwrite: drop the old node
+            else
+                EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), K);
+                return;
+            end
         end
     end
 
@@ -387,6 +407,12 @@ function E = local_truncate_eigen(E, K)
         end
     end
     E.nModes = K;
+end
+
+% ----------------------------------------------------------------------------
+function s = local_tau_str(tau)
+% Format a Tau value for a dialog message: ', tau=0.5' or '' when empty (non-Dirac).
+    if isempty(tau); s = ''; else; s = sprintf(', tau=%.3g', tau); end
 end
 
 % ----------------------------------------------------------------------------

@@ -1174,23 +1174,23 @@ switch (lower(action))
                 % === MANIFOLD (cortex only) ===
                 if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
                     AddSeparator(jPopup);
-                    gui_component('MenuItem', jPopup, [], 'Compute manifold', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_manifold, filenameRelative));
+                    gui_component('MenuItem', jPopup, [], 'Compute manifold', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_manifold, filenameRelative, 'Interactive', 1));
                 end
 
                 % === OPERATOR (cortex only) ===
                 if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
                     jMenuOperator = gui_component('Menu', jPopup, [], 'Compute operator', IconLoader.ICON_SURFACE_CORTEX, [], []);
-                    gui_component('MenuItem', jMenuOperator, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Laplace-Beltrami'));
-                    gui_component('MenuItem', jMenuOperator, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Connection Laplacian'));
-                    gui_component('MenuItem', jMenuOperator, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Dirac'));
+                    gui_component('MenuItem', jMenuOperator, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Laplace-Beltrami', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuOperator, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Connection Laplacian', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuOperator, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Dirac', 'Interactive', 1));
                 end
 
                 % === EIGEN (cortex only) ===
                 if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
                     jMenuEigen = gui_component('Menu', jPopup, [], 'Compute eigenmodes', IconLoader.ICON_SURFACE_CORTEX, [], []);
-                    gui_component('MenuItem', jMenuEigen, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Laplace-Beltrami'));
-                    gui_component('MenuItem', jMenuEigen, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Connection Laplacian'));
-                    gui_component('MenuItem', jMenuEigen, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac'));
+                    gui_component('MenuItem', jMenuEigen, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Laplace-Beltrami', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuEigen, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Connection Laplacian', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuEigen, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac', 'Interactive', 1));
                 end
 
                 % === SET SURFACE TYPE ===
