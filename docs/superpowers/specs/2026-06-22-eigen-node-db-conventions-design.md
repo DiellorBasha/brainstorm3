@@ -36,7 +36,7 @@ discriminating params must live in the cache entry (decision below).
 
 - **Dialog:** **Overwrite / Cancel** (two-way). Cancel ⇒ reuse the existing node; Overwrite
   ⇒ delete the existing node and recompute fresh.
-- **Trigger:** **exact-spec match.** A non-matching request (different K/Tau/Gauge) creates a
+- **Trigger:** **exact-spec match.** A non-matching request (different nModes/Tau/Gauge) creates a
   new node *without* prompting.
 - **Operator dependents:** **warn + cascade delete.** Overwriting an operator also deletes
   the eigen nodes that reference it; the confirm message states the count.
@@ -48,7 +48,7 @@ discriminating params must live in the cache entry (decision below).
 `db_template('surface')` child entries (lines 36–39):
 ```
 Manifold : struct('FileName','Comment')                       % + Gauge
-Eigen    : struct('FileName','Comment','Variant')             % + K, Tau
+Eigen    : struct('FileName','Comment','Variant')             % + nModes, Tau, OperatorFile
 Operator : struct('FileName','Comment','Variant')             % + Tau
 ```
 `db_update` is at **v5.06**; `NormalizeSurfaceArray` backfills missing *template* fields
@@ -58,28 +58,41 @@ Operator : struct('FileName','Comment','Variant')             % + Tau
 
 ## Part 3a — Cache the spec; let `bst_get` find it
 
+**Field naming.** All new fields use clear, descriptive names. The ambiguous `K` is
+**renamed to `nModes`** (modes per hemisphere) — which also matches the existing public
+option name (`bst_dirac(..., 'nModes', …)`, `bst_eigenmodes_ensure`). This rename applies to
+**both** the new cache entry **and** the on-disk `EigenMat` field (see "Field rename" below).
+`Tau` (the documented relative-Dirac curvature-mixing weight) and `Lambda` (eigenvalues) are
+kept — they are domain-standard, documented names, not opaque letters.
+
 **Schema (`db_template('surface')`)** — final entry shapes (Eigen carries `OperatorFile`
 so the operator→eigen cascade lookup is also cache-only, see below):
 ```
-Eigen    : struct('FileName','Comment','Variant','K','Tau','OperatorFile')
+Eigen    : struct('FileName','Comment','Variant','nModes','Tau','OperatorFile')
 Operator : struct('FileName','Comment','Variant','Tau')
 Manifold : struct('FileName','Comment','Gauge')
 ```
 
 **`db_add_*` populate the new fields** (single source of truth = the saved struct):
-- `db_add_eigen`:    `newEntry.K = EigenMat.K`; `newEntry.Tau = EigenMat.Provenance.Tau` (or `[]` for non-Dirac variants); `newEntry.OperatorFile = EigenMat.OperatorFile`.
+- `db_add_eigen`:    `newEntry.nModes = EigenMat.nModes`; `newEntry.Tau = EigenMat.Provenance.Tau` (or `[]` for non-Dirac variants); `newEntry.OperatorFile = EigenMat.OperatorFile`.
 - `db_add_operator`: `newEntry.Tau = OperatorMat.Provenance.Tau` (or `[]`).
 - `db_add_manifold`: `newEntry.Gauge = ManifoldMat.Provenance.Gauge` (or `''`).
+
+**Field rename `EigenMat.K` → `EigenMat.nModes`.** Update `db_template('eigenmat')`,
+`tess_eigen`, `bst_dirac`, and any other consumers. Existing `eigen_*.mat` files on disk
+carry the legacy `.K`; `in_bst_eigen` gains a backward-compat shim (if `.K` present and
+`.nModes` absent, set `.nModes = .K`) — exactly the legacy-field handling pattern of
+`in_bst_headmodel`. So old files keep loading without a file rewrite.
 
 **Migration `db_update` v5.07 — value-backfill.** After `NormalizeSurfaceArray` adds the new
 (empty) fields, a v5.07 step walks every subject's surfaces and, for each Eigen/Operator/
 Manifold entry whose new field is empty, loads the file once via `in_bst_*` and fills
-`K`/`Tau`/`Gauge` from the struct / `Provenance`. Stale entries (file missing) are left empty
+`nModes`/`Tau`/`Gauge`/`OperatorFile` from the struct / `Provenance`. Stale entries (file missing) are left empty
 and skipped (cannot match a spec → effectively absent, which is correct).
 
 **New `bst_get` by-spec cases** (mirror `SurfaceFileByType`; cache-only; return the
 existing 4-tuple shape `[sSubject, iSubject, iSurface, iNode]`, empties if none):
-- `bst_get('EigenFileForSurface',    SurfaceFile, Variant, K, Tau)` — match: `Variant` equal, entry `K >= K`, and (Dirac/Dirac-Face/Hodge-Face) `Tau` equal; Tau ignored for Laplace-Beltrami / Connection Laplacian. Among matches, return the one with the smallest sufficient `K`.
+- `bst_get('EigenFileForSurface',    SurfaceFile, Variant, nModes, Tau)` — match: `Variant` equal, entry `nModes >= nModes` (requested), and (Dirac/Dirac-Face/Hodge-Face) `Tau` equal; Tau ignored for Laplace-Beltrami / Connection Laplacian. Among matches, return the one with the smallest sufficient `nModes`.
 - `bst_get('OperatorFileForSurface', SurfaceFile, Variant, Tau)` — match: `Variant` equal and (Dirac-type) `Tau` equal.
 - `bst_get('ManifoldFileForSurface', SurfaceFile, Gauge)` — match: `Gauge` equal.
 
@@ -125,15 +138,16 @@ remove the entry from `sSubject.Surface(iSurface).<Type>`, persist (`bst_set` +
 
 ## Data integrity / edge cases
 
-- **Nested basis vs overwrite:** a request for K=400 matching an existing K=500 Dirac/Tau=0.5
-  node counts as a match (reuse on Cancel). The confirm message shows the existing node's
-  actual K/Tau so Overwrite (which would replace 500 with 400) is an informed choice.
+- **Nested basis vs overwrite:** a request for `nModes=400` matching an existing `nModes=500`
+  Dirac/Tau=0.5 node counts as a match (reuse on Cancel). The confirm message shows the
+  existing node's actual `nModes`/Tau so Overwrite (which would replace 500 with 400) is an
+  informed choice.
 - **Non-Dirac Tau:** Laplace-Beltrami / Connection Laplacian store `Tau=[]`; their find ignores
   Tau.
 - **Stale entries** (file missing): never match a spec; `node_delete`/overwrite tolerate a
   missing file (remove the entry regardless).
-- **Reuse picks smallest sufficient K** so a tiny request doesn't load a huge basis when a
-  right-sized one exists.
+- **Reuse picks the smallest sufficient `nModes`** so a tiny request doesn't load a huge basis
+  when a right-sized one exists.
 
 ## Validation
 
@@ -143,7 +157,7 @@ remove the entry from `sSubject.Surface(iSurface).<Type>`, persist (`bst_set` +
   assert operator Tau discrimination; assert `EigenFilesForOperator` returns dependents.
 - `checkcode` clean on every changed file.
 - Migration: load the TutorialAuditory protocol (pre-v5.07) and confirm entries backfill
-  K/Tau/Gauge/OperatorFile without error; re-running is a no-op.
+  nModes/Tau/Gauge/OperatorFile without error; re-running is a no-op.
 - Overwrite flow: GUI path validated by code review + a non-interactive equivalence check
   (Interactive=0 unchanged); a scripted Overwrite=Yes path test deletes old + creates fresh.
 
