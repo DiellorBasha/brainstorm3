@@ -1893,6 +1893,7 @@ switch (lower(action))
                     if ~isempty(DataFile)
                         gui_component('MenuItem', jMenuModality, [], 'Save whitened recordings', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)SaveWhitenedData(filenameRelative));
                     end
+                    gui_component('MenuItem', jMenuModality, [], 'Resolution metrics', IconLoader.ICON_RESULTS, [], @(h,ev)ComputeResolutionMetrics(filenameRelative));
                 end
                 
                 % === VIEW BAD CHANNELS ===
@@ -3871,7 +3872,90 @@ function SaveWhitenedData(ResultsFile)
     panel_protocols('UpdateNode', 'Study', iStudy);
     % Select node
     panel_protocols('SelectNode', [], 'data', iStudy, iNewData);
-    % Hide progress bar 
+    % Hide progress bar
+    bst_progress('stop');
+end
+
+
+%% ===== MODEL EVALUATION: RESOLUTION METRICS =====
+% Point-spread metrics (resolution matrix R = Kernel*Leadfield) for a linear imaging
+% kernel: per-source localization error, spatial dispersion and PSF amplitude, saved as
+% static source maps on the cortex. Constrained (1-component) models only for now.
+function ComputeResolutionMetrics(ResultsFile)
+    bst_progress('start', 'Model evaluation', 'Loading source model...');
+    ResultsMat = in_bst_results(ResultsFile, 0, 'ImagingKernel', 'HeadModelFile', ...
+        'GoodChannel', 'nComponents', 'SurfaceFile', 'HeadModelType', 'DataFile', 'Comment');
+    % Validate: linear imaging kernel + constrained + linked head model
+    if isempty(ResultsMat) || isempty(ResultsMat.ImagingKernel)
+        bst_progress('stop');
+        bst_error('Resolution metrics require an imaging-kernel (linear inverse) source file.', 'Resolution metrics', 0);
+        return;
+    end
+    if ~isequal(ResultsMat.nComponents, 1)
+        bst_progress('stop');
+        bst_error('Resolution metrics currently support constrained (1-component) source models only.', 'Resolution metrics', 0);
+        return;
+    end
+    if isempty(ResultsMat.HeadModelFile)
+        bst_progress('stop');
+        bst_error('No head model is linked to this source file.', 'Resolution metrics', 0);
+        return;
+    end
+    % Leadfield: constrained gain (orientations), restricted to the kernel's good channels
+    HeadModelMat = in_bst_headmodel(ResultsMat.HeadModelFile, 0, 'Gain', 'GridLoc', 'GridOrient');
+    if isempty(HeadModelMat.GridOrient)
+        bst_progress('stop');
+        bst_error('The head model has no source orientations (GridOrient); cannot build the constrained leadfield.', 'Resolution metrics', 0);
+        return;
+    end
+    bst_progress('text', 'Computing resolution metrics...');
+    Lcon      = bst_gain_orient(HeadModelMat.Gain, HeadModelMat.GridOrient);  % [nAllCh x nSrc]
+    Leadfield = Lcon(ResultsMat.GoodChannel, :);                             % [nGoodCh x nSrc]
+    Kernel    = ResultsMat.ImagingKernel;                                    % [nSrc x nGoodCh]
+    GridLoc   = HeadModelMat.GridLoc;                                        % [nSrc x 3] meters
+    if isempty(GridLoc) && ~isempty(ResultsMat.SurfaceFile)
+        sSurf   = in_tess_bst(ResultsMat.SurfaceFile);
+        GridLoc = sSurf.Vertices;
+    end
+    if (size(Kernel,2) ~= size(Leadfield,1)) || (size(Kernel,1) ~= size(Leadfield,2)) || (size(GridLoc,1) ~= size(Kernel,1))
+        bst_progress('stop');
+        bst_error(sprintf('Kernel %s / leadfield %s / GridLoc %s shapes are incompatible.', ...
+            mat2str(size(Kernel)), mat2str(size(Leadfield)), mat2str(size(GridLoc))), 'Resolution metrics', 0);
+        return;
+    end
+    M = bst_resolution_metrics(Kernel, Leadfield, GridLoc);
+    % Save each metric as a static source map (2 identical frames for robust display)
+    bst_progress('text', 'Saving resolution maps...');
+    [sStudy, iStudy] = bst_get('AnyFile', ResultsFile);   %#ok<ASGLU>
+    StudyDir = bst_fileparts(file_fullpath(sStudy.FileName));
+    maps = { 'LocError',          'Resolution: localization error', 'mm', 'results_reslocerr'; ...
+             'SpatialDispersion', 'Resolution: spatial dispersion', 'mm', 'results_resdisp';   ...
+             'OverallAmplitude',  'Resolution: PSF amplitude',      '',   'results_resamp' };
+    iNew = [];
+    for k = 1:size(maps,1)
+        FileMat = db_template('resultsmat');
+        FileMat.ImagingKernel = [];
+        FileMat.ImageGridAmp  = repmat(M.(maps{k,1})(:), 1, 2);   % [nSrc x 2] static
+        FileMat.Time          = [0, 1];
+        FileMat.nComponents   = 1;
+        FileMat.HeadModelType = ResultsMat.HeadModelType;
+        FileMat.SurfaceFile   = ResultsMat.SurfaceFile;
+        FileMat.HeadModelFile = ResultsMat.HeadModelFile;
+        FileMat.GoodChannel   = ResultsMat.GoodChannel;
+        FileMat.DataFile      = ResultsMat.DataFile;
+        FileMat.ColormapType  = 'source';
+        FileMat.DisplayUnits  = maps{k,3};
+        FileMat.Function      = 'resolution';
+        FileMat.Comment       = [maps{k,2}, ' | ', ResultsMat.Comment];
+        FileMat = bst_history('add', FileMat, 'resolution', maps{k,2});
+        OutFile = bst_process('GetNewFilename', StudyDir, maps{k,4});
+        bst_save(OutFile, FileMat, 'v6');
+        [sStudy, iNew] = db_add_data(iStudy, OutFile, FileMat);   %#ok<ASGLU>
+    end
+    panel_protocols('UpdateNode', 'Study', iStudy);
+    if ~isempty(iNew)
+        panel_protocols('SelectNode', [], 'results', iStudy, iNew);
+    end
     bst_progress('stop');
 end
 
