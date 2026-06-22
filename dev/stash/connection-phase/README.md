@@ -25,6 +25,10 @@ as-is; that is expected.
   (face→vertex frame transfer; consumed by the wavefront/sign-correction code above). Its
   input source `tess_tangents` was deleted; fold it in as a local function during the
   eigen_-node rewire. Was in `toolbox/anatomy/` (non-idiomatic `bst_` prefix for a helper).
+- `tess_sulcal_pairs.m` — facing sulcal-wall vertex-pair detector (used by
+  `bst_source_sign_correct` / `test_wavefront_pipeline`). A `tess_`-renamed copy of
+  `sign_ambiguity/sa_sulcal_walls.m` (near-duplicate — dedup to one during the rewire). Was
+  misplaced in `toolbox/anatomy/`; it's sign-ambiguity research, not Brainstorm API.
 - `connection_phase_readout_*.md` — the design/plan docs.
 - tests/demos/benchmarks for the above (incl. `test_tangent_face2vertex.m`).
 
