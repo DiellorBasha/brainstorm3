@@ -608,6 +608,14 @@ switch (lower(nodeType{1}))
             end
             iModifiedStudies = iUniqueStudy;
         end
+%% ===== DERIVED ANATOMY (manifold / operator / eigen) =====
+    case {'manifold', 'operator', 'eigen'}
+        bst_progress('start', 'Delete nodes', 'Deleting files...');
+        % Resolve + delete each node by filename (file + DB entry). The shared primitive
+        % returns the subjects whose Surface lists changed; the tail refreshes the tree.
+        iMod = db_delete_surface_node(FileName, ~isUserConfirm);
+        iModifiedSubjects = [iModifiedSubjects, iMod];
+
     otherwise
         % Node that cannot be deleted
         return
