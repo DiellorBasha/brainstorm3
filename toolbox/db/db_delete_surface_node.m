@@ -69,8 +69,14 @@ function iModifiedSubjects = db_delete_surface_node(FileNames, isForced)
     end
     if isempty(FullFiles); return; end
 
-    % --- Delete the files (one batched confirmation) ---
-    if (file_delete(FullFiles, isForced) ~= 1); return; end
+    % --- Delete the files that still exist (one batched confirmation). Missing files
+    %     (stale entries / DB drift) are tolerated: we still drop their DB entry below,
+    %     otherwise a dangling registration can never be cleaned up. Only an interactive
+    %     cancel (isForced=0 and file_delete reports failure) aborts the removal. ---
+    existing = FullFiles(logical(cellfun(@(f) double(file_exist(f)), FullFiles)));
+    if ~isempty(existing) && (file_delete(existing, isForced) ~= 1) && ~isForced
+        return;   % user cancelled the confirmation dialog
+    end
 
     % --- Remove the DB entries, grouped by (subject, surface, field), in descending
     %     index order so earlier removals do not shift the indices of later ones ---
