@@ -125,6 +125,9 @@ bst_set('ProtocolSubjects', ProtocolSubjects);
 
 % Refresh tree and save database
 panel_protocols('UpdateNode', 'Subject', iSubject);
+% Expand the parent surface and select the new node, so the user sees it appear
+% (UpdateNode alone leaves the surface node collapsed).
+panel_protocols('SelectNode', [], file_short(OutputFileFull));
 db_save();
 
 end
