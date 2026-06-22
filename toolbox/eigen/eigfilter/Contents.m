@@ -24,10 +24,10 @@
 %   mexhat        - g = (t*lambda).*exp(-t*lambda)     (band-pass; bank-capable)
 %   dog           - g = exp(-t1*lambda) - exp(-t2*lambda)  (band-pass)
 %
-% Consumed by the file-based eigen filter path: bst_eigen 'filter' -> bst_eigenfilter (and
-% bst_eigenmodes_filter_gain). NOTE: deprecated/experimental consumers are NOT the live path --
-% bst_eigenmode_prior (the bst_eigenmode_*/bst_inverse_eigenmodes inverses) and the Dirac-
-% wavelet cluster moved to dev/experimental (bst_dirac_eigenmodes_filter). The live source
-% mapping is bst_dirac / bst_inverse_dirac, which do not use this library.
+% Consumed by the file-based eigen filter path: bst_eigen 'filter' -> bst_eigenfilter.
+% NOTE: the legacy scalar-LBO eigenmode cluster (bst_eigenmodes_* + process_eigenmodes_*,
+% incl. bst_eigenmodes_filter_gain) and the Dirac-wavelet cluster were retired to
+% dev/experimental; bst_eigenmode_prior remains only for the deprecated bst_inverse_eigenmodes
+% inverses. The live source mapping is bst_dirac / bst_inverse_dirac, which do not use this library.
 %
 % Authors: Diellor Basha, 2026

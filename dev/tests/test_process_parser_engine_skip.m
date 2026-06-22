@@ -1,9 +1,8 @@
 function test_process_parser_engine_skip
 % ParseProcessFolder must treat a process_*.m that defines NO GetDescription
 % subfunction as a shared engine / support function (driven by sibling menu
-% processes, e.g. process_eigenmodes_freq) and skip it SILENTLY -- while a file
-% whose GetDescription EXISTS but errors is a broken menu process and must still
-% be reported as "Invalid ... function".
+% processes) and skip it SILENTLY -- while a file whose GetDescription EXISTS but
+% errors is a broken menu process and must still be reported as "Invalid ... function".
 %
 % The discrimination lives in panel_process_select('IsProcessEngineFile', file).
 thisDir  = fileparts(mfilename('fullpath'));
@@ -12,19 +11,6 @@ addpath(repoRoot);
 if ~brainstorm('status')
     brainstorm nogui
 end
-
-%% ===== Discriminator: real files =====
-% Shared engine: no GetDescription -> engine (skip).
-fEngine = which('process_eigenmodes_freq');
-assert(~isempty(fEngine), 'process_eigenmodes_freq must be on the path.');
-assert(isequal(panel_process_select('IsProcessEngineFile', fEngine), true), ...
-    'process_eigenmodes_freq (no GetDescription) must be classified as a shared engine.');
-
-% Real menu process: has GetDescription -> NOT an engine (would be registered/warned).
-fMenu = which('process_eigenmodes_psd');
-assert(~isempty(fMenu), 'process_eigenmodes_psd must be on the path.');
-assert(isequal(panel_process_select('IsProcessEngineFile', fMenu), false), ...
-    'process_eigenmodes_psd (has GetDescription) must NOT be classified as an engine.');
 
 %% ===== Discriminator: temp files (both branches) =====
 % (a) Engine stub: only a Compute subfunction, no GetDescription -> engine.
@@ -55,11 +41,11 @@ assert(isequal(panel_process_select('IsProcessEngineFile', fB), false), ...
     'A process_*.m whose GetDescription exists (even if it errors) must NOT be an engine.');
 fprintf('PASSED: engine/menu-process discrimination (real + temp files).\n');
 
-%% ===== End-to-end: a forced re-parse no longer flags the engine =====
+%% ===== End-to-end: a forced re-parse flags no shared-engine file as invalid =====
 out = evalc("panel_process_select('ParseProcessFolder', 1)");
-assert(isempty(strfind(out, 'process_eigenmodes_freq')), ...
-    'ParseProcessFolder must skip process_eigenmodes_freq silently (no "Invalid" message).');
-fprintf('PASSED: forced re-parse does not flag process_eigenmodes_freq.\n');
+assert(isempty(strfind(out, 'Invalid')), ...
+    'ParseProcessFolder must not report any shared-engine file as "Invalid".');
+fprintf('PASSED: forced re-parse flags no engine file as invalid.\n');
 
 fprintf('ALL TESTS PASSED: test_process_parser_engine_skip\n');
 end
