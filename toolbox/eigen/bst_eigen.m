@@ -73,11 +73,13 @@ function [OutputFiles, Messages, isError] = bst_eigen(Data, OPTIONS)
 
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment       = '';
-Def_OPTIONS.Method        = 'spectrum';  % {'spectrum'(wired),'project','filter'(stubs)}
+Def_OPTIONS.Method        = 'spectrum';  % {'spectrum','filter'} wired; 'project' stub
 Def_OPTIONS.EigenFile     = [];          % eigen_ node (the spatial axis); [] => resolve from SurfaceFile
 Def_OPTIONS.Variant       = [];          % operator family hint ('Laplace-Beltrami'|'Connection Laplacian'|'Dirac'|...)
 Def_OPTIONS.nModes        = [];          % use a subset of modes (the spatial "band"); [] => all
 Def_OPTIONS.Measure       = 'power';     % spectrum measure {'power','magnitude'}
+Def_OPTIONS.KernelName    = 'flat';      % 'filter' method: eigfilter kernel name (or handle / [K x 1] gain)
+Def_OPTIONS.KernelParams  = struct();    % 'filter' method: kernel parameters
 Def_OPTIONS.WinLength     = [];          % windowing: window length in SECONDS ([] => one window)
 Def_OPTIONS.WinOverlap    = 50;          % windowing: overlap in percent
 Def_OPTIONS.WinFunc       = 'mean';      % windowing: aggregate across windows {'mean','std','mean+std'}
@@ -191,10 +193,13 @@ for iData = 1:length(Data)
             % Windowed eigenspectrum (the bst_psd analogue), computed SEPARATELY per hemisphere.
             [Result, Messages, isError] = ComputeEigenspectrum(F, EigenMat, OperatorMat, sfreq, OPTIONS);
             if isError, break; end
+        case 'filter'
+            % Spatial eigen filter: project -> scale by h(Lambda) -> reconstruct, per hemisphere.
+            [Ffilt, Messages, isError] = bst_eigenfilter(F, EigenMat, OperatorMat, OPTIONS.KernelName, OPTIONS.KernelParams);
+            if isError, break; end
+            Result = struct('Type', 'filter', 'Field', Ffilt);
         case 'project'
             % TODO: Coef = Phi' * B * F  (manifold Fourier transform onto the eigenbasis).
-        case 'filter'
-            % TODO: eigen-domain spectral filter (project -> apply h(Lambda) -> reconstruct).
         otherwise
             Messages = ['Unknown eigen method: ' OPTIONS.Method];
             isError  = 1;
@@ -227,13 +232,15 @@ bst_progress('stop');
         if isempty(Result)
             return;
         end
-        % Build the output struct. Currently only the eigen-spectrum output is assembled,
-        % reusing TimefreqMat (Freqs = sqrt(Lambda), the PSD analogue). A 'result_' output
-        % (reconstructed/filtered source map) is a TODO for the project/filter methods.
+        % Build the output struct: an eigen-spectrum reuses TimefreqMat (Freqs = sqrt(Lambda),
+        % the PSD analogue); a filtered source map is written as a results_ file (ResultsMat).
         switch lower(Result.Type)
             case 'spectrum'
                 FileMat    = BuildSpectrumTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile);
                 filePrefix = 'timefreq_eigenspectrum';
+            case 'filter'
+                FileMat    = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVector, SurfaceFile);
+                filePrefix = 'results_eigenfilter';
             otherwise
                 error('bst_eigen:OutputType', 'Unknown result type: %s', Result.Type);
         end
@@ -471,4 +478,49 @@ function FileMat = BuildSpectrumTimefreq(Result, OPTIONS, EigenMat, DataType, Da
     FileMat.Options.Lambda      = LambdaAll;    % exact eigenvalues per hemisphere
     FileMat.Options.RowHemi     = {Result.Hemi.Tag};
     FileMat = bst_history('add', FileMat, 'compute', 'Eigen-spectrum decomposition (bst_eigen)');
+end
+
+
+%% ===== BUILD THE EIGEN-FILTER RESULTS FILE =====
+function FileMat = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVector, SurfaceFile)
+    % Filtered source map -> results_ file. Unconstrained (3-vector, nComponents=3) for the
+    % Dirac/face variants; scalar (nComponents=1) otherwise (Connection stays complex).
+    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+        nComp = 3;
+    else
+        nComp = 1;
+    end
+    nT = size(Result.Field, 2);
+    if ischar(OPTIONS.KernelName)
+        kstr = OPTIONS.KernelName;
+    else
+        kstr = 'custom';
+    end
+
+    FileMat = db_template('resultsmat');
+    FileMat.ImagingKernel = [];
+    FileMat.ImageGridAmp  = Result.Field;          % [nSource x nTime] filtered source map
+    FileMat.nComponents   = nComp;
+    FileMat.HeadModelType = 'surface';
+    FileMat.SurfaceFile   = SurfaceFile;
+    FileMat.Function      = 'eigenfilter';
+    if ~isempty(TimeVector) && (numel(TimeVector) == nT)
+        FileMat.Time = TimeVector;
+    else
+        FileMat.Time = 0:(nT-1);
+    end
+    if ~isempty(DataFile)
+        FileMat.DataFile = file_short(DataFile);
+    end
+    if isempty(OPTIONS.Comment)
+        FileMat.Comment = sprintf('Eigenfilter (%s, %s)', EigenMat.Variant, kstr);
+    else
+        FileMat.Comment = OPTIONS.Comment;
+    end
+    FileMat.Options.Method       = 'eigenfilter';
+    FileMat.Options.Variant      = EigenMat.Variant;
+    FileMat.Options.EigenFile    = OPTIONS.EigenFile;
+    FileMat.Options.KernelName   = kstr;
+    FileMat.Options.KernelParams = OPTIONS.KernelParams;
+    FileMat = bst_history('add', FileMat, 'compute', 'Eigen-domain spatial filter (bst_eigen)');
 end
