@@ -87,10 +87,16 @@ if ~isempty(sSubject.Surface) && ~all(isfield(sSubject.Surface, tFields))
 end
 
 % Append a child entry to the parent surface's Operator list
+% Cache the discriminating spec (Variant + Tau) so bst_get can find this node from the
+% cache alone (no file load). Tau is meaningful only for the Dirac-type variants.
 newEntry.FileName = file_short(OutputFileFull);
 newEntry.Comment  = Comment;
 newEntry.Variant  = '';
 if isfield(OperatorMat, 'Variant'); newEntry.Variant = OperatorMat.Variant; end
+newEntry.Tau = [];
+if isfield(OperatorMat, 'Provenance') && isstruct(OperatorMat.Provenance) && isfield(OperatorMat.Provenance, 'Tau')
+    newEntry.Tau = OperatorMat.Provenance.Tau;
+end
 sSubject.Surface(iSurface).Operator(end+1) = newEntry;
 iOperator = numel(sSubject.Surface(iSurface).Operator);
 

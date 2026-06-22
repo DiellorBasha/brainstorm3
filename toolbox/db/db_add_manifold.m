@@ -104,9 +104,14 @@ if ~isempty(sSubject.Surface) && ~all(isfield(sSubject.Surface, tFields))
     sSubject.Surface = reshape([sNew{:}], size(sSubject.Surface));
 end
 
-% Append a child entry to the parent surface's Manifold list
+% Append a child entry to the parent surface's Manifold list.
+% Cache the discriminating spec (Gauge) so bst_get can find this node from the cache alone.
 newEntry.FileName = file_short(OutputFileFull);
 newEntry.Comment  = Comment;
+newEntry.Gauge = '';
+if isfield(ManifoldMat, 'Provenance') && isstruct(ManifoldMat.Provenance) && isfield(ManifoldMat.Provenance, 'Gauge')
+    newEntry.Gauge = ManifoldMat.Provenance.Gauge;
+end
 sSubject.Surface(iSurface).Manifold(end+1) = newEntry;
 iManifold = numel(sSubject.Surface(iSurface).Manifold);
 

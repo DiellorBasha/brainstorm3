@@ -456,6 +456,45 @@ if (CurrentDbVersion < 5.06)
     end
 end
 
+%% ===== UPDATE: 22-Jun-2026 =====
+% Modification: cache the discriminating spec on the Eigen/Operator/Manifold child entries
+% so bst_get can resolve a derived node by spec from the cache alone (no file load):
+%   Eigen    + nModes, Tau, OperatorFile
+%   Operator + Tau
+%   Manifold + Gauge
+% NormalizeSurfaceArray only widens SURFACE-level fields (which already exist since 5.04),
+% so the nested entry field sets are widened and value-backfilled here, loading each node
+% file's metadata once (small fields only, never the heavy Phi / operator matrices).
+if (CurrentDbVersion < 5.07)
+    isSurfFixed = 0;
+    for iProt = 1:length(ProtocolsListSubjects)
+        SubjectsRoot = '';
+        if (iProt <= length(ProtocolsListInfos)) && isfield(ProtocolsListInfos(iProt), 'SUBJECTS')
+            SubjectsRoot = ProtocolsListInfos(iProt).SUBJECTS;
+        end
+        subjFields = fieldnames(ProtocolsListSubjects(iProt));
+        for iField = 1:length(subjFields)
+            subjField = subjFields{iField};
+            for iSubj = 1:length(ProtocolsListSubjects(iProt).(subjField))
+                sSurf = ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface;
+                if isempty(sSurf)
+                    continue;
+                end
+                [sSurf, isFix] = BackfillDerivedSpecs(sSurf, SubjectsRoot);
+                if isFix
+                    ProtocolsListSubjects(iProt).(subjField)(iSubj).Surface = sSurf;
+                    isSurfFixed = 1;
+                end
+            end
+        end
+    end
+    if isSurfFixed
+        disp('BST> Database structure: Caching eigen/operator/manifold specs on the surface entries...');
+        SaveProtocolSubjects();
+        disp('BST> Database structure: Done.');
+    end
+end
+
 %% ===== JUST BEFORE RETURNING TO STARTUP FUNCTION =====
 % Save the new database version
 if saveMetadata
@@ -600,6 +639,119 @@ function [sSurf, isFixed] = NormalizeSurfaceArray(sSurf, templateSurface)
     end
     % Concatenate and restore the original array orientation (Surface lists are 1xN row vectors)
     sSurf = reshape([sNew{:}], origSize);
+end
+
+%% ===== BACKFILL DERIVED-NODE SPECS (v5.07) =====
+% Widen the Eigen/Operator/Manifold child-entry field sets to the current db_template and
+% value-backfill the spec fields from each node file's metadata (small fields only). Direct
+% absolute-path load (not in_bst_*), because the protocol is not "current" during a startup
+% migration. Best-effort: a missing/unreadable file leaves the new fields empty (a stale entry
+% then simply never matches a spec).
+function [sSurf, isFixed] = BackfillDerivedSpecs(sSurf, SubjectsRoot)
+    isFixed = 0;
+    tpl  = db_template('Surface');
+    fEig = fieldnames(tpl.Eigen);
+    fOp  = fieldnames(tpl.Operator);
+    fMan = fieldnames(tpl.Manifold);
+    for iS = 1:numel(sSurf)
+        % --- Eigen: nModes / Tau / OperatorFile ---
+        if isfield(sSurf(iS), 'Eigen')
+            [arr, ch] = i_backfill(sSurf(iS).Eigen, fEig, tpl.Eigen, SubjectsRoot, 'eigen');
+            if ch; sSurf(iS).Eigen = arr; isFixed = 1; end
+        end
+        % --- Operator: Tau ---
+        if isfield(sSurf(iS), 'Operator')
+            [arr, ch] = i_backfill(sSurf(iS).Operator, fOp, tpl.Operator, SubjectsRoot, 'operator');
+            if ch; sSurf(iS).Operator = arr; isFixed = 1; end
+        end
+        % --- Manifold: Gauge ---
+        if isfield(sSurf(iS), 'Manifold')
+            [arr, ch] = i_backfill(sSurf(iS).Manifold, fMan, tpl.Manifold, SubjectsRoot, 'manifold');
+            if ch; sSurf(iS).Manifold = arr; isFixed = 1; end
+        end
+    end
+end
+
+% Widen one derived-entry array to fieldNames and fill its spec fields from the node files.
+function [arr, isChanged] = i_backfill(arr, fieldNames, tplEmpty, SubjectsRoot, kind)
+    isChanged = 0;
+    if isempty(arr)
+        % Replace an empty old-schema array (or a bare [] double) with the empty
+        % current-schema struct so later db_add_* appends are field-homogeneous.
+        if ~isstruct(arr) || ~isequal(fieldnames(arr), fieldNames)
+            arr = tplEmpty;  isChanged = 1;
+        end
+        return;
+    end
+    cells = cell(1, numel(arr));
+    for k = 1:numel(arr)
+        e = arr(k);
+        % Widen: add any missing template fields (empty).
+        for f = 1:numel(fieldNames)
+            if ~isfield(e, fieldNames{f}); e.(fieldNames{f}) = []; isChanged = 1; end
+        end
+        % Value-backfill from the node file (only when a spec field is still empty).
+        e = i_fill_spec(e, SubjectsRoot, kind);
+        extra = setdiff(fieldnames(e), fieldNames, 'stable');
+        cells{k} = orderfields(e, [fieldNames(:); extra(:)]);
+    end
+    % A non-empty array is always rebuilt (widened + value-filled), so report it changed.
+    arr = reshape([cells{:}], size(arr));
+    isChanged = 1;
+end
+
+% Fill one entry's spec fields from its node file (kind = 'eigen'|'operator'|'manifold').
+function e = i_fill_spec(e, SubjectsRoot, kind)
+    switch kind
+        case 'eigen'
+            if (~isfield(e,'nModes') || isempty(e.nModes)) || (~isfield(e,'Tau') || isempty(e.Tau)) ...
+               || (~isfield(e,'OperatorFile') || isempty(e.OperatorFile))
+                M = i_loadmeta(SubjectsRoot, e.FileName, {'nModes','K','Provenance','OperatorFile'});
+                if ~isempty(M)
+                    if (~isfield(e,'nModes') || isempty(e.nModes))
+                        if isfield(M,'nModes') && ~isempty(M.nModes); e.nModes = M.nModes;
+                        elseif isfield(M,'K') && ~isempty(M.K);        e.nModes = M.K; end
+                    end
+                    if (~isfield(e,'Tau') || isempty(e.Tau));          e.Tau = i_provtau(M); end
+                    if (~isfield(e,'OperatorFile') || isempty(e.OperatorFile)) && isfield(M,'OperatorFile')
+                        e.OperatorFile = M.OperatorFile;
+                    end
+                end
+            end
+        case 'operator'
+            if ~isfield(e,'Tau') || isempty(e.Tau)
+                M = i_loadmeta(SubjectsRoot, e.FileName, {'Provenance'});
+                if ~isempty(M); e.Tau = i_provtau(M); end
+            end
+        case 'manifold'
+            if ~isfield(e,'Gauge') || isempty(e.Gauge)
+                M = i_loadmeta(SubjectsRoot, e.FileName, {'Provenance'});
+                if ~isempty(M) && isfield(M,'Provenance') && isstruct(M.Provenance) && isfield(M.Provenance,'Gauge')
+                    e.Gauge = M.Provenance.Gauge;
+                end
+            end
+    end
+end
+
+function M = i_loadmeta(SubjectsRoot, relFile, fields)
+    M = [];
+    if isempty(SubjectsRoot) || isempty(relFile); return; end
+    try
+        f = bst_fullfile(SubjectsRoot, relFile);
+        if ~file_exist(f); return; end
+        warning off MATLAB:load:variableNotFound
+        M = load(f, fields{:});
+        warning on MATLAB:load:variableNotFound
+    catch
+        M = [];
+    end
+end
+
+function tau = i_provtau(M)
+    tau = [];
+    if isfield(M,'Provenance') && isstruct(M.Provenance) && isfield(M.Provenance,'Tau')
+        tau = M.Provenance.Tau;
+    end
 end
 
 function [ProtocolMat, ProtocolFile] = GetProtocolMat(sProtocol)

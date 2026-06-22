@@ -87,10 +87,21 @@ if ~isempty(sSubject.Surface) && ~all(isfield(sSubject.Surface, tFields))
 end
 
 % Append a child entry to the parent surface's Eigen list
+% Cache the discriminating spec on the entry so bst_get can find this node from the
+% cache alone (no file load): Variant + nModes + Tau, plus the OperatorFile reference
+% (used by the operator->eigen dependency lookup).
 newEntry.FileName = file_short(OutputFileFull);
 newEntry.Comment  = Comment;
 newEntry.Variant  = '';
 if isfield(EigenMat, 'Variant'); newEntry.Variant = EigenMat.Variant; end
+newEntry.nModes = [];
+if isfield(EigenMat, 'nModes'); newEntry.nModes = EigenMat.nModes; end
+newEntry.Tau = [];
+if isfield(EigenMat, 'Provenance') && isstruct(EigenMat.Provenance) && isfield(EigenMat.Provenance, 'Tau')
+    newEntry.Tau = EigenMat.Provenance.Tau;
+end
+newEntry.OperatorFile = '';
+if isfield(EigenMat, 'OperatorFile'); newEntry.OperatorFile = EigenMat.OperatorFile; end
 sSubject.Surface(iSurface).Eigen(end+1) = newEntry;
 iEigen = numel(sSubject.Surface(iSurface).Eigen);
 
