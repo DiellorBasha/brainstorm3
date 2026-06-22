@@ -310,7 +310,7 @@ analytic kernels `g(λ)`; `bst_eigfilter_kernel('info', name)` returns a metadat
 | `dog` | `exp(−t₁λ) − exp(−t₂λ)` | **band-pass** (difference of heat kernels), `t₁<t₂` enforced |
 
 (The GUI sections currently expose `{mexhat, dog, heat, inverse_heat, tikhonov}` via
-`bst_eigfilter_panel('Kernels')`.) The same library feeds both the **analysis filters** and
+`panel_eigenfilter_design('Kernels')`.) The same library feeds both the **analysis filters** and
 the inverse **prior** (`bst_eigenmode_prior`), per the design in
 [`2026-06-02-eigfilter-library-design.md`](../2026-06-02-eigfilter-library-design.md) and the
 unifying view in

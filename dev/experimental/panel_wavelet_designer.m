@@ -73,7 +73,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok
     jOpt.add(jSec1);
 
     % ===== SECTION 2: FILTER KERNEL (shared helper) =====
-    [keys, displays] = bst_eigfilter_panel('Kernels');
+    [keys, displays] = panel_eigenfilter_design('Kernels');
     jSec2 = gui_river([2 2], [2 8 3 6], '2. Filter kernel');
     gui_component('label', jSec2, 'br', 'Kernel:');
     jKernel = gui_component('combobox', jSec2, 'br hfill', [], {displays}, [], [], []);
@@ -117,7 +117,7 @@ function bstPanelNew = CreatePanel(EigenMat, EigenFile, hFig, ctxFn, Frame) %#ok
     setappdata(hFig, 'WaveletDesignerState', S);
 
     % --- build the initial scale sliders for the default kernel (shared helper) ---
-    bst_eigfilter_panel('BuildSliders', jParams, keys{1}, S.Lambda, @() Refresh('WaveletDesigner'));
+    panel_eigenfilter_design('BuildSliders', jParams, keys{1}, S.Lambda, @() Refresh('WaveletDesigner'));
 
     % --- wire callbacks ---
     % JSlider: StateChangedCallback fires continuously during a drag; we update the cheap
@@ -159,8 +159,8 @@ end
 % Reads the Input + Filter-kernel controls into ONE designed wavelet. This is the
 % canonical design/exploration object. It carries no tiling fields.
 function wavelet = BuildWavelet(S, ctrl)
-    wavelet = struct('Kernel', bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys), ...
-                     'Params', bst_eigfilter_panel('ReadParams', ctrl.jParams, S.Lambda), ...
+    wavelet = struct('Kernel', panel_eigenfilter_design('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys), ...
+                     'Params', panel_eigenfilter_design('ReadParams', ctrl.jParams, S.Lambda), ...
                      'Direction', SeedDirection(S, ctrl), ...
                      'Chirality', 0, 'Axis', [0 0 1]);
     if S.isDirac
@@ -324,8 +324,8 @@ function OnKernelChanged(panelName)
     ctrl = bst_get('PanelControls', panelName);
     if isempty(ctrl); return; end
     S = getappdata(ctrl.hFig, 'WaveletDesignerState');
-    key = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
-    bst_eigfilter_panel('BuildSliders', ctrl.jParams, key, S.Lambda, @() Refresh('WaveletDesigner'));
+    key = panel_eigenfilter_design('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    panel_eigenfilter_design('BuildSliders', ctrl.jParams, key, S.Lambda, @() Refresh('WaveletDesigner'));
     Refresh(panelName);
 end
 
@@ -341,11 +341,11 @@ function LoadBank(panelName, loadBank) %#ok<DEFNU>
     for k = 1:numel(ctrl.KernelKeys)
         if strcmpi(ctrl.KernelKeys{k}, wavelet.Kernel); ctrl.jKernel.setSelectedIndex(k-1); break; end
     end
-    bst_eigfilter_panel('BuildSliders', ctrl.jParams, wavelet.Kernel, S.Lambda, @() Refresh('WaveletDesigner'));
+    panel_eigenfilter_design('BuildSliders', ctrl.jParams, wavelet.Kernel, S.Lambda, @() Refresh('WaveletDesigner'));
     [S, ctrl] = GetState(panelName);
     % scale sliders: closest mode index to each saved param value
     if isfield(wavelet,'Params') && isstruct(wavelet.Params)
-        pnames = bst_eigfilter_panel('ParamNames', ctrl.jParams);
+        pnames = panel_eigenfilter_design('ParamNames', ctrl.jParams);
         for i = 1:numel(pnames)
             nm = pnames{i};
             if ~isfield(wavelet.Params, nm); continue; end

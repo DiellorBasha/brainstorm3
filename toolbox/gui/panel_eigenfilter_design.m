@@ -1,13 +1,15 @@
-function varargout = bst_eigfilter_panel(varargin)
-% BST_EIGFILTER_PANEL: Shared "Filter kernel" UI section (kernel dropdown + mode-index
-% scale sliders), reused by panel_helmholtz.
+function varargout = panel_eigenfilter_design(varargin)
+% PANEL_EIGENFILTER_DESIGN: Shared eigenfilter "design" UI section (kernel dropdown +
+% mode-index scale sliders), reused by panel_helmholtz and panel_eigenfilter_options.
+% Also renders the filter's spectral response h(lambda) (DrawResponse).
 %
 % API (dispatched via macro_method):
-%   [keys, displays] = bst_eigfilter_panel('Kernels')
-%   key   = bst_eigfilter_panel('CurrentKernel', jKernel, keys)
-%   bst_eigfilter_panel('BuildSliders', jParams, kernelKey, Lambda, onSettle)
-%   names = bst_eigfilter_panel('ParamNames', jParams)
-%   params = bst_eigfilter_panel('ReadParams', jParams, Lambda)
+%   [keys, displays] = panel_eigenfilter_design('Kernels')
+%   key   = panel_eigenfilter_design('CurrentKernel', jKernel, keys)
+%   panel_eigenfilter_design('BuildSliders', jParams, kernelKey, Lambda, onSettle)
+%   names = panel_eigenfilter_design('ParamNames', jParams)
+%   params = panel_eigenfilter_design('ReadParams', jParams, Lambda)
+%   panel_eigenfilter_design('DrawResponse', hAxes, kernelName, params, Lambda)
 %
 % The scale sliders live in mode-index space (1..K): mode k maps to eigenvalue
 % Lambda(k), then to the kernel's scale parameter (t = 1/lambda_k for heat/mexhat/dog,

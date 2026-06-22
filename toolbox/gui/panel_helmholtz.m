@@ -18,12 +18,12 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
 
     % --- Smoothing (Dirac eigenmodes) ---
     gui_component('label', jSec, 'br', 'Smoothing (Dirac eigenmodes):');
-    [keys, displays] = bst_eigfilter_panel('Kernels');
+    [keys, displays] = panel_eigenfilter_design('Kernels');
     jKernel = gui_component('combobox', jSec, 'br hfill', [], {displays}, [], [], []);
     iHeat = find(strcmp(keys,'heat'),1); if ~isempty(iHeat); jKernel.setSelectedIndex(iHeat-1); end
     jParams = gui_river([2 2], [0 2 0 2]);  jSec.add('br hfill', jParams);
     jSmoothOn = gui_component('checkbox', jSec, 'br', 'Smoothing on');
-    bst_eigfilter_panel('BuildSliders', jParams, bst_eigfilter_panel('CurrentKernel', jKernel, keys), Lambda, @() OnSmooth(panelName));
+    panel_eigenfilter_design('BuildSliders', jParams, panel_eigenfilter_design('CurrentKernel', jKernel, keys), Lambda, @() OnSmooth(panelName));
     java_setcb(jKernel,   'ActionPerformedCallback', @(h,e) OnKernel(panelName));
     java_setcb(jSmoothOn, 'ActionPerformedCallback', @(h,e) OnSmooth(panelName));
 
@@ -95,14 +95,14 @@ function OnDeriv(panelName, order) %#ok<DEFNU>
 end
 function OnKernel(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    key = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
-    bst_eigfilter_panel('BuildSliders', ctrl.jParams, key, ctrl.Lambda, @() OnSmooth(panelName));
+    key = panel_eigenfilter_design('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    panel_eigenfilter_design('BuildSliders', ctrl.jParams, key, ctrl.Lambda, @() OnSmooth(panelName));
     OnSmooth(panelName);
 end
 function OnSmooth(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    name   = bst_eigfilter_panel('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
-    params = bst_eigfilter_panel('ReadParams', ctrl.jParams, ctrl.Lambda);
+    name   = panel_eigenfilter_design('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
+    params = panel_eigenfilter_design('ReadParams', ctrl.jParams, ctrl.Lambda);
     view_helmholtz('SetSmoothing', ctrl.hFig, ctrl.jSmoothOn.isSelected(), name, params);
 end
 function OnGate(panelName) %#ok<DEFNU>
