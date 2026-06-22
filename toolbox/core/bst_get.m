@@ -1377,6 +1377,102 @@ switch contextName
             end
         end
 
+%% ==== EIGEN FILE FOR SURFACE (find by spec, cache-only) ====
+    % Usage : [sSubject, iSubject, iSurface, iEigen] = bst_get('EigenFileForSurface', SurfaceFile, Variant, nModes, Tau)
+    %   Best-match Eigen child of SurfaceFile, resolved from the cache (no file load):
+    %   Variant equal, entry nModes >= requested (when given), and (Dirac-type) Tau equal
+    %   (when given). Among matches, returns the one with the smallest sufficient nModes.
+    case 'EigenFileForSurface'
+        if (nargin < 3); error('Invalid call to bst_get().'); end
+        [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', varargin{2});
+        if isempty(sSubject) || isempty(iSurface) ...
+                || ~isfield(sSubject.Surface(iSurface), 'Eigen') || isempty(sSubject.Surface(iSurface).Eigen)
+            return;
+        end
+        Variant   = varargin{3};
+        nModesReq = []; if (nargin >= 4); nModesReq = varargin{4}; end
+        TauReq    = []; if (nargin >= 5); TauReq    = varargin{5}; end
+        isDiracType = any(strcmpi(Variant, {'Dirac','Dirac-Face','Hodge-Face'}));
+        nodes   = sSubject.Surface(iSurface).Eigen;
+        bestIdx = []; bestN = Inf;
+        for iNode = 1:length(nodes)
+            if ~isfield(nodes(iNode),'Variant') || ~strcmpi(nodes(iNode).Variant, Variant); continue; end
+            nk = []; if isfield(nodes(iNode),'nModes'); nk = nodes(iNode).nModes; end
+            if isempty(nk); continue; end
+            if ~isempty(nModesReq) && (nk < nModesReq); continue; end
+            if isDiracType && ~isempty(TauReq)
+                tk = []; if isfield(nodes(iNode),'Tau'); tk = nodes(iNode).Tau; end
+                if isempty(tk) || (abs(tk - TauReq) > 1e-12); continue; end
+            end
+            if (nk < bestN); bestN = nk; bestIdx = iNode; end
+        end
+        if ~isempty(bestIdx)
+            argout1 = sSubject; argout2 = iSubject; argout3 = iSurface; argout4 = bestIdx;
+        end
+
+%% ==== OPERATOR FILE FOR SURFACE (find by spec, cache-only) ====
+    % Usage : [sSubject, iSubject, iSurface, iOperator] = bst_get('OperatorFileForSurface', SurfaceFile, Variant, Tau)
+    %   First Operator child of SurfaceFile with Variant equal and (Dirac-type) Tau equal.
+    case 'OperatorFileForSurface'
+        if (nargin < 3); error('Invalid call to bst_get().'); end
+        [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', varargin{2});
+        if isempty(sSubject) || isempty(iSurface) ...
+                || ~isfield(sSubject.Surface(iSurface), 'Operator') || isempty(sSubject.Surface(iSurface).Operator)
+            return;
+        end
+        Variant = varargin{3};
+        TauReq  = []; if (nargin >= 4); TauReq = varargin{4}; end
+        isDiracType = any(strcmpi(Variant, {'Dirac','Dirac-Face'}));
+        nodes = sSubject.Surface(iSurface).Operator;
+        for iNode = 1:length(nodes)
+            if ~isfield(nodes(iNode),'Variant') || ~strcmpi(nodes(iNode).Variant, Variant); continue; end
+            if isDiracType && ~isempty(TauReq)
+                tk = []; if isfield(nodes(iNode),'Tau'); tk = nodes(iNode).Tau; end
+                if isempty(tk) || (abs(tk - TauReq) > 1e-12); continue; end
+            end
+            argout1 = sSubject; argout2 = iSubject; argout3 = iSurface; argout4 = iNode;
+            return;
+        end
+
+%% ==== MANIFOLD FILE FOR SURFACE (find by spec, cache-only) ====
+    % Usage : [sSubject, iSubject, iSurface, iManifold] = bst_get('ManifoldFileForSurface', SurfaceFile, Gauge)
+    case 'ManifoldFileForSurface'
+        if (nargin < 3); error('Invalid call to bst_get().'); end
+        [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', varargin{2});
+        if isempty(sSubject) || isempty(iSurface) ...
+                || ~isfield(sSubject.Surface(iSurface), 'Manifold') || isempty(sSubject.Surface(iSurface).Manifold)
+            return;
+        end
+        GaugeReq = varargin{3};
+        nodes = sSubject.Surface(iSurface).Manifold;
+        for iNode = 1:length(nodes)
+            gk = ''; if isfield(nodes(iNode),'Gauge'); gk = nodes(iNode).Gauge; end
+            if ~isempty(gk) && strcmpi(gk, GaugeReq)
+                argout1 = sSubject; argout2 = iSubject; argout3 = iSurface; argout4 = iNode;
+                return;
+            end
+        end
+
+%% ==== EIGEN FILES FOR OPERATOR (dependents, for cascade delete) ====
+    % Usage : [iEigenList, iSurface, sSubject, iSubject] = bst_get('EigenFilesForOperator', SurfaceFile, OperatorFile)
+    %   List the Eigen children of SurfaceFile whose OperatorFile references OperatorFile.
+    case 'EigenFilesForOperator'
+        if (nargin < 3); error('Invalid call to bst_get().'); end
+        [sSubject, iSubject, iSurface] = bst_get('SurfaceFile', varargin{2});
+        iList = [];
+        if ~isempty(sSubject) && ~isempty(iSurface) ...
+                && isfield(sSubject.Surface(iSurface), 'Eigen') && ~isempty(sSubject.Surface(iSurface).Eigen)
+            opRef = file_short(varargin{3});
+            nodes = sSubject.Surface(iSurface).Eigen;
+            for iNode = 1:length(nodes)
+                if isfield(nodes(iNode),'OperatorFile') && ~isempty(nodes(iNode).OperatorFile) ...
+                        && file_compare(file_short(nodes(iNode).OperatorFile), opRef)
+                    iList(end+1) = iNode; %#ok<AGROW>
+                end
+            end
+        end
+        argout1 = iList; argout2 = iSurface; argout3 = sSubject; argout4 = iSubject;
+
     case 'WaveletFile'
         % No protocol in database
         if isempty(GlobalData) || isempty(GlobalData.DataBase) || isempty(GlobalData.DataBase.iProtocol) || (GlobalData.DataBase.iProtocol == 0)
