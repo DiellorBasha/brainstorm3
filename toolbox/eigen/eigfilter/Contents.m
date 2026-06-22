@@ -25,9 +25,9 @@
 %   dog           - g = exp(-t1*lambda) - exp(-t2*lambda)  (band-pass)
 %
 % Consumed by the file-based eigen filter path: bst_eigen 'filter' -> bst_eigenfilter.
-% NOTE: the legacy scalar-LBO eigenmode cluster (bst_eigenmodes_* + process_eigenmodes_*,
-% incl. bst_eigenmodes_filter_gain) and the Dirac-wavelet cluster were retired to
-% dev/experimental; bst_eigenmode_prior remains only for the deprecated bst_inverse_eigenmodes
-% inverses. The live source mapping is bst_dirac / bst_inverse_dirac, which do not use this library.
+% NOTE: the legacy scalar-LBO eigenmode clusters (bst_eigenmodes_*/process_eigenmodes_*, the
+% eigenmode-inverse cluster incl. bst_eigenmode_prior, and the Dirac-wavelet cluster) were all
+% retired to dev/experimental. The live source mapping is bst_dirac / bst_inverse_dirac, which
+% do not use this library.
 %
 % Authors: Diellor Basha, 2026

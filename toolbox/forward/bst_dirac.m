@@ -21,7 +21,7 @@ function varargout = bst_dirac(HeadModel, varargin)
 %         L~_h = Psi_h' * B_h * Phi_h      [nCh x K],   B_h = kron(Mass_h, I4)
 %     The hemispheres are stacked into a composed head model
 %         Gain = [L~_L, L~_R]              [nCh x 2K]
-%     consumed unchanged by bst_inverse_eigenmodes.
+%     consumed unchanged by bst_inverse_dirac.
 %
 %     RECONSTRUCT is the inverse spectral transform: since Phi is B-orthonormal,
 %     a coefficient row c [1 x 2K] maps back to a cortical field by f_h = Phi_h * c_h,
@@ -53,7 +53,7 @@ function varargout = bst_dirac(HeadModel, varargin)
 %     'Tau'    : relative-Dirac curvature weighting in [0,1] (default 0.5),
 %                forwarded to tess_eigen when a node must be created.
 %
-% SEE ALSO: tess_eigen, tess_operators, bst_inverse_eigenmodes, view_leadfield_vectors
+% SEE ALSO: tess_eigen, tess_operators, bst_inverse_dirac, view_leadfield_vectors
 %
 % Authors: Diellor Basha, 2026
 

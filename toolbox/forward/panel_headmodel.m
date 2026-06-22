@@ -485,11 +485,6 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
     end
     isOpenMEEG = any(strcmpi(allMethods, 'openmeeg'));
     isDuneuro = any(strcmpi(allMethods, 'duneuro'));
-    % DEPRECATED ("Cortex surface harmonics" / scalar LBO eigenmode leadfield): the GUI
-    % option has been removed (bst_dirac is now the canonical eigenmode forward method).
-    % This isEigenSpace path is unreachable from the panel and only triggers if a caller
-    % passes sMethod.SourceCompression='eigenmode'. Scheduled for deletion; do not extend.
-    isEigenSpace = isfield(sMethod, 'SourceCompression') && strcmpi(sMethod.SourceCompression, 'eigenmode');
     % "Dirac Transform": compose the base unconstrained surface leadfield into the
     % Dirac eigenbasis (bst_dirac) on an in-memory base, saving only the Dirac node.
     isDiracTransform = isfield(sMethod, 'DiracTransform') && ~isempty(sMethod.DiracTransform) && sMethod.DiracTransform;
@@ -516,14 +511,6 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
             errMessage = 'No cortex surface available for this subject.';
             continue;
         end
-        % Eigenmode source space requires precomputed eigenmodes on the cortex
-        if isEigenSpace
-            [~, isEig] = in_tess_eigenmodes(sSubject.Surface(sSubject.iCortex).FileName);
-            if ~isEig
-                errMessage = 'No eigenmodes on the cortex surface. Compute eigenmodes first.';
-                continue;
-            end
-        end
         % Load channel description
         ChannelFile = file_fullpath(sStudy.Channel.FileName);
         ChannelMat = in_bst_channel(ChannelFile);
@@ -532,10 +519,10 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
         % Override fields with input structure
         OPTIONS = struct_copy_fields(OPTIONS, sMethod, 1);
         % Output folder: folder of the channel file
-        if sMethod.SaveFile && ~isEigenSpace && ~isDiracTransform
+        if sMethod.SaveFile && ~isDiracTransform
             OPTIONS.HeadModelFile = bst_fileparts(ChannelFile);
         else
-            OPTIONS.HeadModelFile = '';   % eigenspace / Dirac: base computed in-memory; only the composed node is saved
+            OPTIONS.HeadModelFile = '';   % Dirac: base computed in-memory; only the composed node is saved
         end
         
         % ===== Fields Related to Sensor Information =====
@@ -843,44 +830,6 @@ function [OutputFiles, errMessage] = ComputeHeadModel(iStudies, sMethod) %#ok<DE
             % Save only the Dirac node
             StudyDir = bst_fileparts(file_fullpath(sStudy.FileName));
             OutputFile = bst_process('GetNewFilename', StudyDir, nodeTag);
-            bst_save(OutputFile, CompHM, 'v7');
-            newHeadModel = db_template('HeadModel');
-            newHeadModel.FileName      = file_short(OutputFile);
-            newHeadModel.Comment       = CompHM.Comment;
-            newHeadModel.HeadModelType = 'surface';
-            newHeadModel.MEGMethod     = OPTIONS.MEGMethod;
-            newHeadModel.EEGMethod     = OPTIONS.EEGMethod;
-            newHeadModel.ECOGMethod    = OPTIONS.ECOGMethod;
-            newHeadModel.SEEGMethod    = OPTIONS.SEEGMethod;
-            newHeadModel.NIRSMethod    = OPTIONS.NIRSMethod;
-            iHeadModel = length(sStudy.HeadModel) + 1;
-            sStudy.HeadModel(iHeadModel) = newHeadModel;
-            sStudy.iHeadModel = iHeadModel;
-            bst_set('Study', iStudy, sStudy);
-            panel_protocols('UpdateNode', 'Study', iStudy);
-            OutputFiles{end+1} = OutputFile;
-            continue;     % skip the normal base-node save block
-        end
-
-        % ===== EIGENMODE COMPOSITION ("Cortex surface harmonics") =====
-        if isEigenSpace
-            baseHM = OPTIONS.HeadModelMat;            % in-memory base (no file written)
-            [Eig, isEigBase] = in_tess_eigenmodes(baseHM.SurfaceFile);
-            if ~isEigBase
-                errMessage = 'No eigenmodes on the cortex surface. Compute eigenmodes first.';
-                continue;
-            end
-            nModesReq = 0;
-            if isfield(sMethod, 'nModes') && ~isempty(sMethod.nModes)
-                nModesReq = sMethod.nModes;
-            end
-            CompHM = bst_eigenmode_leadfield(baseHM, Eig, 'nModes', nModesReq);
-            CompHM.Comment = OPTIONS.Comment;         % from sMethod.Comment (GUI dialog text or caller-supplied), e.g. "<base> | harmonic"
-            CompHM = bst_history('add', CompHM, 'eigenmode_leadfield', ...
-                sprintf('Eigenmode leadfield (%d modes) composed in Compute head model', CompHM.nModes));
-            % Save only the harmonic node
-            StudyDir = bst_fileparts(file_fullpath(sStudy.FileName));
-            OutputFile = bst_process('GetNewFilename', StudyDir, 'headmodel_eigenmode');
             bst_save(OutputFile, CompHM, 'v7');
             newHeadModel = db_template('HeadModel');
             newHeadModel.FileName      = file_short(OutputFile);
