@@ -62,6 +62,27 @@ function names = ParamNames(jParams) %#ok<DEFNU>
     if isempty(s); names = {}; else; names = strsplit(char(s), ','); end
 end
 
+function DrawResponse(hAxes, kernelName, params, Lambda) %#ok<DEFNU>
+% Plot the filter's spectral response h(lambda) (gain vs mode index) into hAxes.
+    Lambda = double(Lambda(:));
+    if isempty(Lambda)
+        cla(hAxes);
+        return;
+    end
+    g = bst_eigfilter_kernel(kernelName, params);
+    if iscell(g)            % sliders yield single-scale params; guard the bank case
+        g = g{1};
+    end
+    h = bst_eigfilter_evaluate(g, Lambda);
+    k = (1:numel(Lambda))';
+    plot(hAxes, k, h, 'LineWidth', 2);
+    set(hAxes, 'XGrid', 'on', 'YGrid', 'on');
+    xlabel(hAxes, 'Mode index k');
+    ylabel(hAxes, 'Gain h(\lambda)');
+    title(hAxes, sprintf('Spectral response: %s', kernelName), 'Interpreter', 'none');
+    xlim(hAxes, [1, max(2, numel(Lambda))]);
+end
+
 function params = ReadParams(jParams, Lambda) %#ok<DEFNU>
     params = struct();
     K = numel(Lambda);
