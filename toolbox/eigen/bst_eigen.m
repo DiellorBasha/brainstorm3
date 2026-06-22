@@ -105,6 +105,7 @@ end
 
 % ===== LOOP ON FILES =====
 bst_progress('start', 'Eigen analysis', 'Analyzing in the eigen basis...', 0, length(Data));
+try
 for iData = 1:length(Data)
     % ===== GET INITIAL DATA FILE =====
     isFile = ischar(Data{iData});
@@ -149,7 +150,7 @@ for iData = 1:length(Data)
             otherwise
                 Messages = ['Unsupported data type for eigen analysis: ' DataType];
                 isError  = 1;
-                return;
+                break;
         end
         % Restrict to the requested time window
         if ~isempty(OPTIONS.TimeWindow) && ~isempty(TimeVector)
@@ -179,7 +180,7 @@ for iData = 1:length(Data)
     if isempty(F)
         Messages = 'bst_eigen: empty source-mapped data; nothing to analyze.';
         isError  = 1;
-        return;
+        break;
     end
 
     % ===== COMPUTE TRANSFORM (dispatch) =====
@@ -189,7 +190,7 @@ for iData = 1:length(Data)
         case 'spectrum'
             % Windowed eigenspectrum (the bst_psd analogue), computed SEPARATELY per hemisphere.
             [Result, Messages, isError] = ComputeEigenspectrum(F, EigenMat, OperatorMat, sfreq, OPTIONS);
-            if isError, return; end
+            if isError, break; end
         case 'project'
             % TODO: Coef = Phi' * B * F  (manifold Fourier transform onto the eigenbasis).
         case 'filter'
@@ -197,7 +198,7 @@ for iData = 1:length(Data)
         otherwise
             Messages = ['Unknown eigen method: ' OPTIONS.Method];
             isError  = 1;
-            return;
+            break;
     end
 
     % ===== POST-PROCESS -- PLACEHOLDER =====
@@ -207,6 +208,11 @@ for iData = 1:length(Data)
     SaveFile(iTargetStudy, InitFile, DataType, Result, OPTIONS, EigenMat, TimeVector, SurfaceFile);
     bst_progress('inc', 1);
 end
+catch ME
+    bst_progress('stop');
+    rethrow(ME);
+end
+bst_progress('stop');
 
 
 %% ===== POST-PROCESS (placeholder) =====
