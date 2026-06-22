@@ -30,7 +30,7 @@ function Tiles = bst_filterbank_tiles(wavelet, opts)
 %           tile is set so the tile CENTERS (lambda of peak/cutoff) span LambdaRange.
 %           When N==1 the wavelet's own scale param is kept unchanged.
 %
-% SEE ALSO: bst_eigfilter_kernel, bst_dirac_eigenmodes_filter, panel_filter_designer
+% SEE ALSO: bst_eigfilter_kernel, bst_eigfilter_evaluate
 %
 % Authors: Diellor Basha, 2026
 

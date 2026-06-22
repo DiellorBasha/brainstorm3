@@ -1,6 +1,6 @@
 function varargout = bst_eigfilter_panel(varargin)
 % BST_EIGFILTER_PANEL: Shared "Filter kernel" UI section (kernel dropdown + mode-index
-% scale sliders), reused by panel_wavelet_designer and panel_helmholtz.
+% scale sliders), reused by panel_helmholtz.
 %
 % API (dispatched via macro_method):
 %   [keys, displays] = bst_eigfilter_panel('Kernels')

@@ -2570,8 +2570,6 @@ switch (lower(action))
                 if (length(bstNodes) == 1)
                     % === VIEW ===
                     gui_component('MenuItem', jPopup, [], 'View', IconLoader.ICON_MATLAB, [], @(h,ev)bst_call(@EigenView_Callback, filenameFull));
-                    % === DESIGN WAVELET ===
-                    gui_component('MenuItem', jPopup, [], 'Design wavelet...', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_wavelet_designer, filenameRelative));
                     % === DELETE ===
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
@@ -2582,9 +2580,7 @@ switch (lower(action))
 %% ===== POPUP: WAVELET =====
             case 'wavelet'
                 if (length(bstNodes) == 1)
-                    % === EDIT / RE-OPEN ===
-                    gui_component('MenuItem', jPopup, [], 'Edit / re-open', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_wavelet_designer, filenameRelative));
-                    % === DELETE ===
+                    % === DELETE ===  (designer retired to dev/experimental; existing nodes stay deletable)
                     if ~bst_get('ReadOnly')
                         AddSeparator(jPopup);
                         gui_component('MenuItem', jPopup, [], 'Delete', IconLoader.ICON_DELETE, [], @(h,ev)bst_call(@WaveletDelete_Callback, filenameRelative));
