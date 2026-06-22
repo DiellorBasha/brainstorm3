@@ -178,7 +178,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     end
 
     % --- load operator pencil (per-hemisphere cells) ---
-    Op = load(file_fullpath(OperatorFile));
+    Op = in_bst_operator(OperatorFile);
     if ~isfield(Op,'Operator') || ~isfield(Op,'Mass') || ~isfield(Op,'GlobalVertices')
         error('tess_eigen:badOperatorFile', ...
             'Operator file is missing Operator/Mass/GlobalVertices: %s', OperatorFile);
@@ -412,7 +412,7 @@ function EigenMat = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDira
             continue;
         end
         try
-            E = load(file_fullpath(nodes(k).FileName));
+            E = in_bst_eigen(nodes(k).FileName);
         catch
             continue;   % unreadable / missing entry
         end

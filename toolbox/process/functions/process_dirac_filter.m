@@ -119,7 +119,7 @@ function sInput = Run(sProcess, sInput) %#ok<DEFNU>
     % ----- Dirac eigenbasis + operator mass (found-or-created) -----
     bst_progress('text', 'Loading Dirac eigenbasis...');
     EigenMat = tess_eigen(SurfaceFile, 'Dirac');
-    OpMat    = load(file_fullpath(EigenMat.OperatorFile));
+    OpMat    = in_bst_operator(EigenMat.OperatorFile);
     MassCell = OpMat.Mass;
     nVert = double(max(cellfun(@(x) max(x(:)), EigenMat.GlobalVertices)));
     if size(sInput.A,1) ~= 3*nVert

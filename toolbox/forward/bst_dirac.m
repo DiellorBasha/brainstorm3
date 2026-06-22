@@ -232,7 +232,7 @@ function EigenMat = local_eigen_for_reconstruct(CompHM)
     EigenMat = [];
     if isfield(CompHM,'DiracEigenFile') && ~isempty(CompHM.DiracEigenFile)
         try
-            EigenMat = load(file_fullpath(CompHM.DiracEigenFile));
+            EigenMat = in_bst_eigen(CompHM.DiracEigenFile);
         catch
             EigenMat = [];
         end
@@ -278,7 +278,7 @@ function [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(SurfaceFile,
         error('bst_dirac:badBasis', ...
             'Dirac eigen node has no OperatorFile reference; cannot load the mass matrix.');
     end
-    OperatorMat = load(file_fullpath(EigenMat.OperatorFile));
+    OperatorMat = in_bst_operator(EigenMat.OperatorFile);
     if ~isfield(OperatorMat,'Mass') || isempty(OperatorMat.Mass) || numel(OperatorMat.Mass) ~= 2
         error('bst_dirac:badBasis', ...
             'Operator node is missing a 1x2 Mass; cannot project: %s', EigenMat.OperatorFile);
@@ -307,7 +307,7 @@ function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau
             continue;
         end
         try
-            E = load(file_fullpath(nodes(k).FileName));
+            E = in_bst_eigen(nodes(k).FileName);
         catch
             continue;   % unreadable / missing entry
         end
