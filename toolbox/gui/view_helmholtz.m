@@ -54,7 +54,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     Op = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
     bst_progress('text', 'Loading Dirac eigenbasis...');
     EigenMat = tess_eigen(SurfaceFile, 'Dirac');
-    OpMat    = load(file_fullpath(EigenMat.OperatorFile));
+    OpMat    = in_bst_operator(EigenMat.OperatorFile);
     Lambda   = double(EigenMat.Lambda{1}(:));
     bst_progress('stop');
 
@@ -320,7 +320,7 @@ function Op = i_op(SurfaceFile, variant)
     Op = [];
     if ~isempty(iSurf) && isfield(sSubject.Surface(iSurf),'Operator')
         for k = 1:numel(sSubject.Surface(iSurf).Operator)
-            S = load(file_fullpath(sSubject.Surface(iSurf).Operator(k).FileName));
+            S = in_bst_operator(sSubject.Surface(iSurf).Operator(k).FileName);
             if strcmpi(S.Variant, variant); Op = S; break; end
         end
     end

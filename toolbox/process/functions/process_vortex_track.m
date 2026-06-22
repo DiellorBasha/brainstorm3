@@ -165,7 +165,7 @@ function Op = i_op(SurfaceFile, variant)
     Op = [];
     if ~isempty(iSurf) && isfield(sSubject.Surface(iSurf),'Operator')
         for k = 1:numel(sSubject.Surface(iSurf).Operator)
-            S = load(file_fullpath(sSubject.Surface(iSurf).Operator(k).FileName));
+            S = in_bst_operator(sSubject.Surface(iSurf).Operator(k).FileName);
             if strcmpi(S.Variant, variant), Op = S; break; end
         end
     end

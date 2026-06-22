@@ -18,7 +18,7 @@ function hFig = view_wavelet_designer(NodeFile)
     % --- resolve the node: eigen vs filterbank ---
     [~,~,~,iE] = bst_get('EigenFile', NodeFile);
     if ~isempty(iE)
-        EigenMat  = load(file_fullpath(NodeFile));
+        EigenMat  = in_bst_eigen(NodeFile);
         EigenFile = NodeFile;  loadBank = [];
     else
         [~,~,~,iFb] = bst_get('WaveletFile', NodeFile);
@@ -28,7 +28,7 @@ function hFig = view_wavelet_designer(NodeFile)
         end
         loadBank  = load(file_fullpath(NodeFile));
         EigenFile = loadBank.ParentEigen;
-        EigenMat  = load(file_fullpath(EigenFile));
+        EigenMat  = in_bst_eigen(EigenFile);
     end
     SurfaceFile = EigenMat.ParentSurface;
 

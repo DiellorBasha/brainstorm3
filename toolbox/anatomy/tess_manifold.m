@@ -93,7 +93,7 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
                 % Already has a manifold node — LOAD and return it (no recompute).
                 % tess_manifold is the single find-or-load-or-create entry point,
                 % so it always hands back the complete ManifoldMat.
-                ManifoldMat = load(file_fullpath(sSubject.Surface(iSurface).Manifold(1).FileName));
+                ManifoldMat = in_bst_manifold(sSubject.Surface(iSurface).Manifold(1).FileName);
                 return;
             end
         end

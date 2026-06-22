@@ -489,11 +489,11 @@ function basis = LoadBasis(hFig)
         error(['This result does not reference a Dirac eigenbasis (DiracEigenFile);' 10 ...
                'the dSPM (vertex) spectrum needs it. Recompute the Dirac sources.']);
     end
-    E = load(file_fullpath(K.DiracEigenFile));
+    E = in_bst_eigen(K.DiracEigenFile);
     if ~isfield(E, 'Phi') || isempty(E.Phi) || ~isfield(E, 'OperatorFile')
         error('Dirac eigen node is missing Phi/OperatorFile.');
     end
-    O = load(file_fullpath(E.OperatorFile));
+    O = in_bst_operator(E.OperatorFile);
     if ~isfield(O, 'Mass') || numel(O.Mass) ~= 2
         error('Dirac operator node is missing the 1x2 Mass (B).');
     end
