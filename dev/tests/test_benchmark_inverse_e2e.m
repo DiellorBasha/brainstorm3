@@ -4,7 +4,7 @@ function test_benchmark_inverse_e2e
 % [nVert x nTime] vertex estimate. Skips cleanly otherwise.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 sStudies = bst_get('ProtocolStudies');

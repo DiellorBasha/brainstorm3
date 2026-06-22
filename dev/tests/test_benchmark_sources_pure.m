@@ -3,7 +3,7 @@ function test_benchmark_sources_pure
 % synthetic surface; shapes; seeding reproducibility; spatial profiles.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 % Synthetic surface: 6x6 grid of vertices on a plane (deterministic), 4-neighbour conn

@@ -2,7 +2,7 @@ function test_benchmark_report_pure
 % Verify aggregation: median/IQR/bootstrap CI + paired differences.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 % Synthetic long-format rows: 2 methods, 1 metric, 6 realizations

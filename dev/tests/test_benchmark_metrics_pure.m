@@ -2,7 +2,7 @@ function test_benchmark_metrics_pure
 % Verify the metric suite on synthetic GT vs estimate.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 % 4 vertices on a line, 10 mm apart

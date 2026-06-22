@@ -3,7 +3,7 @@ function test_benchmark_esi_e2e
 % and confirm the report struct + CSV are produced. Skips cleanly without a suitable protocol.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 outDir = fullfile(repoRoot, 'dev', 'benchmarks', 'smoke');

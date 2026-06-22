@@ -2,7 +2,7 @@ function test_benchmark_simulate_pure
 % Verify forward projection + colored-noise addition at a target SNR.
 thisDir  = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(fileparts(thisDir));
-addpath(repoRoot);
+addpath(repoRoot, fullfile(repoRoot,'dev','benchmarks'));
 if ~brainstorm('status'); brainstorm nogui; end
 
 nCh = 20; nV = 8; nTime = 50;
