@@ -67,7 +67,7 @@ function Out = bst_dirac_filter(SurfaceFile, iVertex, Direction, Filter, Chirali
     if (nargin < 4), Filter    = []; end
 
     % --- Dirac eigenbasis + mass (found-or-loaded) ---
-    Eig = tess_eigen(SurfaceFile, 'Dirac', 'K', nModes, 'Tau', Tau);
+    Eig = tess_eigen(SurfaceFile, 'Dirac', 'nModes', nModes, 'Tau', Tau);
     Op  = in_bst_operator(Eig.OperatorFile);
 
     % --- check the seed vertex is in the eigen support ---

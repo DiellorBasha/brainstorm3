@@ -3,7 +3,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %
 % USAGE:  EigenMat = tess_eigen(SurfaceFile, OperatorName)
 %         EigenMat = tess_eigen(SurfaceFile, OperatorName, ...
-%                               'K',400, 'Tau',0.5, 'NoSave',false, 'ForceRecompute',false)
+%                               'nModes',400, 'Tau',0.5, 'NoSave',false, 'ForceRecompute',false)
 %
 % DESCRIPTION:
 %     Finds (or creates) the operator node of the requested variant under the
@@ -32,7 +32,8 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %     (creating a child node under the surface).
 %
 % OPTIONS:
-%     'K'              : number of modes to keep per hemisphere (default 400)
+%     'nModes'         : number of modes to keep per hemisphere (default 400).
+%                        ('K' is accepted as a legacy alias.)
 %     'Tau'            : scalar in [0,1] (default 0.5) — relative-Dirac mixing
 %                        parameter, forwarded to operator creation (Dirac only)
 %     'NoSave'         : true/false (default false) — compute but do not write
@@ -79,7 +80,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     ForceRecompute = false;  % when false, reuse a cached eigen node; see help
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
-            case 'k',              K              = varargin{i+1};
+            case {'k','nmodes'},   K              = varargin{i+1};
             case 'tau',            Tau            = varargin{i+1};
             case 'nosave',         NoSave         = logical(varargin{i+1});
             case 'forcerecompute', ForceRecompute = logical(varargin{i+1});
@@ -188,7 +189,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     nxrVer = '';
     try, nxrVer = nxr_compute('version'); catch, end  %#ok<CTCH>
 
-    prov = struct('Backend','nxr', 'NxrVersion',nxrVer, 'Variant',Variant, 'K',K);
+    prov = struct('Backend','nxr', 'NxrVersion',nxrVer, 'Variant',Variant, 'nModes',K);
     if isDirac
         prov.Tau = Tau;
     end
@@ -296,7 +297,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     EigenMat.ParentSurface  = SurfaceFile;
     EigenMat.Phi            = Phi;             % 1x2 cell of eigenvector matrices
     EigenMat.Lambda         = Lambda;          % 1x2 cell of eigenvalue vectors [K x 1]
-    EigenMat.K              = K;
+    EigenMat.nModes         = K;
     EigenMat.GlobalVertices = GlobalVertices;  % 1x2 cell of global vertex indices
     EigenMat.GlobalFaces    = GlobalFaces;     % 1x2 cell of global face indices (face-domain variants)
     EigenMat.Provenance     = prov;
@@ -417,7 +418,7 @@ function EigenMat = local_find_eigen(sSubject, iSurface, Variant, K, Tau, isDira
             continue;   % unreadable / missing entry
         end
         if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant);  continue; end
-        if ~isfield(E,'K') || isempty(E.K) || E.K < K;             continue; end
+        if ~isfield(E,'nModes') || isempty(E.nModes) || E.nModes < K; continue; end
         if isDirac && abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;  continue; end
         % The basis must actually carry usable eigen data.
         if ~isfield(E,'Phi') || isempty(E.Phi) || ~isfield(E,'Lambda') || isempty(E.Lambda)
@@ -432,8 +433,8 @@ end
 function E = local_truncate_eigen(E, K)
 % Truncate a (possibly larger) cached eigenbasis to its first K modes per
 % hemisphere. The basis is nested (ascending eigenvalues, B-orthonormal), so the
-% leading K columns are exactly the K-mode basis. No-op when E.K == K.
-    if ~isfield(E,'K') || isempty(E.K) || E.K <= K
+% leading K columns are exactly the K-mode basis. No-op when E.nModes == K.
+    if ~isfield(E,'nModes') || isempty(E.nModes) || E.nModes <= K
         return;
     end
     for hh = 1:numel(E.Phi)
@@ -445,7 +446,7 @@ function E = local_truncate_eigen(E, K)
             E.Lambda{hh} = E.Lambda{hh}(1:K);
         end
     end
-    E.K = K;
+    E.nModes = K;
 end
 
 % ----------------------------------------------------------------------------

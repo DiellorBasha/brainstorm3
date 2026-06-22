@@ -123,7 +123,7 @@ function varargout = bst_dirac(HeadModel, varargin)
     [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(HeadModel.SurfaceFile, nModes, Tau, Variant);
 
     % Truncate to nModes (a reused node may carry more modes than requested).
-    K = min(nModes, EigenMat.K);
+    K = min(nModes, EigenMat.nModes);
     Tau = local_eigen_tau(EigenMat, Tau);
 
     Lblk = cell(1,2); vblk = cell(1,2); hblk = cell(1,2); gblk = cell(1,2);
@@ -265,7 +265,7 @@ function [EigenMat, OperatorMat, EigenFile] = local_get_dirac_eigen(SurfaceFile,
     if nargin < 4 || isempty(Variant), Variant = 'Dirac'; end
     [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant);
     if isempty(EigenMat)
-        EigenMat = tess_eigen(SurfaceFile, Variant, 'K', nModes, 'Tau', Tau);
+        EigenMat = tess_eigen(SurfaceFile, Variant, 'nModes', nModes, 'Tau', Tau);
         % Re-find to recover the saved node's filename for provenance stamping.
         [found, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau, Variant);
         if ~isempty(found); EigenMat = found; end
@@ -312,7 +312,7 @@ function [EigenMat, EigenFile] = local_find_dirac_eigen(SurfaceFile, nModes, Tau
             continue;   % unreadable / missing entry
         end
         if ~isfield(E,'Variant') || ~strcmpi(E.Variant, Variant); continue; end
-        if ~isfield(E,'K') || isempty(E.K) || E.K < nModes;       continue; end
+        if ~isfield(E,'nModes') || isempty(E.nModes) || E.nModes < nModes; continue; end
         if abs(local_eigen_tau(E, NaN) - Tau) > 1e-12;            continue; end
         EigenMat  = E;
         EigenFile = nodes(k).FileName;

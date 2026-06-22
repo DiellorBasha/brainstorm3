@@ -62,10 +62,16 @@ if (nargin < 2)
         error('Not a valid eigen node (no Phi field): %s', file_short(EigenFile));
     end
 else
-    % Read the requested fields only
+    % Read the requested fields only. If nModes is requested, also read the
+    % legacy field K so the shim below can map it (mirrors in_bst_results, which
+    % reads companion fields when one is requested).
     FieldsToRead = varargin;
+    LoadFields   = FieldsToRead;
+    if ismember('nModes', FieldsToRead) && ~ismember('K', LoadFields)
+        LoadFields{end+1} = 'K';
+    end
     warning off MATLAB:load:variableNotFound
-    EigenMat = load(EigenFile, FieldsToRead{:});
+    EigenMat = load(EigenFile, LoadFields{:});
     warning on MATLAB:load:variableNotFound
     % Ensure every requested field exists (empty if absent on disk)
     for i = 1:numel(FieldsToRead)
@@ -73,4 +79,11 @@ else
             EigenMat.(FieldsToRead{i}) = [];
         end
     end
+end
+
+% Backward-compat shim: legacy eigen_ files store the per-hemisphere mode count
+% as 'K'; the canonical field is now 'nModes'. Map it on read so old files load
+% unchanged (no file rewrite needed).
+if (~isfield(EigenMat,'nModes') || isempty(EigenMat.nModes)) && isfield(EigenMat,'K') && ~isempty(EigenMat.K)
+    EigenMat.nModes = EigenMat.K;
 end

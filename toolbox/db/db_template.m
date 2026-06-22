@@ -150,8 +150,8 @@ switch lower(structureName)
               'OperatorFile',   '', ...   % path ref to the operator node solved
               'Variant',        '', ...   % 'Laplace-Beltrami' | 'Connection Laplacian' | 'Dirac' | 'Dirac-Face'
               'Phi',            [], ...   % 1x2 per-hemi cell: eigenvectors
-              'Lambda',         [], ...   % 1x2 per-hemi cell: eigenvalues [K x 1]
-              'K',              [], ...   % modes requested
+              'Lambda',         [], ...   % 1x2 per-hemi cell: eigenvalues [nModes x 1]
+              'nModes',         [], ...   % modes per hemisphere requested (legacy field name: K)
               'GlobalVertices', [], ...   % 1x2 per-hemi cell: scatter maps
               'GlobalFaces',    [], ...   % face-domain variants ('Dirac-Face'): 1x2 cell of global FACE indices; [] otherwise
               'Provenance',     []);
