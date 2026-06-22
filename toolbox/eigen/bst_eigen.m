@@ -44,9 +44,12 @@ function [OutputFiles, Messages, isError] = bst_eigen(Data, OPTIONS)
 %     - Messages    : string, errors/warnings
 %     - isError     : 1 if an error happened
 %
-% NOTE: The 'spectrum' method is wired end-to-end for the Laplace-Beltrami (scalar) variant;
-%       the 'project'/'filter' methods and the Dirac/Connection data layouts remain stubs.
-%       LH and RH are ALWAYS computed SEPARATELY (the basis is B-orthonormal per hemisphere).
+% NOTE: The 'spectrum' method is wired end-to-end for Laplace-Beltrami (scalar [nV x nT]),
+%       Dirac (3D-vector map [3nV x nT] embedded as a pure-imaginary quaternion [4nV]),
+%       face Dirac/Hodge (3-vector face map [3nF x nT]), and Connection Laplacian (a COMPLEX
+%       tangent field [nV x nT] in the operator frame -- real-3D embedding needs the not-yet-
+%       persisted per-vertex frame). The 'project'/'filter' methods remain stubs. LH and RH
+%       are ALWAYS computed SEPARATELY (the basis is B-orthonormal per hemisphere).
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -270,15 +273,6 @@ function [Result, Messages, isError] = ComputeEigenspectrum(F, EigenMat, Operato
     Result   = [];
     Messages = '';
     isError  = 0;
-    % First slice: Laplace-Beltrami (scalar) layout only -- F is [nVertices x nTime] and a
-    % hemisphere's field is F(GlobalVertices{h}, :). Dirac/Connection vector layouts (3nV /
-    % complex-tangent) need a layout map and are a TODO.
-    if ~strcmpi(EigenMat.Variant, 'Laplace-Beltrami')
-        Messages = sprintf(['bst_eigen: ''spectrum'' is wired for the Laplace-Beltrami (scalar) variant only; ' ...
-                            'got ''%s'' (Dirac/Connection vector layouts are a TODO).'], EigenMat.Variant);
-        isError  = 1;
-        return;
-    end
     % Window length: seconds -> samples (the engine windows in samples).
     if ~isempty(OPTIONS.WinLength)
         WinSamples = round(OPTIONS.WinLength * sfreq);
@@ -290,26 +284,22 @@ function [Result, Messages, isError] = ComputeEigenspectrum(F, EigenMat, Operato
     HemiTags = {'LH', 'RH'};
     Nwin = [];
     for h = 1:nHemi
-        Phi_h = EigenMat.Phi{h};
-        if isempty(Phi_h)
+        if isempty(EigenMat.Phi{h})
             continue;
         end
-        idxH = EigenMat.GlobalVertices{h}(:);
-        % Layout check: scalar field rows must index into F.
-        if max(idxH) > size(F, 1)
-            Messages = sprintf(['bst_eigen: hemisphere %d indexes vertex %d but the source map has %d rows. ' ...
-                                'The data layout does not match a scalar Laplace-Beltrami basis ' ...
-                                '(is this an unconstrained/vector source map?).'], h, max(idxH), size(F,1));
+        % Map the source map F into THIS hemisphere's native row layout (variant-specific).
+        [U_h, Phi_h, B_h, Lam_h, msg] = ExtractHemiField(F, EigenMat, OperatorMat, h);
+        if ~isempty(msg)
+            Messages = ['bst_eigen: ' msg];
             isError  = 1;
             return;
         end
-        U_h   = F(idxH, :);
-        B_h   = OperatorMat.Mass{h};            % per-hemisphere mass (B-orthonormal with Phi_h)
-        Lam_h = EigenMat.Lambda{h}(:);
-        [S_h, k_h, Nwin, msg, Sstd_h] = bst_eigenspectrum(U_h, Phi_h, B_h, Lam_h, ...
+        % Same engine for all variants (C = Phi'*(B*U) is layout-agnostic; ' is conjugate
+        % transpose, so the complex connection Hermitian product is handled automatically).
+        [S_h, k_h, Nwin, msg2, Sstd_h] = bst_eigenspectrum(U_h, Phi_h, B_h, Lam_h, ...
             WinSamples, OPTIONS.WinOverlap, OPTIONS.WinFunc, OPTIONS.Measure);
         if isempty(S_h)
-            Messages = ['bst_eigen: ' msg];
+            Messages = ['bst_eigen: ' msg2];
             isError  = 1;
             return;
         end
@@ -325,6 +315,87 @@ function [Result, Messages, isError] = ComputeEigenspectrum(F, EigenMat, Operato
     Result.Measure = OPTIONS.Measure;
     Result.Nwin    = Nwin;
     Result.Hemi    = Hemi;
+end
+
+
+%% ===== EXTRACT THE HEMISPHERE FIELD IN THE BASIS'S NATIVE LAYOUT =====
+function [U_h, Phi_h, B_h, Lam_h, msg] = ExtractHemiField(F, EigenMat, OperatorMat, h)
+    % Returns this hemisphere's field U_h in the row layout that matches Phi_h / B_h, plus
+    % the basis and eigenvalues. msg is '' on success, else an error string. The transform
+    % C = Phi_h'*(B_h*U_h) is identical across variants; only U_h's construction differs.
+    msg   = '';
+    U_h   = [];
+    Phi_h = EigenMat.Phi{h};
+    Lam_h = EigenMat.Lambda{h}(:);
+    B_h   = OperatorMat.Mass{h};
+    nT    = size(F, 2);
+    switch EigenMat.Variant
+        case 'Laplace-Beltrami'
+            % Scalar field: one row per vertex. F is [nVertices x nTime].
+            idx = EigenMat.GlobalVertices{h}(:);
+            if max(idx) > size(F, 1)
+                msg = sprintf(['hemisphere %d indexes vertex %d but the source map has %d rows ' ...
+                    '(expected a scalar [nVertices x nTime] map for Laplace-Beltrami).'], h, max(idx), size(F,1));
+                return;
+            end
+            U_h = F(idx, :);
+
+        case 'Dirac'
+            % 3D vector source map [3*nVertices x nTime], embedded as a pure-imaginary
+            % quaternion field [4*nVh x nTime]: per vertex block rows = [w=0; x; y; z]
+            % (matching bst_dirac.m). Mass B_h = kron(Mass_vertex, I4).
+            vH = EigenMat.GlobalVertices{h}(:);
+            if 3*max(vH) > size(F, 1)
+                msg = sprintf(['Dirac needs an unconstrained 3-vector source map [3*nVertices x nTime]; ' ...
+                    'hemisphere %d needs row %d but the map has %d rows.'], h, 3*max(vH), size(F,1));
+                return;
+            end
+            nVh = numel(vH);
+            U_h = zeros(4*nVh, nT);
+            U_h(2:4:end, :) = F((vH-1)*3 + 1, :);   % x  (quaternion i)
+            U_h(3:4:end, :) = F((vH-1)*3 + 2, :);   % y  (quaternion j)
+            U_h(4:4:end, :) = F((vH-1)*3 + 3, :);   % z  (quaternion k); w rows stay 0
+
+        case 'Connection Laplacian'
+            % Complex tangent field, one (complex) row per vertex, expressed in the operator's
+            % intrinsic frame. The real-3D-tangent -> complex embedding needs that per-vertex
+            % frame {e1,e2}, which is NOT persisted in the operator/eigen node yet, so we
+            % require the caller to pass the field already complex (in the operator frame).
+            idx = EigenMat.GlobalVertices{h}(:);
+            if max(idx) > size(F, 1)
+                msg = sprintf('hemisphere %d indexes vertex %d but the field has %d rows.', h, max(idx), size(F,1));
+                return;
+            end
+            if isreal(F)
+                msg = ['Connection Laplacian needs a COMPLEX tangent field [nVertices x nTime] in the ' ...
+                       'operator frame; embedding a real 3-vector field requires the per-vertex tangent ' ...
+                       'frame, which is not persisted in the operator node yet (TODO: store the frame).'];
+                return;
+            end
+            U_h = F(idx, :);
+
+        case {'Dirac-Face', 'Hodge-Face'}
+            % Face-domain quaternion field: 3-vector face map [3*nFaces x nTime] embedded as
+            % pure-imaginary quaternion [4*nFh x nTime], indexed by GlobalFaces.
+            fH = EigenMat.GlobalFaces{h}(:);
+            if isempty(fH)
+                msg = sprintf('variant ''%s'' hemisphere %d has no GlobalFaces.', EigenMat.Variant, h);
+                return;
+            end
+            if 3*max(fH) > size(F, 1)
+                msg = sprintf(['%s needs a 3-vector face map [3*nFaces x nTime]; hemisphere %d needs row %d ' ...
+                    'but the map has %d rows.'], EigenMat.Variant, h, 3*max(fH), size(F,1));
+                return;
+            end
+            nFh = numel(fH);
+            U_h = zeros(4*nFh, nT);
+            U_h(2:4:end, :) = F((fH-1)*3 + 1, :);
+            U_h(3:4:end, :) = F((fH-1)*3 + 2, :);
+            U_h(4:4:end, :) = F((fH-1)*3 + 3, :);
+
+        otherwise
+            msg = sprintf('unsupported eigen variant ''%s''.', EigenMat.Variant);
+    end
 end
 
 
