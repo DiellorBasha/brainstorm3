@@ -24,8 +24,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
 %     already has an Operator child of the requested Variant it is reused;
 %     otherwise tess_operators(SurfaceFile, OperatorName, 'Tau', Tau) is called
 %     to create one. tess_operators is the ONLY path that reaches
-%     nxr_compute('create') (transitively, via nxr_safe_create); tess_eigen
-%     never builds a mesh itself.
+%     nxr_compute('create'); tess_eigen never builds a mesh itself.
 %
 %     Unless NoSave is true, the result is saved as an eigen_*.mat file alongside
 %     the parent surface and registered in the Brainstorm DB via db_add_eigen
@@ -181,7 +180,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     %     operator computed at a different Tau is not wrongly reused.
     OperatorFile = local_operator_file(SurfaceFile, Variant, Tau);
     if isempty(OperatorFile)
-        % Create it (tess_operators -> nxr_safe_create -> nxr_compute('create')).
+        % Create it (tess_operators -> nxr_compute('create')).
         bst_progress('text', sprintf('Computing %s operator...', Variant));
         tess_operators(SurfaceFile, OperatorName, 'Tau', Tau);
         % Re-resolve from the refreshed cache (db_add_operator updated GlobalData).

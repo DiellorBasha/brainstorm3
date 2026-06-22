@@ -41,7 +41,7 @@ function Op = Prepare(DiracOp, LBO, Surf) %#ok<INUSD,DEFNU>
         fH = find(fMask);  mapV = zeros(nVtot,1); mapV(vH)=1:nVh;
         Floc = mapV(Fcs(fMask,:));  Vloc = Vtx(vH,:);  nFh = numel(fH);
         % nxr face-native gradient on this closed hemisphere submesh
-        h = nxr_safe_create(Vloc, Floc);
+        h = nxr_compute('create', Vloc, Floc);   % create validates the mesh (clean error, no segfault)
         G = nxr_compute('operators', h, 'gradFace');          % [3F x F]
         nxr_compute('destroy', h);
         % per-face geometry (normals outward via vertex normals, areas, centroids)

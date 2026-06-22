@@ -222,7 +222,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         Floc  = mapV(Fcs(fMask, :));
 
         % create nxr submesh (validated; never a hand-built mesh)
-        h = nxr_safe_create(Vloc, Floc);
+        h = nxr_compute('create', Vloc, Floc);   % create validates the mesh (clean error, no segfault)
         try
             switch Variant
                 case 'Laplace-Beltrami'
