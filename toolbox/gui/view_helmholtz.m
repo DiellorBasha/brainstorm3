@@ -120,7 +120,8 @@ function UpdateFrame(hFig)
     % spatial eigenmode smoothing (linear -> applying after the difference is equivalent)
     if St.Smooth.on
         g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
-        Jt = real(bst_dirac_eigenmodes_filter(St.EigenMat, St.Mass, Jt, 'custom', 'TransferFn', g));
+        % bst_eigenfilter reads the per-hemisphere mass Oper.Mass{h}; St.Mass is {B1,B2}.
+        Jt = real(bst_eigenfilter(Jt, St.EigenMat, struct('Mass', {St.Mass}), g, struct()));
     end
     % Detect singular points only when they are actually used (markers shown or tracking on),
     % so plain time-stepping with both off skips the per-frame persistence computation.
