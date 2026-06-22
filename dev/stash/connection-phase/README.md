@@ -21,8 +21,12 @@ as-is; that is expected.
   the connection **Fiedler** magnitude as voting weights.
 - `bst_wavefront_track.m`, `bst_face_wavefront_track.m` — wavefront tracking.
 - `bst_cwt_fiedler_pipeline.m` — experimental CWT + Fiedler inverse pipeline.
+- `bst_tangent_face2vertex.m` — per-face tangent direction → per-vertex orthonormal frame
+  (face→vertex frame transfer; consumed by the wavefront/sign-correction code above). Its
+  input source `tess_tangents` was deleted; fold it in as a local function during the
+  eigen_-node rewire. Was in `toolbox/anatomy/` (non-idiomatic `bst_` prefix for a helper).
 - `connection_phase_readout_*.md` — the design/plan docs.
-- tests/demos/benchmarks for the above.
+- tests/demos/benchmarks for the above (incl. `test_tangent_face2vertex.m`).
 
 ## How to rewire onto the canonical eigen_ node
 
