@@ -122,7 +122,6 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     isHodgeFace = strcmpi(Variant, 'Hodge-Face');           % scalar lapFace eigensolve + Hodge vector lift
     isFace  = isDiracFace || isHodgeFace;                   % face-domain (modes on faces)
     isDirac = strcmpi(Variant, 'Dirac') || isDiracFace;     % quaternion Dirac-type: over-fetch + Rayleigh-Ritz + Tau
-    isLBO   = strcmpi(Variant, 'Laplace-Beltrami');
 
     % --- guard: nxr-compute plugin (operators reach nxr transitively) ---
     [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
@@ -216,12 +215,13 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     if isDirac
         prov.Tau = Tau;
     end
-    if isLBO
-        prov.Ortho = 'B-orthonormal';
-    else
-        % Connection Laplacian and Dirac both use Rayleigh-Ritz to resolve their
-        % degenerate multiplets into genuine B-orthonormal eigenpairs.
-        prov.Ortho = 'Rayleigh-Ritz';
+    % Orthonormalization / solve strategy is per-operator (see the local_solve_* helpers).
+    switch Variant
+        case 'Laplace-Beltrami',     prov.Ortho = 'B-orthonormal (real)';
+        case 'Connection Laplacian', prov.Ortho = 'M-orthonormal (smallest-positive)';
+        case {'Dirac','Dirac-Face'}, prov.Ortho = 'Rayleigh-Ritz';
+        case 'Hodge-Face',           prov.Ortho = 'Hodge lift (W_F-orthonormal)';
+        otherwise,                   prov.Ortho = '';
     end
     prov.ComputeDate = datestr(now,'yyyy-mm-dd HH:MM:SS');
 
@@ -239,72 +239,29 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         A  = Op.Operator{hh};
         B  = Op.Mass{hh};
         gv = Op.GlobalVertices{hh};
-        n  = size(A, 1);
-
-        if isHodgeFace
-            % Scalar face Laplacian eigensolve (A=lapFace [F x F]) + Hodge vector lift
-            % {grad psi_k, n x grad psi_k}/sqrt(lambda_k), W_F-orthonormalized, embedded as
-            % pure-imaginary quaternions [4F x 2K]. (Not a quaternion Dirac eigensolve.)
-            [Vk, lamk] = local_hodge_face_modes(A, Op.FaceAux{hh}, K);
-            Phi{hh} = Vk;  Lambda{hh} = lamk;
-            GlobalVertices{hh} = gv;  GlobalFaces{hh} = Op.GlobalFaces{hh};
-            continue;
-        end
-
-        if isDirac
-            % quaternion domain count: faces for 'Dirac-Face', vertices for 'Dirac'
-            if isFace, nDom = numel(Op.GlobalFaces{hh}); else, nDom = numel(gv); end
-            if size(A,1) ~= 4*nDom
-                error('tess_eigen:diracSizeMismatch', ...
-                    'Dirac operator on hemisphere %s is %dx%d, expected 4*nDom=%d.', ...
-                    tags{hh}, size(A,1), size(A,2), 4*nDom);
-            end
-            nVh = nDom;   % reuse the over-fetch / size logic below
-            if K > 4*nVh - 2
-                error('tess_eigen:tooManyModes', ...
-                    'K=%d exceeds 4*nV-2=%d on hemisphere %s.', K, 4*nVh-2, tags{hh});
-            end
-            % Over-fetch generously: the 4-fold quaternionic multiplets make eigs
-            % return a rank-deficient spanning set; ~30%% over-fetch keeps rank>=K.
-            nRequest = min(K + max(8, ceil(0.3*K)), 4*nVh - 2);
-        else
-            if K > n - 2
-                error('tess_eigen:tooManyModes', ...
-                    'K=%d exceeds nV-2=%d on hemisphere %s.', K, n-2, tags{hh});
-            end
-            nRequest = min(K + 8, n - 2);
-        end
 
         hemiName = 'left'; if hh == 2, hemiName = 'right'; end
         bst_progress('text', sprintf('Eigensolve: %s hemisphere (%s, K=%d)...', hemiName, Variant, K));
-        opts = struct('tol', 1e-6, 'maxit', 1000, 'disp', 0);
-        % Robust smallest-eigenpair solve: A has a near-zero kernel (constant /
-        % constant-quaternion modes), so eigs(...,'smallestabs') would shift-invert at
-        % sigma=0 and factorize the singular A (RCOND ~ 1e-18 warning). bst_eigs_smallest
-        % symmetrizes A,B (forces the Lanczos path) and uses a small negative sigma shift.
-        [V, D] = bst_eigs_smallest(A, B, nRequest, opts);
-        lam = real(diag(D));
-        [lam, idx] = sort(lam, 'ascend');
-        V = V(:, idx);
 
-        if isLBO
-            % LBO is real symmetric with a simple spectrum on the canonical
-            % cortex; standard B-normalization (scale each column so phi'Bphi=1)
-            % suffices and keeps the modes real.
-            V   = real(V);
-            nrm = sqrt(real(diag(V' * (B * V))));
-            nrm(nrm < eps) = eps;
-            V = V * spdiags(1 ./ nrm, 0, numel(nrm), numel(nrm));
-            Vk   = V(:, 1:K);
-            lamk = lam(1:K);
-        else
-            % Connection Laplacian (complex Hermitian) and Dirac both have
-            % degenerate multiplets, so eigs returns a B-non-orthonormal /
-            % rank-deficient spanning set. Rank-revealing B-orthonormalization +
-            % Rayleigh-Ritz recovers K genuine B-orthonormal eigenpairs. The
-            % helper is complex-safe (conjugate transpose throughout), so the
-            % complex connection modes are preserved.
-            [Vk, lamk] = local_ritz_basis(A, B, V, K);
+        % Per-operator eigensolve. Each operator is a different mathematical object and
+        % needs its own tuned solver -- a single shared path produces wrong/spurious modes
+        % for at least one of them (see the local_solve_* helpers):
+        %   Laplace-Beltrami     real symmetric PSD      -> scalar fields
+        %   Connection Laplacian complex Hermitian, ~PSD -> 2D tangent-vector fields
+        %   Dirac / Dirac-Face   quaternionic, 4-fold    -> 3D embedded vector fields
+        %   Hodge-Face           scalar lapFace + lift   -> 3D face vector fields
+        switch Variant
+            case 'Laplace-Beltrami'
+                [Vk, lamk] = local_solve_lbo(A, B, K);
+            case 'Connection Laplacian'
+                [Vk, lamk] = local_solve_connection(A, B, K);
+            case {'Dirac', 'Dirac-Face'}
+                if isFace, nDom = numel(Op.GlobalFaces{hh}); else, nDom = numel(gv); end
+                [Vk, lamk] = local_solve_dirac(A, B, K, nDom, tags{hh});
+            case 'Hodge-Face'
+                [Vk, lamk] = local_hodge_face_modes(A, Op.FaceAux{hh}, K);
+            otherwise
+                error('tess_eigen:badVariant', 'No eigensolve defined for variant ''%s''.', Variant);
         end
 
         Phi{hh}            = Vk;
@@ -376,6 +333,86 @@ function [Phi, lam] = local_hodge_face_modes(lapFace, aux, Kvec)
     Phi(3:4:end,:) = U(2:3:end,:);
     Phi(4:4:end,:) = U(3:3:end,:);
     lam = repelem(lam_s(:),2);  lam = lam(1:nC);       % paired scalar eigenvalue per vector mode
+end
+
+% ----------------------------------------------------------------------------
+function [Phi, lam] = local_solve_lbo(A, B, K)
+% Laplace-Beltrami eigensolve: A is real symmetric and PSD with a simple spectrum on the
+% canonical cortex. Take the K smallest eigenpairs (smoothest scalar modes, for scalar
+% cortical data analysis), keep them REAL, and B-normalize each column so phi'*B*phi = 1.
+    n = size(A, 1);
+    if K > n - 2
+        error('tess_eigen:tooManyModes', 'K=%d exceeds nV-2=%d.', K, n - 2);
+    end
+    nReq = min(K + 8, n - 2);
+    [V, D] = bst_eigs_smallest(A, B, nReq, struct('tol', 1e-6, 'maxit', 1000, 'disp', 0));
+    lam = real(diag(D));
+    [lam, idx] = sort(lam, 'ascend');
+    V = real(V(:, idx));
+    nrm = sqrt(real(diag(V' * (B * V))));
+    nrm(nrm < eps) = eps;
+    V = V * spdiags(1 ./ nrm, 0, numel(nrm), numel(nrm));
+    Phi = V(:, 1:K);
+    lam = lam(1:K);
+end
+
+% ----------------------------------------------------------------------------
+function [Phi, lam] = local_solve_connection(A, B, K)
+% Connection-Laplacian eigensolve: A is COMPLEX HERMITIAN and only ~PSD -- the discrete
+% connection Laplacian carries a few small spurious NEGATIVE eigenvalues (a connection
+% Laplacian on a closed curved surface has no zero/negative mode, so anything <= 0 is a
+% discretization artifact). The genuine modes are the smooth low-frequency POSITIVE ones
+% (the 2D tangent-vector / n-RoSy basis). So: over-fetch the smallest-magnitude eigenpairs,
+% DROP the non-positive spurious modes, keep the smallest K positives, M-orthonormalize.
+% No Rayleigh-Ritz: the connection spectrum is generically simple, and re-diagonalizing on
+% an over-fetched span re-introduces the spurious negatives. Complex modes preserved.
+    n = size(A, 1);
+    if K > n - 2
+        error('tess_eigen:tooManyModes', 'K=%d exceeds nV-2=%d.', K, n - 2);
+    end
+    % Over-fetch so that, after dropping the few spurious non-positive modes, at least K
+    % genuine positive eigenpairs remain.
+    nReq = min(K + max(16, ceil(0.5 * K)), n - 2);
+    [V, D] = bst_eigs_smallest(A, B, nReq, struct('tol', 1e-8, 'maxit', 2000, 'disp', 0));
+    lam = real(diag(D));
+    keep = (lam > 0);                       % drop the spurious non-positive artifacts
+    V = V(:, keep);  lam = lam(keep);
+    [lam, idx] = sort(lam, 'ascend');
+    V = V(:, idx);
+    if numel(lam) < K
+        error('tess_eigen:connTooFewPositive', ...
+            ['Only %d positive connection eigenpairs recovered (< K=%d); increase the ' ...
+             'over-fetch in local_solve_connection.'], numel(lam), K);
+    end
+    V   = V(:, 1:K);
+    lam = lam(1:K);
+    % M-orthonormal magnitude (eigs returns B-normalized; guard it, complex-safe).
+    nrm = sqrt(real(sum(conj(V) .* (B * V), 1)));
+    nrm(nrm < eps) = eps;
+    Phi = V ./ nrm;
+    lam = lam(:);
+end
+
+% ----------------------------------------------------------------------------
+function [Phi, lam] = local_solve_dirac(A, B, K, nDom, tag)
+% Dirac / Dirac-Face eigensolve: A is quaternionic [4*nDom] with 4-fold quaternionic
+% multiplets, so eigs returns a B-non-orthonormal / rank-deficient spanning set. Over-fetch
+% generously, then Rayleigh-Ritz (rank-revealing B-orthonormalization + re-diagonalization)
+% recovers K genuine B-orthonormal eigenpairs (for 3D embedded vector-field analysis).
+% Complex-safe throughout.
+    if size(A, 1) ~= 4 * nDom
+        error('tess_eigen:diracSizeMismatch', ...
+            'Dirac operator on hemisphere %s is %dx%d, expected 4*nDom=%d.', ...
+            tag, size(A, 1), size(A, 2), 4 * nDom);
+    end
+    if K > 4 * nDom - 2
+        error('tess_eigen:tooManyModes', ...
+            'K=%d exceeds 4*nV-2=%d on hemisphere %s.', K, 4 * nDom - 2, tag);
+    end
+    % ~30% over-fetch keeps rank >= K despite the 4-fold multiplets.
+    nReq = min(K + max(8, ceil(0.3 * K)), 4 * nDom - 2);
+    [V, ~] = bst_eigs_smallest(A, B, nReq, struct('tol', 1e-6, 'maxit', 1000, 'disp', 0));
+    [Phi, lam] = local_ritz_basis(A, B, V, K);
 end
 
 % ----------------------------------------------------------------------------
