@@ -20,7 +20,7 @@ function test_helmholtz_view()
 
     [~, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
     Jt = double(bst_memory('GetResultsValues', St.srcDS, St.srcResult, [], iT, 0));
-    Ht = bst_dirac_helmholtz('Frame', St.Op, Jt);
+    Ht = bst_helmholtz('Frame', St.Op, Jt);
 
     % Total: quiver override == J, source colormap
     nFail = nFail + chk('Total quiver = J', isequal(getappdata(hFig,'QuiverVectorOverride'), Ht.Vtot));

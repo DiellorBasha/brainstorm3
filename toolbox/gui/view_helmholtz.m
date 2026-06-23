@@ -46,12 +46,13 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     SurfaceFile = R.SurfaceFile;
 
     bst_progress('start', 'Helmholtz view', 'Loading operators...');
-    Dirac = i_op(SurfaceFile, 'Dirac');
-    LBO   = i_op(SurfaceFile, 'Laplace-Beltrami');
+    Dirac = bst_get_operator_node(SurfaceFile, 'Dirac');
+    LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
     Surf  = in_tess_bst(SurfaceFile, 0);
+    Mani  = tess_manifold(SurfaceFile);
     nV = size(Surf.Vertices,1);
     bst_progress('text', 'Factorizing the cotan operator...');
-    Op = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Op = bst_helmholtz('Prepare', {Dirac, LBO}, Mani, Surf, 'Domain','vertex');
     bst_progress('text', 'Loading Dirac eigenbasis...');
     EigenMat = tess_eigen(SurfaceFile, 'Dirac');
     OpMat    = in_bst_operator(EigenMat.OperatorFile);
@@ -129,10 +130,10 @@ function UpdateFrame(hFig)
     if isKey(St.Cache, iT)
         Ht = St.Cache(iT);
         if needCores && isempty(Ht.Cores)                 % cached without detection -> fill in now
-            Ht = bst_dirac_helmholtz('Frame', St.Op, Jt, true);  St.Cache(iT) = Ht;
+            Ht = bst_helmholtz('Frame', St.Op, Jt, true);  St.Cache(iT) = Ht;
         end
     else
-        Ht = bst_dirac_helmholtz('Frame', St.Op, Jt, needCores);  St.Cache(iT) = Ht;
+        Ht = bst_helmholtz('Frame', St.Op, Jt, needCores);  St.Cache(iT) = Ht;
     end
     comp = i_component(Ht, St.Component);
     % --- cortex scalar + colormap ---
@@ -315,17 +316,6 @@ function c = i_component(Ht, name)
         case 'Harm',  c = struct('Vec',Ht.Vharm,'Scal',Ht.Hmag, 'Signed',false, 'Markers',[],          'Kind','harm',   'HarmFrac',Ht.HarmFrac);
         otherwise,    c = struct('Vec',Ht.Vtot, 'Scal',Ht.Fmag, 'Signed',false, 'Markers',[],          'Kind','total',  'HarmFrac',Ht.HarmFrac);
     end
-end
-function Op = i_op(SurfaceFile, variant)
-    [sSubject,~,iSurf] = bst_get('SurfaceFile', SurfaceFile);
-    Op = [];
-    if ~isempty(iSurf) && isfield(sSubject.Surface(iSurf),'Operator')
-        for k = 1:numel(sSubject.Surface(iSurf).Operator)
-            S = in_bst_operator(sSubject.Surface(iSurf).Operator(k).FileName);
-            if strcmpi(S.Variant, variant); Op = S; break; end
-        end
-    end
-    if isempty(Op); tess_operators(SurfaceFile, variant); Op = i_op(SurfaceFile, variant); end
 end
 function iTess = i_find_tess(hFig)
     TessInfo = getappdata(hFig, 'Surface');

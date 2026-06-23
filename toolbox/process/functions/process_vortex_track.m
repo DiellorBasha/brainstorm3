@@ -1,6 +1,6 @@
 function varargout = process_vortex_track( varargin )
 % PROCESS_VORTEX_TRACK  Track Dirac vortex cores (and sources/sinks) over time.
-% Detects persistence-ranked cores per frame (bst_dirac_helmholtz) and links them
+% Detects persistence-ranked cores per frame (bst_helmholtz) and links them
 % into trajectories (bst_vortex_track), saved as a dipoles file (view_dipoles).
 % @=============================================================================
 % Author: Diellor Basha, 2026
@@ -69,13 +69,14 @@ function OutputFiles = Run(sProcess, sInput) %#ok<DEFNU>
     % --- operators + per-frame decomposition ---
     SurfaceFile = sRes.SurfaceFile;
     Surf = in_tess_bst(SurfaceFile, 0);
-    Dirac = i_op(SurfaceFile, 'Dirac');  LBO = i_op(SurfaceFile, 'Laplace-Beltrami');
-    Op = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
+    Mani = tess_manifold(SurfaceFile);
+    Dirac = bst_get_operator_node(SurfaceFile, 'Dirac');  LBO = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    Op = bst_helmholtz('Prepare', {Dirac, LBO}, Mani, Surf, 'Domain','vertex');
     nT = numel(tW);
     coresV = cell(1,nT); coresS = cell(1,nT);
     bst_progress('start', 'Vortex tracking', 'Decomposing frames...', 1, nT);
     for t = 1:nT
-        Ht = bst_dirac_helmholtz('Frame', Op, J(:,t));
+        Ht = bst_helmholtz('Frame', Op, J(:,t));
         coresV{t} = Ht.Cores;  coresS{t} = Ht.Sources;
         bst_progress('inc', 1);
     end
@@ -159,15 +160,3 @@ end
 
 function s = i_sgn(ch),     if ch>=0, s='+'; else, s='-'; end, end
 function s = i_srcname(ch), if ch>=0, s='Source'; else, s='Sink'; end, end
-
-function Op = i_op(SurfaceFile, variant)
-    [sSubject,~,iSurf] = bst_get('SurfaceFile', SurfaceFile);
-    Op = [];
-    if ~isempty(iSurf) && isfield(sSubject.Surface(iSurf),'Operator')
-        for k = 1:numel(sSubject.Surface(iSurf).Operator)
-            S = in_bst_operator(sSubject.Surface(iSurf).Operator(k).FileName);
-            if strcmpi(S.Variant, variant), Op = S; break; end
-        end
-    end
-    if isempty(Op), tess_operators(SurfaceFile, variant); Op = i_op(SurfaceFile, variant); end
-end
