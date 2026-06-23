@@ -619,8 +619,8 @@ function FigureMouseUpCallback(hFig, varargin)
         if strcmpi(clickAction, 'popup')
             DisplayFigurePopup(hFig);
             
-        % === SELECTING CORTICAL SCOUTS (incl. geodesic Area tool) ===
-        elseif isSelectingCorticalSpot || panel_scout('IsAreaToolActive')
+        % === SELECTING CORTICAL SCOUTS (New scout or geodesic Area tool) ===
+        elseif isSelectingCorticalSpot
             panel_scout('CreateScoutMouse', hFig);
             
         % === SELECTING POINT ===

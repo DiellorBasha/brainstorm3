@@ -173,12 +173,13 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 gui_component('button', jPanelScoutOptions,[], '<',  {Insets(0,0,0,0), java_scaled('dimension',22,20)}, 'Decrease scout size (only one vertex)', @(h,ev)bst_call(@EditScoutsSize, 'Shrink1'));
                 gui_component('button', jPanelScoutOptions,[], '>',  {Insets(0,0,0,0), java_scaled('dimension',22,20)}, 'Increase scout size (only one vertex)', @(h,ev)bst_call(@EditScoutsSize, 'Grow1'));
                 gui_component('button', jPanelScoutOptions,[], '>>', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Increase scout size',                   @(h,ev)bst_call(@EditScoutsSize, 'Grow'));
-                % Geodesic area tool (heat-distance disk): click a vertex to seed, Ctrl+scroll to grow/shrink
-                jToggleArea = gui_component('toggle', jPanelScoutOptions,[], 'Area', {Insets(0,0,0,0), java_scaled('dimension',44,20)}, 'Geodesic area tool: click a vertex to seed a scout, then Ctrl+scroll to grow/shrink (heat distance)', @(h,ev)bst_call(@AreaToolToggle));
                 % Separator
                 gui_component('label', jPanelScoutOptions, [], '  ');
                 % Constrained to data
                 jToggleConst = gui_component('toggle', jPanelScoutOptions,'tab hfill', 'Constrained', {Insets(0,0,0,0), java_scaled('dimension',10,20)}, 'Constrain patch growth to vertices with data above threshold.');
+                % Geodesic area tool (own row, below the swell buttons): a state button -- while
+                % pressed, click a vertex to seed a scout and Ctrl+scroll to grow/shrink it.
+                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', 'Geodesic area', {Insets(0,0,0,0), java_scaled('dimension',100,20)}, 'Geodesic area tool: select this button, click a vertex to seed a scout, then Ctrl+scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
                 % Scout size in vertices/area
                 %gui_component('Label', jPanelScoutOptions, 'br', 'Number of vertices:');
                 jLabelScoutSize = gui_component('Label', jPanelScoutOptions, 'br hfill', '  No scout selected');
@@ -1893,8 +1894,12 @@ function SetSelectionState(isSelected)
     end
     % Start scout selection
     if isSelected
-        % Push toolbar "AddScout" button 
+        % Push toolbar "AddScout" button
         ctrl.jButtonAddScout.setSelected(1);
+        % Release the geodesic Area tool (mutually exclusive selection modes)
+        if isfield(ctrl,'jToggleArea') && ~isempty(ctrl.jToggleArea)
+            ctrl.jToggleArea.setSelected(0);
+        end
         % Unselect all the scouts in JList
         SetSelectedScouts([]);
         % Set 3DViz figures in 'SelectingCorticalSpot' mode
@@ -3032,13 +3037,42 @@ function isActive = IsAreaToolActive() %#ok<DEFNU>
     end
 end
 
-% Toggle callback: activating the Area tool turns off the normal point-add mode and clears
-% any previous area cache (the next click starts a fresh disk).
+% Toggle callback: the Area tool is a STATE button that puts the 3D figures into the same
+% cortical-spot selection mode as "New scout" (so a click is a vertex pick, not a camera move,
+% and the figure isn't disturbed when the tool is off). Mutually exclusive with "New scout".
 function AreaToolToggle() %#ok<DEFNU>
-    if IsAreaToolActive()
-        SetSelectionState(0);       % mutually exclusive with the "New scout" point-add mode
+    ctrl = bst_get('PanelControls', 'Scout');
+    if isempty(ctrl) || ~isfield(ctrl, 'jToggleArea') || isempty(ctrl.jToggleArea)
+        return;
     end
-    AreaCache([]);                  % reset cached seed/distance
+    isOn = ctrl.jToggleArea.isSelected();
+    % Figures in which a scout can be selected (same set "New scout" uses)
+    hFigures = bst_figures('GetFiguresForScouts');
+    if isempty(hFigures)
+        hFigures = bst_figures('GetFigureWithSurfaces');
+    end
+    if isOn
+        % Mutually exclusive with the point-add "New scout" mode
+        ctrl.jButtonAddScout.setSelected(0);
+        if isempty(hFigures)
+            java_dialog('warning', 'You need to open a 3D figure before creating scouts.', 'Geodesic area tool');
+            ctrl.jToggleArea.setSelected(0);
+            return;
+        end
+        % Enter cortical-spot selection mode (clicks pick vertices; cross cursor)
+        SetSelectedScouts([]);
+        for hFig = hFigures
+            setappdata(hFig, 'isSelectingCorticalSpot', 1);
+            set(hFig, 'Pointer', 'cross');
+        end
+        AreaCache([]);          % fresh tool session
+    else
+        % Exit selection mode (restore normal figure manipulation)
+        for hFig = hFigures
+            set(hFig, 'Pointer', 'arrow');
+            setappdata(hFig, 'isSelectingCorticalSpot', 0);
+        end
+    end
 end
 
 % Persistent cache for the active area scout: struct(iScout, Seed, phi, Radius, SurfaceFile).
