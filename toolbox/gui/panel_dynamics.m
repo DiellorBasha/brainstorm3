@@ -1,14 +1,14 @@
 function varargout = panel_dynamics( varargin )
-% PANEL_DYNAMICS: List/inspect spatiotemporal "atoms" (the joint Events+Scouts system).
+% PANEL_DYNAMICS: Tree of spatiotemporal atom groups (the joint Events+Scouts system).
 %
-% Milestone-1 skeleton panel. Lists the atoms of a loaded dynamics table
-% (db_template('dynamicsmat')); selecting a row highlights the atom's marker on
-% the cortex figure and jumps the recording time to the atom's time. Opened by
-% view_dynamics(). The full interactive editor (add/remove/filter/stats) comes
-% in later phases.
+% Milestone-1 skeleton panel. Shows a tree of atom groups (db_template('atomgroup')):
+% top-level groups, their nested child groups (an extended "alpha (8-13 Hz)" window
+% containing simple "alpha_peak"/"alpha_trough"/... children), and each group's
+% occurrences as leaves. Selecting an occurrence highlights its marker on the
+% cortex figure and jumps the recording time. Opened by view_dynamics().
 %
 % USAGE:  bstPanel = panel_dynamics('CreatePanel')
-%                    panel_dynamics('SetTarget', hFig, Atoms)   % populate from view_dynamics
+%                    panel_dynamics('SetTarget', hFig, T)   % populate from view_dynamics
 %
 % Authors: Diellor Basha, 2026
 
@@ -42,83 +42,111 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     jPanelMain = java_create('javax.swing.JPanel');
     jPanelMain.setLayout(BorderLayout());
-    jPanelMain.setPreferredSize(java_scaled('dimension', 260, 420));
+    jPanelMain.setPreferredSize(java_scaled('dimension', 300, 460));
 
-    % Header (monospaced so the column titles line up with the rows)
-    jLabel = JLabel(' ');
-    jLabel.setFont(Font('Monospaced', Font.BOLD, java_scaled('value', 11)));
-    jPanelMain.add(jLabel, BorderLayout.NORTH);
-
-    % Atom list
-    jList = java_create('javax.swing.JList');
-    jList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    jList.setFont(Font('Monospaced', Font.PLAIN, java_scaled('value', 11)));
-    java_setcb(jList, ...
-        'ValueChangedCallback', @(h,ev)ListChanged_Callback(ev), ...
-        'MouseClickedCallback', @(h,ev)ListChanged_Callback([]));
-    jScroll = JScrollPane(jList);
+    jTree = java_create('javax.swing.JTree');
+    jTree.setRootVisible(0);
+    jTree.setShowsRootHandles(1);
+    jTree.getSelectionModel().setSelectionMode(javax.swing.tree.TreeSelectionModel.SINGLE_TREE_SELECTION);
+    jTree.setFont(Font('Monospaced', Font.PLAIN, java_scaled('value', 11)));
+    java_setcb(jTree, 'ValueChangedCallback', @(h,ev)TreeSel_Callback());
+    jScroll = JScrollPane(jTree);
     jPanelMain.add(jScroll, BorderLayout.CENTER);
 
-    bstPanelNew = BstPanel(panelName, jPanelMain, struct('jList', jList, 'jLabel', jLabel));
-end
-
-
-%% ===== LIST SELECTION CALLBACK =====
-function ListChanged_Callback(ev)
-    if ~isempty(ev) && ev.getValueIsAdjusting()
-        return;
-    end
-    ctrl = bst_get('PanelControls', 'Dynamics');
-    if isempty(ctrl), return; end
-    iAtom = ctrl.jList.getSelectedIndex() + 1;   % Java 0-based
-    if (iAtom < 1), return; end
-    HighlightAtom(iAtom);
+    bstPanelNew = BstPanel(panelName, jPanelMain, struct('jTree', jTree));
 end
 
 
 %% ===== SET TARGET (called by view_dynamics) =====
-% Stores the figure + atoms this panel drives, and populates the list.
-function SetTarget(hFig, Atoms) %#ok<DEFNU>
-    setappdata(0, 'DynamicsTarget', struct('hFig', hFig, 'Atoms', Atoms));
+% Builds the group tree and stores the figure + node->(group,occurrence) map.
+function SetTarget(hFig, T) %#ok<DEFNU>
+    import javax.swing.tree.*;
     ctrl = bst_get('PanelControls', 'Dynamics');
     if isempty(ctrl), return; end
-    model = javax.swing.DefaultListModel();
-    hemiChar = 'LR';
-    for i = 1:numel(Atoms)
-        a = Atoms(i);
-        hc = '?';
-        if ~isempty(a.hemi) && (a.hemi>=1) && (a.hemi<=2), hc = hemiChar(double(a.hemi)); end
-        model.addElement(sprintf('%8.3f  %-7s  %-6s  %-6s  %-9s  %c  %d', ...
-            a.time, i_str(a.phase), i_str(a.bandName), i_str(a.scaleName), i_str(a.Function), hc, a.vertex));
+
+    root     = DefaultMutableTreeNode('Atoms');
+    nodeList = {};
+    goList   = zeros(0, 2);
+    added    = false(1, numel(T.Groups));
+    parents  = {T.Groups.parent};
+
+    % Top-level groups first, then any orphans (parent set but not found)
+    isTop = cellfun(@isempty, parents);
+    for g = [find(isTop), find(~isTop)]
+        i_addGroup(root, g);
     end
-    ctrl.jList.setModel(model);
-    % Column header (same widths as the rows above)
-    ctrl.jLabel.setText(sprintf('%-8s  %-7s  %-6s  %-6s  %-9s  %s  %s', ...
-        'Time(s)', 'Phase', 'Freq', 'Scale', 'Func', 'H', 'Vertex'));
+    ctrl.jTree.setModel(DefaultTreeModel(root));
+    ctrl.jTree.expandRow(0);
+    setappdata(0, 'DynamicsTarget', struct('hFig', hFig, 'T', T, 'nodeList', {nodeList}, 'goList', goList));
+
+    % --- nested builder (captures nodeList/goList/added/T) ---
+    function i_addGroup(parentNode, g)
+        if added(g), return; end
+        added(g) = true;
+        G = T.Groups(g);
+        nOcc  = max(size(G.times,2), numel(G.vertices));
+        gNode = DefaultMutableTreeNode(sprintf('%s   [%s, %d]', G.label, G.type, nOcc));
+        parentNode.add(gNode);
+        nodeList{end+1} = gNode;  goList(end+1,:) = [g, 0]; %#ok<AGROW>
+        % occurrence leaves (spatial occurrences only)
+        for o = 1:numel(G.vertices)
+            leaf = DefaultMutableTreeNode(sprintf('%9.3fs  v%-6d %s', G.times(1,o), G.vertices(o), i_hemi(G.hemi(o))));
+            gNode.add(leaf);
+            nodeList{end+1} = leaf;  goList(end+1,:) = [g, o]; %#ok<AGROW>
+        end
+        % nested child groups
+        for c = find(strcmpi(parents, G.label))
+            i_addGroup(gNode, c);
+        end
+    end
 end
 
 
-%% ===== HIGHLIGHT AN ATOM =====
-function HighlightAtom(iAtom)
-    st = getappdata(0, 'DynamicsTarget');
-    if isempty(st) || ~ishandle(st.hFig) || (iAtom > numel(st.Atoms)), return; end
-    a = st.Atoms(iAtom);
-    % Move the selection marker on the cortex
-    hSel   = findobj(st.hFig, 'Tag', 'AtomSel');
-    posOff = getappdata(st.hFig, 'AtomOffsetPos');
-    if ~isempty(hSel) && ~isempty(posOff) && (iAtom <= size(posOff,1))
-        set(hSel, 'XData', posOff(iAtom,1), 'YData', posOff(iAtom,2), 'ZData', posOff(iAtom,3), 'Visible', 'on');
+%% ===== TREE SELECTION CALLBACK =====
+function TreeSel_Callback()
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    st   = getappdata(0, 'DynamicsTarget');
+    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    sel = ctrl.jTree.getLastSelectedPathComponent();
+    if isempty(sel), return; end
+    % Map the selected Java node back to (group, occurrence)
+    g = 0;  o = 0;
+    for i = 1:numel(st.nodeList)
+        if sel.equals(st.nodeList{i})
+            g = st.goList(i,1);  o = st.goList(i,2);  break;
+        end
     end
-    % Jump recording time (no-op if no time context is open)
-    try, panel_time('SetCurrentTime', a.time); catch, end %#ok<CTCH>
-end
-
-
-%% ===== EMPTY-SAFE STRING (for table cells) =====
-function s = i_str(x)
-    if isempty(x)
-        s = '-';
+    if (g < 1), return; end
+    G = st.T.Groups(g);
+    % Highlight the marker (only for spatial occurrences)
+    hSel = findobj(st.hFig, 'Tag', 'AtomSel');
+    GroupsPosOff = getappdata(st.hFig, 'GroupsPosOff');
+    if (o >= 1) && ~isempty(hSel) && (g <= numel(GroupsPosOff)) && (o <= size(GroupsPosOff{g},1))
+        p = GroupsPosOff{g}(o,:);
+        set(hSel, 'XData', p(1), 'YData', p(2), 'ZData', p(3), 'Visible', 'on');
+    elseif ~isempty(hSel)
+        set(hSel, 'Visible', 'off');   % group node selected: clear the point marker
+    end
+    % Jump recording time (occurrence time, or the group's first onset)
+    if (o >= 1) && (o <= size(G.times,2))
+        t = G.times(1, o);
+    elseif ~isempty(G.times)
+        t = G.times(1, 1);
     else
-        s = char(x);
+        t = [];
+    end
+    if ~isempty(t)
+        try, panel_time('SetCurrentTime', t); catch, end %#ok<CTCH>
+    end
+end
+
+
+%% ===== HEMISPHERE CHAR =====
+function s = i_hemi(h)
+    if isempty(h) || (h < 1) || (h > 2)
+        s = '?';
+    else
+        hc = 'LR';
+        s = hc(double(h));
     end
 end
