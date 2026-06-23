@@ -327,29 +327,33 @@ switch lower(structureName)
     case 'atom'
         % One spatiotemporal sparse marker: a REFERENCE (time x space x band x
         % scale) + descriptors + provenance, sufficient to re-derive the data.
+        % Coordinates are a REFERENCE (time x space x freq x scale) + descriptors
+        % + provenance, sufficient to re-derive the data; not a copy.
         template = struct(...
-            'label',       '', ...   % type name, e.g. 'vortex'
-            'category',    '', ...   % 'source'|'sink'|'vortex'|'antivortex'
+            'label',       '', ...   % free type name (e.g. 'vortex'), for display
+            'category',    '', ...   % singular-point type: source/sink/vortex/antivortex (derived)
             'color',       [], ...   % [r g b]
-            'time',        [], ...   % seconds (ref into recording; cf. Events)
-            'sample',      [], ...   % sample index (convenience)
-            'sourceEvent', '', ...   % originating event group, e.g. 'alpha_peak'
-            'vertex',      [], ...   % seed vertex index (ref into surface; cf. Scouts)
-            'pos',         [], ...   % [x y z] position
-            'hemi',        [], ...   % 1=L, 2=R
-            'region',      '', ...   % atlas region label (optional)
-            'band',        [], ...   % [fLo fHi] Hz
-            'bandName',    '', ...   % 'alpha'
-            'scale',       [], ...   % [k1 k2] eigenmode range (reserved; [] for now)
-            'scaleName',   '', ...
-            'strength',    [], ...   % |J|, omega, or |Phi|/|Psi| extremum value
-            'charge',      [], ...   % +1/-1 topological charge (source/sink sign)
-            'chirality',   [], ...   % +1/-1 vortex rotation sense
-            'persistence', [], ...   % topological persistence
+            'time',        [], ...   % TIME: seconds (ref into recording; cf. Events)
+            'sample',      [], ...   % TIME: sample index (convenience)
+            'phase',       '', ...   % TIME: oscillation phase peak/trough/rising/falling
+            'sourceEvent', '', ...   % TIME: originating event group, e.g. alpha_peak
+            'vertex',      [], ...   % SPACE: seed vertex index (ref into surface; cf. Scouts)
+            'pos',         [], ...   % SPACE: [x y z] position
+            'hemi',        [], ...   % SPACE: 1=L, 2=R
+            'region',      '', ...   % SPACE: atlas region label (optional)
+            'band',        [], ...   % FREQUENCY: [fLo fHi] Hz
+            'bandName',    '', ...   % FREQUENCY: alpha/beta/gamma/...
+            'scale',       [], ...   % SCALE: [k1 k2] eigenmode range (bst_eigen; reserved)
+            'scaleName',   '', ...   % SCALE: dominant eigenspectrum band (eigen-populated later)
+            'Function',    '', ...   % FUNCTION: potential(Phi)/stream(Psi)/magnitude(|J|)/... (cf. Scout.Function)
+            'strength',    [], ...   % descriptor: extremum value
+            'charge',      [], ...   % descriptor: +1/-1 topological charge (source/sink sign)
+            'chirality',   [], ...   % descriptor: +1/-1 vortex rotation sense
+            'persistence', [], ...   % descriptor: topological persistence
             'descriptors', struct(), ... % OPEN-ENDED extensible bag (future axes)
-            'DataFile',    '', ...   % recording (time source)
-            'ResultsFile', '', ...   % kernel/source link (the inverse used)
-            'SurfaceFile', '');      % cortex (space source)
+            'DataFile',    '', ...   % provenance: recording (time source)
+            'ResultsFile', '', ...   % provenance: kernel/source link (the inverse used)
+            'SurfaceFile', '');      % provenance: cortex (space source)
 
     case 'dynamicsmat'
         % Collection of atoms (a spatiotemporal sparse table), saved dynamics_*.mat

@@ -44,8 +44,9 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jPanelMain.setLayout(BorderLayout());
     jPanelMain.setPreferredSize(java_scaled('dimension', 260, 420));
 
-    % Header
-    jLabel = JLabel('Atoms');
+    % Header (monospaced so the column titles line up with the rows)
+    jLabel = JLabel(' ');
+    jLabel.setFont(Font('Monospaced', Font.BOLD, java_scaled('value', 11)));
     jPanelMain.add(jLabel, BorderLayout.NORTH);
 
     % Atom list
@@ -87,10 +88,13 @@ function SetTarget(hFig, Atoms) %#ok<DEFNU>
         a = Atoms(i);
         hc = '?';
         if ~isempty(a.hemi) && (a.hemi>=1) && (a.hemi<=2), hc = hemiChar(double(a.hemi)); end
-        model.addElement(sprintf('%8.3fs  %-9s  v%-6d %c', a.time, a.category, a.vertex, hc));
+        model.addElement(sprintf('%8.3f  %-7s  %-6s  %-6s  %-9s  %c  %d', ...
+            a.time, i_str(a.phase), i_str(a.bandName), i_str(a.scaleName), i_str(a.Function), hc, a.vertex));
     end
     ctrl.jList.setModel(model);
-    ctrl.jLabel.setText(sprintf('Atoms (%d)', numel(Atoms)));
+    % Column header (same widths as the rows above)
+    ctrl.jLabel.setText(sprintf('%-8s  %-7s  %-6s  %-6s  %-9s  %s  %s', ...
+        'Time(s)', 'Phase', 'Freq', 'Scale', 'Func', 'H', 'Vertex'));
 end
 
 
@@ -107,4 +111,14 @@ function HighlightAtom(iAtom)
     end
     % Jump recording time (no-op if no time context is open)
     try, panel_time('SetCurrentTime', a.time); catch, end %#ok<CTCH>
+end
+
+
+%% ===== EMPTY-SAFE STRING (for table cells) =====
+function s = i_str(x)
+    if isempty(x)
+        s = '-';
+    else
+        s = char(x);
+    end
 end

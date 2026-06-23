@@ -112,6 +112,10 @@ function OutputFiles = Run(sProcess, sInputs)
         evtTimes = events(iEvt).times(1, :);
         iT = bst_closest(evtTimes, TimeVector);
         nE = numel(iT);
+        % Oscillation phase from the event name suffix ("alpha_peak" -> "peak")
+        phaseTok = '';
+        tok = regexp(evtName, '_(peak|trough|rising|falling)$', 'tokens', 'once');
+        if ~isempty(tok), phaseTok = tok{1}; end
         % --- Bandpass + surface ---
         sFreq = 1 / (TimeVector(2) - TimeVector(1));
         Fbp   = process_bandpass('Compute', F(R.GoodChannel, :), sFreq, FreqRange(1), FreqRange(2), 'bst-hfilter-2019', 0);
@@ -129,16 +133,18 @@ function OutputFiles = Run(sProcess, sInputs)
             for v = vPk(:)'
                 A = bst_dynamics('NewAtom');
                 A.label       = 'peak';
-                A.category    = 'peak';
+                A.category    = 'peak';        % spatial |J| maximum (test populate)
                 A.color       = [0.85 0.20 0.75];
                 A.time        = evtTimes(k);
                 A.sample      = iT(k);
+                A.phase       = phaseTok;      % oscillation phase from the event
                 A.sourceEvent = evtName;
                 A.vertex      = v;
                 A.pos         = Surf.Vertices(v, :);
                 A.hemi        = uint8(1 + (Surf.Vertices(v,2) < 0));   % SCS: Y>0 = left
                 A.band        = FreqRange;
                 A.bandName    = bandVal;
+                A.Function    = 'magnitude';   % atom is an extremum of |J|
                 A.strength    = Jmag(v);
                 A.DataFile    = R.DataFile;
                 A.ResultsFile = ResultsFile;
