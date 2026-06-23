@@ -210,13 +210,27 @@ for iData = 1:length(Data)
             end
             lrange = [min(cellfun(@min, lams)), max(cellfun(@max, lams))];
             frame = bst_eigenwavelet('Design', OPTIONS.KernelName, OPTIONS.Nf, lrange);
-            [W, Messages, isError] = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame);
-            if isError, break; end
-            % Dirac family: Analysis carries the FULL quaternion [4nV x nT x M]; project to
-            % the physical 3-vector for the saved source scalogram (the cortical viewer is
-            % 1/3-component). The full-quaternion transform stays available via bst_eigenwavelet.
-            if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
-                W = bst_eigenwavelet('ToVec', W, EigenMat);
+            if strcmp(EigenMat.Variant, 'Connection Laplacian')
+                % The connection operator lives on the TANGENT bundle: a complex number per
+                % vertex in the canonical frame. Convert the physical 3-vector source to that
+                % complex field (z = <v,e1> + i<v,e2>) via the operator's own frame, analyze,
+                % then decode the complex scalogram back to ambient 3-D tangent vectors for
+                % the saved scalogram. The normal component of the input is dropped (it is not
+                % representable on the tangent bundle).
+                [E1, E2] = GetConnectionFrame(EigenMat, OperatorMat);
+                Fc = TangentToComplex(F, E1, E2);
+                [Wc, Messages, isError] = bst_eigenwavelet('Analysis', Fc, EigenMat, OperatorMat, frame);
+                if isError, break; end
+                W = ComplexToTangent(Wc, E1, E2);          % [3nV x nT x M] ambient 3-vector
+            else
+                [W, Messages, isError] = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame);
+                if isError, break; end
+                % Dirac family: Analysis carries the FULL quaternion [4nV x nT x M]; project to
+                % the physical 3-vector for the saved source scalogram (the cortical viewer is
+                % 1/3-component). The full-quaternion transform stays available via bst_eigenwavelet.
+                if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+                    W = bst_eigenwavelet('ToVec', W, EigenMat);
+                end
             end
             Result = struct('Type', 'wavelet', 'W', W, 'Frame', frame);
         case 'project'
@@ -554,10 +568,11 @@ end
 function FileMat = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile)
     % Spatial graph-wavelet scalogram W [nSrc x nTime x M] -> source TimefreqMat, with the
     % per-member centroid sqrt(lambda) as the (spatial-)frequency axis (reuses the cortical
-    % time-freq viewer). Unconstrained (3-vector) for Dirac/face variants; scalar otherwise.
+    % time-freq viewer). 3-vector for Dirac/face + Connection Laplacian (decoded to ambient
+    % tangent vectors); scalar otherwise.
     W = Result.W;                          % [nSrc x nTime x M]
     [~, nT, M] = size(W);
-    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face', 'Connection Laplacian'}))
         nComp = 3;
     else
         nComp = 1;
@@ -592,4 +607,52 @@ function FileMat = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, Dat
     FileMat.Options.Nf        = Result.Frame.Nf;
     FileMat.Options.Centers   = Result.Frame.Centers;
     FileMat = bst_history('add', FileMat, 'compute', 'Spatial graph-wavelet transform (bst_eigen)');
+end
+
+
+%% ===== CONNECTION-LAPLACIAN TANGENT <-> COMPLEX BRIDGE =====
+% The connection operator acts on a complex tangent field (one z per vertex in the
+% canonical frame). These convert a physical 3-vector source map to/from that field using
+% the operator's OWN frame (bst_operator_frame -> provably the eigenmode decoding basis).
+
+function [E1, E2] = GetConnectionFrame(EigenMat, OperatorMat)
+    % Global per-vertex tangent axes [nVg x 3], scattered from each hemisphere's frame.
+    nVg = 0;
+    for h = 1:numel(EigenMat.GlobalVertices)
+        if ~isempty(EigenMat.GlobalVertices{h})
+            nVg = max(nVg, max(EigenMat.GlobalVertices{h}(:)));
+        end
+    end
+    E1 = zeros(nVg, 3);  E2 = zeros(nVg, 3);
+    for h = 1:numel(EigenMat.GlobalVertices)
+        gv = EigenMat.GlobalVertices{h}(:);
+        if isempty(gv); continue; end
+        Fr = bst_operator_frame(OperatorMat, h);
+        E1(gv, :) = Fr.e1;  E2(gv, :) = Fr.e2;
+    end
+end
+
+function Z = TangentToComplex(F3, E1, E2)
+    % Physical 3-vector field [3nVg x nT] -> complex tangent field [nVg x nT]:
+    % z(v) = <u(v), e1(v)> + i <u(v), e2(v)>  (the normal component of u is dropped).
+    nVg = size(E1, 1);  nT = size(F3, 2);
+    F3r = reshape(F3, 3, nVg, nT);
+    re = sum(F3r .* reshape(E1.', 3, nVg), 1);   % [1 x nVg x nT]
+    im = sum(F3r .* reshape(E2.', 3, nVg), 1);
+    Z  = reshape(re, nVg, nT) + 1i * reshape(im, nVg, nT);
+end
+
+function V = ComplexToTangent(Wc, E1, E2)
+    % Complex tangent scalogram [nVg x nT x M] -> ambient 3-vector [3nVg x nT x M]:
+    % u(v) = real(z(v)) * e1(v) + imag(z(v)) * e2(v).
+    [nVg, nT, M] = size(Wc);
+    V = zeros(3 * nVg, nT, M);
+    for m = 1:M
+        Z = Wc(:, :, m);                          % [nVg x nT]
+        Vk = zeros(3, nVg, nT);
+        for k = 1:3
+            Vk(k, :, :) = real(Z) .* E1(:, k) + imag(Z) .* E2(:, k);   % [nVg x nT]
+        end
+        V(:, :, m) = reshape(Vk, 3 * nVg, nT);
+    end
 end
