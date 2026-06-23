@@ -40,6 +40,14 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 %     - isError     : 1 if an error happened
 %
 % SEE ALSO: bst_eigen, bst_helmholtz, bst_gradient, bst_get_operator_node, tess_manifold
+%
+%     TANGENT STRATUM — two Laplacians, not one. The differential ops (div/curl) use the
+%     de Rham / DEC route (delta d + d delta, the Hodge Laplacian). The SMOOTHING / eigen
+%     Laplacian for tangent fields is the CONNECTION (Bochner) Laplacian (grad* grad),
+%     supplied by the 'Connection Laplacian' operator node and bst_eigen. They differ by
+%     Gauss curvature K (Weitzenbock: Delta_Hodge = Delta_connection + Ric, Ric = K g on a
+%     surface). Use the de Rham route for div/curl/Helmholtz; the connection route for
+%     vector smoothing/spectral analysis.
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -63,11 +71,12 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment      = '';
-Def_OPTIONS.Method       = 'gradient';        % {'gradient','laplacian','poisson','helmholtz'}
+Def_OPTIONS.Method       = 'gradient';        % {'gradient','divergence','curl','laplacian','poisson','helmholtz'}
 Def_OPTIONS.SurfaceFile  = [];                % cortex tying the data to its operators ([] => from the results file)
 Def_OPTIONS.Gauge        = 'trivial';         % manifold_ gauge for node resolution
 Def_OPTIONS.TimeWindow   = [];                % restrict the input time series
 Def_OPTIONS.iTargetStudy = [];                % output study ('NoSave' => return contents, do not save)
+Def_OPTIONS.FieldType    = 'auto';            % {'auto','scalar','tangent','ambient'} field stratum
 
 % Return the default options
 if (nargin == 0)
@@ -124,6 +133,17 @@ for iData = 1:numel(Data)
     % ----- resolve geometry/operators (per-Method) + dispatch -----
     Surf = in_tess_bst(SurfaceFile, 0);
     nVtot = size(Surf.Vertices, 1);
+    nFtot = size(Surf.Faces, 1);
+    stratum = i_field_stratum(F, nVtot, nFtot, OPTIONS.FieldType);
+    % valid (Method x stratum) pairs; everything else is guarded
+    valid = struct('gradient',{{'scalar'}}, 'divergence',{{'tangent','ambient'}}, ...
+                   'curl',{{'tangent','ambient'}}, 'laplacian',{{'scalar'}}, ...
+                   'poisson',{{'scalar'}}, 'helmholtz',{{'ambient'}});
+    m = lower(OPTIONS.Method);
+    if isfield(valid, m) && ~ismember(stratum, valid.(m))
+        error('bst_operators:badFieldType', ...
+            '%s is undefined for a %s field.', OPTIONS.Method, stratum);
+    end
     switch lower(OPTIONS.Method)
         case 'gradient'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);   % carries the DEC operators
@@ -138,23 +158,25 @@ for iData = 1:numel(Data)
         case 'poisson'
             LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
             f     = i_as_vertex_scalar(F, nVtot, 'poisson');
-            Field = i_poisson(LBO, f, nVtot);                       % [nV x nT]
+            Field = bst_poisson(LBO, f);                            % [nV x nT]
             Result = struct('Method','poisson', 'Field',Field, 'nComponents',1);
         case 'divergence'
-            if size(F,1) ~= 3*size(Surf.Faces,1)
-                Messages = sprintf('bst_operators: divergence needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
-                isError = 1; break;
+            Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            if strcmp(stratum, 'ambient')
+                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Field = bst_divergence(F, Mani, 'Ambient', Surf, Dir, LBO);
+            else
+                Field = bst_divergence(F, Mani);                   % tangent [3nF]
             end
-            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Field = bst_divergence(F, Mani);                        % [nV x nT] per-vertex scalar
             Result = struct('Method','divergence', 'Field',Field, 'nComponents',1);
         case 'curl'
-            if size(F,1) ~= 3*size(Surf.Faces,1)
-                Messages = sprintf('bst_operators: curl needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
-                isError = 1; break;
+            Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            if strcmp(stratum, 'ambient')
+                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Field = bst_curl(F, Mani, 'Ambient', Surf, Dir, LBO);
+            else
+                Field = bst_curl(F, Mani);                          % tangent [3nF]
             end
-            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Field = bst_curl(F, Mani);                              % [nV x nT] per-vertex vorticity scalar
             Result = struct('Method','curl', 'Field',Field, 'nComponents',1);
         case 'helmholtz'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
@@ -189,6 +211,31 @@ bst_progress('stop');
 end
 
 
+%% ===== infer the field stratum from layout (or honor an explicit FieldType) =====
+function stratum = i_field_stratum(F, nVtot, nFtot, explicit)
+    if ~strcmpi(explicit, 'auto'), stratum = lower(explicit); return; end
+    nr = size(F,1);
+    if nr == 3*nVtot
+        stratum = 'ambient';
+    elseif nr == 3*nFtot
+        stratum = 'tangent';
+    elseif nr == nVtot
+        if nVtot == nFtot
+            error('bst_operators:badFieldType', ...
+                'Ambiguous layout (nV==nF); set OPTIONS.FieldType explicitly.');
+        end
+        if ~isreal(F)
+            stratum = 'tangent';        % connection (complex) representation
+        else
+            stratum = 'scalar';
+        end
+    else
+        error('bst_operators:badFieldType', ...
+            'Cannot infer field stratum from %d rows (nV=%d, nF=%d); set OPTIONS.FieldType.', nr, nVtot, nFtot);
+    end
+end
+
+
 %% ===== coerce input to a per-vertex scalar field [nV x nT] =====
 function f = i_as_vertex_scalar(F, nVtot, method)
     if size(F,1) == nVtot
@@ -214,25 +261,6 @@ function Lf = i_laplacian(LBO, f, nVtot)
     end
 end
 
-
-%% ===== POISSON: solve K phi = M f per hemisphere (pinned constant nullspace) [nV x nT] =====
-function phi = i_poisson(LBO, f, nVtot)
-    phi = zeros(nVtot, size(f,2));
-    for hh = 1:numel(LBO.Operator)
-        vH = double(LBO.GlobalVertices{hh}(:));
-        K  = LBO.Operator{hh};  M = LBO.Mass{hh};
-        n  = size(K,1);  free = (2:n)';  totMass = sum(M(:));
-        dK = decomposition(K(free,free), 'chol');
-        fh = f(vH,:);
-        ph = zeros(n, size(fh,2));
-        for c = 1:size(fh,2)
-            rhs = M * (fh(:,c) - (sum(M*fh(:,c))/totMass));   % project RHS to mean-zero
-            x = zeros(n,1);  x(free) = dK \ rhs(free);
-            ph(:,c) = x - mean(x);                            % recenter
-        end
-        phi(vH,:) = ph;
-    end
-end
 
 
 %% ===== save a results_ source map (mirrors bst_eigen's filter output) =====

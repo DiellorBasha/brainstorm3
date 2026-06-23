@@ -1,5 +1,5 @@
-function divField = bst_divergence(V, ManifoldMat)
-% BST_DIVERGENCE: Divergence of a tangent vector field on the cortical manifold.
+function divField = bst_divergence(V, ManifoldMat, varargin)
+% BST_DIVERGENCE: Divergence of a tangent or ambient vector field on the cortical manifold.
 %
 % On a 2-D surface the de Rham complex is L0 -d0-> L1 -d1-> L2 (scalar -> tangent vector ->
 % scalar). The divergence is the NEGATIVE ADJOINT of the gradient (grad = #d0):
@@ -8,22 +8,36 @@ function divField = bst_divergence(V, ManifoldMat)
 % cached DEC primitives (sharp, d0, Hodge stars *0,*2) -- a pure DATA op that builds no operators
 % -- and AVOIDS *1^-1 (the metric flat is unstable: *1=cotan has negative entries on obtuse
 % triangles). By construction div(grad f) is a Galerkin Laplace-Beltrami operator (~ M^-1 K).
-% v1 handles a TANGENT face field (the 3D / normal-bearing case stays with bst_helmholtz).
-% I/O-free: the caller resolves and passes the loaded manifold node.
+%
+% Two field types are supported:
+%   TANGENT: v1 per-FACE field [3nF x nT] (interleaved x,y,z per face; e.g. output of
+%            bst_gradient). Uses stable DEC adjoint. Call: bst_divergence(V, ManifoldMat).
+%   AMBIENT: 3D R^3 per-VERTEX field [3nV x nT] (interleaved x,y,z per vertex; e.g. a Dirac
+%            source vector). Wraps the Dirac Hodge engine (bst_helmholtz) and adds the
+%            mean-curvature coupling term: div_Sigma(J) = div_Sigma(J_tan) - 2*H*(J.N),
+%            where H is the scalar mean curvature and N is the outward vertex normal.
+%            Call: bst_divergence(V, ManifoldMat, 'Ambient', Surf, Dir, LBO).
+% I/O-free: the caller resolves and passes the loaded manifold node (and operator nodes for
+% the ambient branch).
 %
 % USAGE:
 %   divField = bst_divergence(V, ManifoldMat)
+%   divField = bst_divergence(V, ManifoldMat, 'Ambient', Surf, Dir, LBO)
 %
 % INPUTS:
-%   - V           : tangent vector field, NATIVE per-FACE ambient [3nF x nT] (interleaved x,y,z
-%                   per face; e.g. the output of bst_gradient)
+%   - V           : [TANGENT] per-FACE ambient [3nF x nT]; [AMBIENT] per-VERTEX [3nV x nT]
 %   - ManifoldMat : a manifold_ node (tess_manifold(Surf)) whose 1x2 DEC group carries the
 %                   per-hemisphere flat/d0/h0/h1 + GlobalVertices/GlobalFaces.
+%   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
+%   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
+%   - Dir         : (ambient only) Dirac operator node (bst_get_operator_node(Surf,'Dirac'))
+%   - LBO         : (ambient only) LBO operator node (bst_get_operator_node(Surf,'Laplace-Beltrami'))
 %
 % OUTPUTS:
 %   - divField    : per-VERTEX scalar field [nV x nT]
 %
-% SEE ALSO: bst_operators, bst_gradient, bst_curl, tess_manifold (DEC group)
+% SEE ALSO: bst_operators, bst_gradient, bst_curl, bst_helmholtz, tess_manifold (DEC group)
+% (de Rham/Hodge route; the connection Laplacian differs by Gauss curvature K — see bst_operators.)
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -45,6 +59,13 @@ function divField = bst_divergence(V, ManifoldMat)
 %
 % Authors: Diellor Basha, 2026
 
+    % ----- ambient (3nV) branch: Hodge divergence + mean-curvature coupling -----
+    if ~isempty(varargin) && strcmpi(varargin{1}, 'Ambient')
+        Surf = varargin{2};  Dir = varargin{3};  LBO = varargin{4};
+        divField = i_ambient_divergence(V, ManifoldMat, Surf, Dir, LBO);
+        return;
+    end
+    % ----- tangent (3nF) branch: existing stable DEC adjoint (UNCHANGED) -----
     if ~isfield(ManifoldMat, 'DEC') || isempty(ManifoldMat.DEC) || ~isfield(ManifoldMat.DEC, 'sharp')
         error('bst_divergence:noDEC', 'The manifold node has no DEC operators (recompute tess_manifold).');
     end
@@ -62,4 +83,30 @@ function divField = bst_divergence(V, ManifoldMat)
         h0inv = spdiags(1 ./ max(full(diag(DEC(hh).h0)), eps), 0, numel(vH), numel(vH));
         divField(vH, :) = -h0inv * (DEC(hh).d0' * (DEC(hh).sharp' * WFv));   % -*0^-1 d0' #' W_F V
     end
+end
+
+%% ===== ambient divergence: Hodge div (imag.n) + mean-curvature term -2H(J.N) =====
+function divField = i_ambient_divergence(J, ManifoldMat, Surf, Dir, LBO)
+    H = bst_helmholtz('Decompose', {Dir, LBO}, ManifoldMat, Surf, J);   % H.Div = tangential Hodge divergence
+    nVtot = size(Surf.Vertices, 1);  nT = size(J, 2);
+    meanCurvTerm = zeros(nVtot, nT);
+    % Vertex normals: use VertNormals if present, else compute via tess_normals
+    if isfield(Surf, 'VertNormals') && ~isempty(Surf.VertNormals)
+        NvAll = Surf.VertNormals;                           % [nVtot x 3] outward vertex normals
+    else
+        NvAll = tess_normals(Surf.Vertices, Surf.Faces);
+    end
+    for hh = 1:numel(LBO.Operator)
+        if isempty(LBO.Operator{hh}), continue; end
+        vH = double(LBO.GlobalVertices{hh}(:));
+        K = LBO.Operator{hh};  M = LBO.Mass{hh};
+        X = Surf.Vertices(vH, :);                           % [nVh x 3] positions
+        HN = 0.5 * (M \ (K * X));                           % mean-curvature normal HN = 1/2 M^-1 K X
+        Nv = NvAll(vH, :);                                  % outward vertex normals [nVh x 3]
+        Hsc = sum(HN .* Nv, 2);                             % scalar mean curvature H = HN . N  [nVh x 1]
+        Jx = J(3*(vH-1)+1, :);  Jy = J(3*(vH-1)+2, :);  Jz = J(3*(vH-1)+3, :);
+        JdotN = Jx.*Nv(:,1) + Jy.*Nv(:,2) + Jz.*Nv(:,3); % [nVh x nT]
+        meanCurvTerm(vH, :) = -2 * (Hsc .* JdotN);         % -2 H (J.N)
+    end
+    divField = H.Div + meanCurvTerm;
 end

@@ -1,5 +1,5 @@
-function curlField = bst_curl(V, ManifoldMat)
-% BST_CURL: Curl (scalar vorticity) of a tangent vector field on the cortical manifold.
+function curlField = bst_curl(V, ManifoldMat, varargin)
+% BST_CURL: Curl (scalar vorticity) of a tangent or ambient vector field on the cortical manifold.
 %
 % On a 2-D surface the de Rham complex is L0 -d0-> L1 -d1-> L2 (scalar -> tangent vector ->
 % scalar). Unlike R^3 there is no vector-valued curl: the curl of a tangent field is the SCALAR
@@ -10,22 +10,36 @@ function curlField = bst_curl(V, ManifoldMat)
 % where N is the outward face normal (N x V rotates each tangent face vector by 90 degrees). This
 % reuses the STABLE adjoint divergence (bst_divergence) and so avoids *1^-1 (the metric flat is
 % unstable on obtuse triangles). Because rot(grad f) is divergence-free, curl(grad f) ~ 0. The
-% sign convention is CCW-positive seen from OUTSIDE (outward N). v1 handles a TANGENT face field
-% (the 3D / normal-bearing case stays with bst_helmholtz). I/O-free: caller passes the loaded node.
+% sign convention is CCW-positive seen from OUTSIDE (outward N).
+%
+% Two field types are supported:
+%   TANGENT: v1 per-FACE field [3nF x nT] (interleaved x,y,z per face; e.g. output of
+%            bst_gradient). Uses -div(N x V) via the stable DEC adjoint.
+%            Call: bst_curl(V, ManifoldMat).
+%   AMBIENT: 3D R^3 per-VERTEX field [3nV x nT] (interleaved x,y,z per vertex; e.g. a Dirac
+%            source vector). Returns the Hodge vorticity (Dirac w-part) from bst_helmholtz.
+%            No mean-curvature coupling for curl (vorticity is purely intrinsic).
+%            Call: bst_curl(V, ManifoldMat, 'Ambient', Surf, Dir, LBO).
+% I/O-free: caller passes the loaded node (and operator nodes for ambient branch).
 %
 % USAGE:
 %   curlField = bst_curl(V, ManifoldMat)
+%   curlField = bst_curl(V, ManifoldMat, 'Ambient', Surf, Dir, LBO)
 %
 % INPUTS:
-%   - V           : tangent vector field, NATIVE per-FACE ambient [3nF x nT] (interleaved x,y,z
-%                   per face; e.g. the output of bst_gradient)
+%   - V           : [TANGENT] per-FACE ambient [3nF x nT]; [AMBIENT] per-VERTEX [3nV x nT]
 %   - ManifoldMat : a manifold_ node (tess_manifold(Surf)) whose 1x2 DEC group + Embedded facet
 %                   carry the per-hemisphere operators and face normals.
+%   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
+%   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
+%   - Dir         : (ambient only) Dirac operator node (bst_get_operator_node(Surf,'Dirac'))
+%   - LBO         : (ambient only) LBO operator node (bst_get_operator_node(Surf,'Laplace-Beltrami'))
 %
 % OUTPUTS:
 %   - curlField   : per-VERTEX scalar vorticity field [nV x nT]
 %
-% SEE ALSO: bst_operators, bst_gradient, bst_divergence, tess_manifold (DEC group)
+% SEE ALSO: bst_operators, bst_gradient, bst_divergence, bst_helmholtz, tess_manifold (DEC group)
+% (de Rham/Hodge route; the connection Laplacian differs by Gauss curvature K — see bst_operators.)
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -47,6 +61,14 @@ function curlField = bst_curl(V, ManifoldMat)
 %
 % Authors: Diellor Basha, 2026
 
+    % ----- ambient (3nV) branch: Hodge vorticity (Dirac w-part) -----
+    if ~isempty(varargin) && strcmpi(varargin{1}, 'Ambient')
+        Surf = varargin{2};  Dir = varargin{3};  LBO = varargin{4};
+        H = bst_helmholtz('Decompose', {Dir, LBO}, ManifoldMat, Surf, V);
+        curlField = H.Curl;
+        return;
+    end
+    % ----- tangent (3nF) branch: existing -div(N x V) (UNCHANGED) -----
     if ~isfield(ManifoldMat, 'DEC') || isempty(ManifoldMat.DEC) || ~isfield(ManifoldMat.DEC, 'sharp')
         error('bst_curl:noDEC', 'The manifold node has no DEC operators (recompute tess_manifold).');
     end

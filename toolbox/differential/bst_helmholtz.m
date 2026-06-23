@@ -133,13 +133,12 @@ function Op = i_prepare_vertex(OperatorNode, ManifoldMat, Surf)
         Gx = sparse(grows, gcols, [c1(:,1);c2(:,1);c3(:,1)], nFh, nVh);
         Gy = sparse(grows, gcols, [c1(:,2);c2(:,2);c3(:,2)], nFh, nVh);
         Gz = sparse(grows, gcols, [c1(:,3);c2(:,3);c3(:,3)], nFh, nVh);
-        % LBO pieces + ONE Cholesky of the pinned (vertex 1 fixed) cotan stiffness
-        K = LBO.Operator{hh};  M = LBO.Mass{hh};
-        free = (2:size(K,1))';
+        % LBO pieces + cached Cholesky of the pinned (vertex 1) cotan stiffness via tess_cholesky
+        M = LBO.Mass{hh};
         Op.D{hh}=D; Op.vH{hh}=vH; Op.Nf{hh}=Nf; Op.Wfv{hh}=Wfv; Op.M{hh}=M;
         Op.Gx{hh}=Gx; Op.Gy{hh}=Gy; Op.Gz{hh}=Gz;
-        Op.cholK{hh}  = decomposition(K(free,free), 'chol');
-        Op.free{hh}   = free;
+        Op.cholK{hh}  = tess_cholesky(LBO, hh, 1);    % pin vertex 1; pure getter (I/O-free)
+        Op.free{hh}   = Op.cholK{hh}.free;
         Op.totMass{hh}= sum(M(:));
     end
 end
@@ -186,12 +185,12 @@ function Ht = i_frame_vertex(Op, Jt, withCores)
     end
 end
 
-%% ===== Poisson solve (vertex) =====
-function psi = i_poisson(dK, M, omega, free, totMass)
+%% ===== Poisson solve (vertex): mean-zero project -> cached pinned solve -> recenter =====
+function psi = i_poisson(dK, M, omega, free, totMass) %#ok<INUSD>
     n = size(M,1);
-    omega = omega - (sum(M*omega) / totMass) * ones(n,1);  % project to the mean-zero subspace
-    rhs = M * omega;
-    psi = i_pinned_solve(dK, rhs, free);                   % pinned solve (vertex 1 fixed) + recenter
+    omega = omega - (sum(M*omega) / totMass) * ones(n,1);   % project to mean-zero
+    x = tess_cholesky('solve', dK, M*omega);                % shared permuted Cholesky solve
+    psi = x - mean(x);                                      % recenter
 end
 
 %% ===== vertex core detection: persistence-ranked extrema, per hemisphere =====

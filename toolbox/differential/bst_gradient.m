@@ -50,6 +50,11 @@ function [gradField, gradMag] = bst_gradient(F, ManifoldMat)
     nH    = numel(DEC);
     allGF = {DEC.GlobalFaces};  allGF = allGF(~cellfun(@isempty, allGF));
     nFtot = max(cellfun(@(c) max(double(c(:))), allGF));
+    nVtot = max(cellfun(@(c) max(double(c(:))), {DEC.GlobalVertices}));
+    if size(F,1) ~= nVtot
+        error('bst_gradient:notScalar', ...
+            'gradient expects a per-vertex scalar [nV=%d x nT]; got %d rows.', nVtot, size(F,1));
+    end
     nT    = size(F, 2);
     gradField = zeros(3*nFtot, nT);
     needMag = (nargout > 1);
