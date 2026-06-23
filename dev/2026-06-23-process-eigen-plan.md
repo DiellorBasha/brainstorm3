@@ -258,7 +258,7 @@ function test_process_eigen()
     ok = iscell(Out) && ~isempty(Out) && ischar(Out{1});
     nFail = nFail + chk('process_eigen returns a saved node', ok);
     if ok
-        R = in_bst_timefreq(Out{1}, 'Method', 'Freqs');
+        R = in_bst_timefreq(Out{1}, 0, 'Method', 'Freqs');
         nFail = nFail + chk('node Method == eigenspectrum', strcmp(R.Method, 'eigenspectrum'));
         nFail = nFail + chk('node has Freqs', ~isempty(R.Freqs));
         try, file_delete(file_fullpath(Out{1}), 1); db_reload_studies(sInputs.iStudy); catch; end
@@ -503,7 +503,7 @@ function test_process_eigenspectrum()
             if ok
                 nFail = nFail + chk('node prefix timefreq_eigenspectrum', ...
                     ~isempty(strfind(Out{1}, 'timefreq_eigenspectrum'))); %#ok<STREMP>
-                R = in_bst_timefreq(Out{1}, 'Method');
+                R = in_bst_timefreq(Out{1}, 0, 'Method');
                 nFail = nFail + chk('node Method == eigenspectrum', strcmp(R.Method, 'eigenspectrum'));
                 try, file_delete(file_fullpath(Out{1}), 1); db_reload_studies(sInputs.iStudy); catch; end
             end
