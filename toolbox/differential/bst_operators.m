@@ -68,6 +68,7 @@ Def_OPTIONS.SurfaceFile  = [];                % cortex tying the data to its ope
 Def_OPTIONS.Gauge        = 'trivial';         % manifold_ gauge for node resolution
 Def_OPTIONS.TimeWindow   = [];                % restrict the input time series
 Def_OPTIONS.iTargetStudy = [];                % output study ('NoSave' => return contents, do not save)
+Def_OPTIONS.FieldType    = 'auto';            % {'auto','scalar','tangent','ambient'} field stratum
 
 % Return the default options
 if (nargin == 0)
@@ -124,6 +125,17 @@ for iData = 1:numel(Data)
     % ----- resolve geometry/operators (per-Method) + dispatch -----
     Surf = in_tess_bst(SurfaceFile, 0);
     nVtot = size(Surf.Vertices, 1);
+    nFtot = size(Surf.Faces, 1);
+    stratum = i_field_stratum(F, nVtot, nFtot, OPTIONS.FieldType);
+    % valid (Method x stratum) pairs; everything else is guarded
+    valid = struct('gradient',{{'scalar'}}, 'divergence',{{'tangent','ambient'}}, ...
+                   'curl',{{'tangent','ambient'}}, 'laplacian',{{'scalar'}}, ...
+                   'poisson',{{'scalar'}}, 'helmholtz',{{'ambient'}});
+    m = lower(OPTIONS.Method);
+    if isfield(valid, m) && ~ismember(stratum, valid.(m))
+        error('bst_operators:badFieldType', ...
+            '%s is undefined for a %s field.', OPTIONS.Method, stratum);
+    end
     switch lower(OPTIONS.Method)
         case 'gradient'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);   % carries the DEC operators
@@ -141,20 +153,22 @@ for iData = 1:numel(Data)
             Field = bst_poisson(LBO, f);                            % [nV x nT]
             Result = struct('Method','poisson', 'Field',Field, 'nComponents',1);
         case 'divergence'
-            if size(F,1) ~= 3*size(Surf.Faces,1)
-                Messages = sprintf('bst_operators: divergence needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
-                isError = 1; break;
+            Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            if strcmp(stratum, 'ambient')
+                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Field = bst_divergence(F, Mani, 'Ambient', Surf, Dir, LBO);
+            else
+                Field = bst_divergence(F, Mani);                   % tangent [3nF]
             end
-            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Field = bst_divergence(F, Mani);                        % [nV x nT] per-vertex scalar
             Result = struct('Method','divergence', 'Field',Field, 'nComponents',1);
         case 'curl'
-            if size(F,1) ~= 3*size(Surf.Faces,1)
-                Messages = sprintf('bst_operators: curl needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
-                isError = 1; break;
+            Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            if strcmp(stratum, 'ambient')
+                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Field = bst_curl(F, Mani, 'Ambient', Surf, Dir, LBO);
+            else
+                Field = bst_curl(F, Mani);                          % tangent [3nF]
             end
-            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Field = bst_curl(F, Mani);                              % [nV x nT] per-vertex vorticity scalar
             Result = struct('Method','curl', 'Field',Field, 'nComponents',1);
         case 'helmholtz'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
@@ -186,6 +200,29 @@ catch ME
     rethrow(ME);
 end
 bst_progress('stop');
+end
+
+
+%% ===== infer the field stratum from layout (or honor an explicit FieldType) =====
+function stratum = i_field_stratum(F, nVtot, nFtot, explicit)
+    if ~strcmpi(explicit, 'auto'), stratum = lower(explicit); return; end
+    nr = size(F,1);
+    if nr == 3*nVtot
+        stratum = 'ambient';
+    elseif nr == 3*nFtot
+        stratum = 'tangent';
+    elseif nr == nVtot && ~isreal(F)
+        stratum = 'tangent';        % connection (complex) representation
+    elseif nr == nVtot
+        stratum = 'scalar';
+    else
+        error('bst_operators:badFieldType', ...
+            'Cannot infer field stratum from %d rows (nV=%d, nF=%d); set OPTIONS.FieldType.', nr, nVtot, nFtot);
+    end
+    if nVtot == nFtot
+        error('bst_operators:badFieldType', ...
+            'Ambiguous layout (nV==nF); set OPTIONS.FieldType explicitly.');
+    end
 end
 
 
