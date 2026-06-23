@@ -1,28 +1,32 @@
 function test_dirac_helmholtz()
-% Pure tests: Poisson solve round-trip, core classifier on a planted scalar, and a
-% full-pipeline sanity on the real Subject01 cortex (Dirac + LBO operators).
+% Pure tests for bst_helmholtz (vertex domain): Poisson solve round-trip, core classifier
+% on a planted scalar, and a full-pipeline sanity on the real Subject01 cortex. Geometry is
+% sourced from the manifold node; operators from the Dirac + LBO operator nodes.
 % Authors: Diellor Basha, 2026
     nFail = 0;
     SurfaceFile = bst_get('Subject',1).Surface(5).FileName;
     Surf  = in_tess_bst(SurfaceFile, 0);
+    Mani  = tess_manifold(SurfaceFile);
     Dirac = i_load_op(SurfaceFile, 'Dirac');
     LBO   = i_load_op(SurfaceFile, 'Laplace-Beltrami');
+    OpNode = {Dirac, LBO};
 
     % --- (1) Poisson solve round-trip on hemisphere 1: K psi = M omega recovers psi ---
+    %     (PoissonSolve is now internal; replicate the pinned mean-zero solve inline.)
     K = LBO.Operator{1}; M = LBO.Mass{1}; n = size(K,1);
     rng(0); psiTrue = randn(n,1); psiTrue = psiTrue - mean(psiTrue);
     rhs = K * psiTrue;                                   % = M*omega with omega = Lap*psiTrue
-    psiRec = bst_dirac_helmholtz('PoissonSolve', K, M, M \ rhs);  % omega = M\rhs
-    psiRec = psiRec - mean(psiRec);
+    omega = M \ rhs;  omega = omega - (sum(M*omega)/sum(M(:)))*ones(n,1);
+    free = (2:n)';  dK = decomposition(K(free,free),'chol');
+    b = M*omega;  x = zeros(n,1);  x(free) = dK \ b(free);
+    psiRec = x - mean(x);
     nFail = nFail + chk('Poisson recovers psi (up to const)', max(abs(psiRec - psiTrue)) < 1e-6 * max(abs(psiTrue)));
 
     % --- (2) Core classifier: a Gaussian bump -> its peak is detected as a (max) core ---
-    % (A single bump necessarily also yields a min/saddle elsewhere -- the index theorem;
-    %  the essential property is that the planted peak is found and classified as a maximum.)
     V = Surf.Vertices; vc = 5000;
     d2 = sum((V - V(vc,:)).^2, 2);
     psi = exp(-d2 / (2*(0.01)^2));                      % sharp positive bump at vc
-    cores = bst_dirac_helmholtz('FindCores', psi, Surf.VertConn, zeros(size(psi)));
+    cores = bst_helmholtz('FindCores', psi, Surf.VertConn, zeros(size(psi)));
     iVs = [cores.iVertex];
     nFail = nFail + chk('bump peak is a core', ismember(vc, iVs));
     cvc = cores(iVs==vc);
@@ -30,41 +34,40 @@ function test_dirac_helmholtz()
 
     % --- (3) Full pipeline on a real (random) source field: finite, right size, nonzero ---
     nV = size(V,1); rng(1); J = randn(3*nV, 2) * 1e-9;
-    H = bst_dirac_helmholtz(Dirac, LBO, Surf, J);
+    H = bst_helmholtz('Decompose', OpNode, Mani, Surf, J);
     nFail = nFail + chk('Curl size [nV x nT]', isequal(size(H.Curl), [nV 2]));
     nFail = nFail + chk('Div/Psi/Phi present + finite', all(isfinite(H.Div(:))) && all(isfinite(H.Psi(:))) && all(isfinite(H.Phi(:))));
     nFail = nFail + chk('field has both curl and div', max(abs(H.Curl(:)))>0 && max(abs(H.Div(:)))>0);
     nFail = nFail + chk('Cores is 1xnT cell', iscell(H.Cores) && numel(H.Cores)==2);
 
     % --- (4) on-demand path: Prepare once + Frame(single col) == whole-series column ---
-    Op  = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    Ht  = bst_dirac_helmholtz('Frame', Op, J(:,1));
+    Op  = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
+    Ht  = bst_helmholtz('Frame', Op, J(:,1));
     nFail = nFail + chk('Frame Curl == Decompose col 1', isequal(Ht.Curl, H.Curl(:,1)));
     nFail = nFail + chk('Frame Psi  == Decompose col 1', isequal(Ht.Psi,  H.Psi(:,1)));
     nFail = nFail + chk('Frame cores match col 1', numel(Ht.Cores)==numel(H.Cores{1}));
 
     % --- (5) Hodge decomposition: component fields, exact reconstruction, dominance ---
-    Op2 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    Ht  = bst_dirac_helmholtz('Frame', Op2, J(:,1));
+    Op2 = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
+    Ht  = bst_helmholtz('Frame', Op2, J(:,1));
     nFail = nFail + chk('component fields are [nV x 3]', isequal(size(Ht.Virr),[size(V,1) 3]) && isequal(size(Ht.Vsol),[size(V,1) 3]));
     recon = Ht.Virr + Ht.Vsol + Ht.Vharm;
     nFail = nFail + chk('exact reconstruction Virr+Vsol+Vharm == J', max(abs(recon(:)-Ht.Vtot(:))) < 1e-9*max(abs(Ht.Vtot(:))));
-    Hirr = bst_dirac_helmholtz('Frame', Op2, reshape(Ht.Virr',[],1));
-    Hsol = bst_dirac_helmholtz('Frame', Op2, reshape(Ht.Vsol',[],1));
+    Hirr = bst_helmholtz('Frame', Op2, reshape(Ht.Virr',[],1));
+    Hsol = bst_helmholtz('Frame', Op2, reshape(Ht.Vsol',[],1));
     nFail = nFail + chk('irrotational is divergence-dominated', sum(Hirr.Div.^2) > sum(Hirr.Curl.^2));
     nFail = nFail + chk('solenoidal is curl-dominated',         sum(Hsol.Curl.^2) > sum(Hsol.Div.^2));
     nFail = nFail + chk('Cores + Sources are struct arrays', isstruct(Ht.Cores) && isstruct(Ht.Sources));
     nFail = nFail + chk('HarmFrac in [0,1]', isscalar(Ht.HarmFrac) && Ht.HarmFrac >= 0 && Ht.HarmFrac <= 1.0001);
 
     % --- (6) persistence schema + per-hemisphere globals ---
-    Op6 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    % plant one positive psi bump per hemisphere; check each hemisphere yields a global core
+    Op6 = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
     vL = Op6.vH{1}(round(numel(Op6.vH{1})/2));
     vR = Op6.vH{2}(round(numel(Op6.vH{2})/2));
     psi6 = zeros(size(V,1),1);
     psi6 = psi6 + exp(-sum((V-V(vL,:)).^2,2)/(2*0.01^2));
     psi6 = psi6 + exp(-sum((V-V(vR,:)).^2,2)/(2*0.01^2));
-    cr = bst_dirac_helmholtz('FindCoresOp', psi6, Op6, zeros(size(V,1),1));
+    cr = bst_helmholtz('FindCoresOp', psi6, Op6, zeros(size(V,1),1));
     nFail = nFail + chk('cores carry persistence field', isfield(cr,'persistence') && isfield(cr,'pos') && isfield(cr,'isGlobal'));
     glob = cr(logical([cr.isGlobal]));
     nFail = nFail + chk('one +global per hemisphere (>=2 globals)', sum([glob.chirality]==1) >= 2);
@@ -74,15 +77,15 @@ function test_dirac_helmholtz()
     nFail = nFail + chk('sub-vertex pos near planted peak', ~isempty(cL) && norm(cL(1).pos - V(vL,:)) < 0.004);
 
     % --- (7) Decompose emits per-frame Sources matching Frame ---
-    H7 = bst_dirac_helmholtz(Dirac, LBO, Surf, J);
+    H7 = bst_helmholtz('Decompose', OpNode, Mani, Surf, J);
     nFail = nFail + chk('Decompose has Sources cell', isfield(H7,'Sources') && iscell(H7.Sources) && numel(H7.Sources)==2);
-    Op7 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    Ht7 = bst_dirac_helmholtz('Frame', Op7, J(:,1));
+    Op7 = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
+    Ht7 = bst_helmholtz('Frame', Op7, J(:,1));
     nFail = nFail + chk('Decompose Sources col1 == Frame', numel(H7.Sources{1})==numel(Ht7.Sources));
 
     % --- (8) cores carry a hemisphere tag consistent with Op.vH ---
-    Op8 = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    Ht8 = bst_dirac_helmholtz('Frame', Op8, J(:,1));
+    Op8 = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
+    Ht8 = bst_helmholtz('Frame', Op8, J(:,1));
     nFail = nFail + chk('cores have hemi field', isfield(Ht8.Cores,'hemi'));
     okHemi = true;
     for c = Ht8.Cores
@@ -91,7 +94,7 @@ function test_dirac_helmholtz()
     nFail = nFail + chk('hemi matches Op.vH membership', okHemi);
 
     % --- (9) Frame(...,false) skips core detection (fast stepping path) ---
-    HtN = bst_dirac_helmholtz('Frame', Op8, J(:,1), false);
+    HtN = bst_helmholtz('Frame', Op8, J(:,1), false);
     nFail = nFail + chk('withCores=false -> empty Cores/Sources', isempty(HtN.Cores) && isempty(HtN.Sources));
     nFail = nFail + chk('withCores=false still computes Psi/Phi', all(isfinite(HtN.Psi)) && all(isfinite(HtN.Phi)));
 
