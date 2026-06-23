@@ -1,0 +1,119 @@
+function varargout = bst_eigenwavelet(varargin)
+% BST_EIGENWAVELET: Spectral graph wavelet orchestrator on an operator eigenbasis.
+%
+% USAGE:
+%   frame = bst_eigenwavelet('Design', family, Nf, lrange)   % family: 'mexhat'|'heat'|'itersine'
+%   H     = bst_eigenwavelet('Evaluate', frame, Lambda)      % [K x M] gains
+%   b     = bst_eigenwavelet('Bounds', frame, Lambda)        % struct A,B,Tightness
+%   [W,Messages,isError]    = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame)
+%   [Frec,Messages,isError] = bst_eigenwavelet('Synthesis', W, EigenMat, OperatorMat, frame)
+%
+% DESCRIPTION:
+%     GSPBox-style spectral graph wavelet frame (Perraudin et al., GSPBOX, arXiv:1408.5781,
+%     2014; Hammond, Vandergheynst & Gribonval, "Wavelets on graphs via spectral graph
+%     theory", Applied and Computational Harmonic Analysis 30(2):129-150, 2011). Adapted to
+%     Brainstorm's exact precomputed eigenbasis: filters are applied as Phi*diag(g(lambda))*Phi'
+%     (NOT the Chebyshev polynomial approximation GSPBox uses to avoid eigendecomposition).
+%
+%     A wavelet transform is a multi-member FRAME {g_1(lambda)..g_M(lambda)}; a single filter
+%     (bst_eigenfilter) is the 1-member case of the same machinery. The per-variant row mapping
+%     and gain evaluation are shared with bst_eigenfilter ('RowMap'/'Design'/'Evaluate').
+%
+%     Families:
+%       'itersine' : tight half-cosine frame (sum_m g_m^2 = const -> exact reconstruction)
+%       'mexhat'   : Nf log-scaled band-pass Mexican-hat wavelets + 1 low-pass scaling function
+%       'heat'     : Nf low-pass heat scales (diffusion scale-space, coarse -> fine)
+%
+% SEE ALSO: bst_eigen, bst_eigenfilter, bst_eigfilter_kernel, manifold_ft, manifold_ift
+
+% @=============================================================================
+% This function is part of the Brainstorm software:
+% https://neuroimage.usc.edu/brainstorm
+%
+% Copyright (c) University of Southern California & McGill University
+% This software is distributed under the terms of the GNU General Public License
+% as published by the Free Software Foundation. Further details on the GPLv3
+% license can be found at http://www.gnu.org/copyleft/gpl.html.
+%
+% FOR RESEARCH PURPOSES ONLY. THE SOFTWARE IS PROVIDED "AS IS," AND THE
+% UNIVERSITY OF SOUTHERN CALIFORNIA AND ITS COLLABORATORS DO NOT MAKE ANY
+% WARRANTY, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+% MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, NOR DO THEY ASSUME ANY
+% LIABILITY OR RESPONSIBILITY FOR THE USE OF THIS SOFTWARE.
+%
+% For more information type "brainstorm license" at command prompt.
+% =============================================================================@
+%
+% Authors: Diellor Basha, 2026
+
+eval(macro_method);
+end
+
+
+%% ===== DESIGN: assemble a frame (cell of handles) =====
+function frame = Design(family, Nf, lrange) %#ok<DEFNU>
+    if (nargin < 2) || isempty(Nf);     Nf = 6; end
+    if (nargin < 3) || isempty(lrange); error('bst_eigenwavelet:Design','lrange = [lmin lmax] is required.'); end
+    lmin = lrange(1); lmax = lrange(2);
+    if ~(lmax > 0) || (lmax <= lmin);   error('bst_eigenwavelet:Design','invalid lrange = [%g %g].', lmin, lmax); end
+    switch lower(family)
+        case 'itersine'
+            overlap = 2;
+            scale = lmax / (Nf - overlap + 1) * overlap;
+            kf = @(x) sin(0.5*pi*(cos(pi*x)).^2) .* (x>=-0.5 & x<=0.5);
+            g = cell(1, Nf);
+            for ii = 1:Nf
+                g{ii} = @(l) kf(double(l(:))/scale - (ii-overlap/2)/overlap) ./ sqrt(overlap) .* sqrt(2);
+            end
+        case 'mexhat'
+            % Nf log-spaced band-pass mexhat wavelets + 1 low-pass scaling function
+            tmin = 1/lmax;
+            tmax = 2/max(lmin, lmax/(4*Nf));
+            tw   = logspace(log10(tmin), log10(tmax), Nf);
+            g = cell(1, Nf+1);
+            g{1} = bst_eigfilter_kernel('heat', struct('t', 2*tmax));   % scaling fn (low-pass)
+            for ii = 1:Nf
+                g{ii+1} = bst_eigfilter_kernel('mexhat', struct('t', tw(ii)));
+            end
+        case 'heat'
+            % Nf low-pass heat scales (diffusion scale-space), coarse -> fine
+            tmin = 1/lmax;
+            tmax = 4/max(lmin, lmax/(4*Nf));
+            tw   = logspace(log10(tmax), log10(tmin), Nf);   % coarse (large t) first
+            g = cell(1, Nf);
+            for ii = 1:Nf
+                g{ii} = bst_eigfilter_kernel('heat', struct('t', tw(ii)));
+            end
+        otherwise
+            error('bst_eigenwavelet:Design','unknown family ''%s'' (use mexhat|heat|itersine).', family);
+    end
+    % Per-member characteristic spatial frequency = gain-weighted centroid of sqrt(lambda)
+    lg = linspace(max(lmin, eps), lmax, 512)';
+    M  = numel(g); cen = zeros(1, M);
+    for m = 1:M
+        gm = abs(g{m}(lg));
+        if sum(gm) > 0; cen(m) = sqrt( sum(lg .* gm) / sum(gm) ); end
+    end
+    frame = struct('Family', lower(family), 'Nf', Nf, 'g', {g}, 'Lrange', [lmin lmax], 'Centers', cen);
+end
+
+
+%% ===== EVALUATE: frame -> gains on Lambda =====
+function H = Evaluate(frame, Lambda) %#ok<DEFNU>
+    Lambda = double(Lambda(:));
+    M = numel(frame.g);
+    H = zeros(numel(Lambda), M);
+    for m = 1:M
+        v = frame.g{m}(Lambda);
+        H(:, m) = v(:);
+    end
+end
+
+
+%% ===== BOUNDS: frame bounds A,B and tightness B/A =====
+function b = Bounds(frame, Lambda) %#ok<DEFNU>
+    H = Evaluate(frame, Lambda);
+    S = sum(H.^2, 2);
+    A = min(S); B = max(S);
+    b = struct('A', A, 'B', B, 'Tightness', B / max(A, eps));
+end

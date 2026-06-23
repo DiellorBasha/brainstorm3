@@ -30,4 +30,9 @@
 % retired to dev/experimental. The live source mapping is bst_dirac / bst_inverse_dirac, which
 % do not use this library.
 %
+% GSPBox frame pattern: this kernel library is the building-block layer for the GSPBox-style
+% frame framework (bst_eigenfilter / bst_eigenwavelet: Design/Evaluate/Analysis/Synthesis/Bounds).
+% Refs: Perraudin et al., GSPBOX, arXiv:1408.5781 (2014); Hammond, Vandergheynst & Gribonval,
+% "Wavelets on graphs via spectral graph theory", ACHA 30(2):129-150 (2011).
+%
 % Authors: Diellor Basha, 2026
