@@ -116,7 +116,9 @@ defer the principled detection science. Test data comes from a trivial
 source-magnitude peak detector, NOT the Helmholtz cores.
 
 1. **`db_template.m`** — `'atom'` and `'dynamicsmat'` cases. ✅
-2. **`toolbox/io/bst_dynamics.m`** — `New` / `NewAtom` / `Add` / `Save` / `Load`
+2. **`toolbox/dynamics/bst_dynamics.m`** — the dynamics-module orchestrator
+   (own `toolbox/dynamics/` folder, mirroring `toolbox/eigen` / `toolbox/timefreq`;
+   the module that works on atom files). `New` / `NewGroup` / `AddGroup` / `Flatten` / `Save` / `Load`
    (Phase 1 saves/loads by path; the `dynamics_` type is not yet registered with
    file_gettype — that comes with the Phase-2 tree node). ✅
 3. **`process_source_atoms.m`** ("Detect source atoms (peaks)") — TEST POPULATE.
