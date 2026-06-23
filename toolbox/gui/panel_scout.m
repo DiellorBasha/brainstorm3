@@ -180,15 +180,17 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 % Geodesic area tool (own row, below the swell buttons): a compact state button
                 % (bullseye = concentric heat-distance isolines). While pressed, click a vertex to
                 % seed a scout and Ctrl+scroll to grow/shrink it.
-                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '<HTML>&#9678;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
+                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
+                jToggleArea.setText(char(9678));    % bullseye glyph as PLAIN text (centers; HTML label did not)
+                jToggleArea.setMargin(java.awt.Insets(0,0,0,0));
                 jToggleArea.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
                 jToggleArea.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
-                jToggleArea.setMargin(java.awt.Insets(0,0,0,0));
                 % Geodesic line tool (arc icon): click two vertices -> draw + store the geodesic between them
-                jToggleGeo = gui_component('toggle', jPanelScoutOptions, '', '<HTML>&#8978;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic line tool: select, then click two vertices -- the exact geodesic (FlipOut) line connecting them is drawn and stored as a 2-endpoint scout', @(h,ev)bst_call(@GeodesicToolToggle));
+                jToggleGeo = gui_component('toggle', jPanelScoutOptions, '', '', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic line tool: select, then click two vertices -- the exact geodesic (FlipOut) line connecting them is drawn and stored as a 2-endpoint scout', @(h,ev)bst_call(@GeodesicToolToggle));
+                jToggleGeo.setText(char(8978));     % arc glyph as PLAIN text
+                jToggleGeo.setMargin(java.awt.Insets(0,0,0,0));
                 jToggleGeo.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
                 jToggleGeo.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
-                jToggleGeo.setMargin(java.awt.Insets(0,0,0,0));
                 % Scout size in vertices/area
                 %gui_component('Label', jPanelScoutOptions, 'br', 'Number of vertices:');
                 jLabelScoutSize = gui_component('Label', jPanelScoutOptions, 'br hfill', '  No scout selected');
@@ -5100,6 +5102,12 @@ function PlotScouts(iScouts, hFigSel)
                 isGeoLink = isfield(sScouts(i), 'Geodesic') && ~isempty(sScouts(i).Geodesic) && (size(sScouts(i).Geodesic,2) == 3);
                 if isGeoLink
                     geoPts = sScouts(i).Geodesic;
+                    % Lift the polyline just above the surface, along the nearest displayed-vertex
+                    % normal, so it is not occluded by (z-fighting with) the opaque cortex patch.
+                    if ~isempty(VertexNormals) && ~isempty(Vertices)
+                        iNear  = dsearchn(Vertices, geoPts);
+                        geoPts = geoPts + 0.0006 * VertexNormals(iNear,:);
+                    end
                     if ~hasGeoFld || isempty(sScouts(i).Handles(iHnd).hGeodesic) || ~all(ishandle(sScouts(i).Handles(iHnd).hGeodesic))
                         sScouts(i).Handles(iHnd).hGeodesic = line(geoPts(:,1), geoPts(:,2), geoPts(:,3), ...
                             'Color', scoutColor, 'LineWidth', 2, 'Tag', 'ScoutGeodesic', 'Parent', hAxes);
@@ -5326,6 +5334,7 @@ function RemoveScoutsFromFigure(hFig, isDeleteObj)
                         if isDeleteObj
                             sHandles = GlobalData.Surface(iSurf).Atlas(iAtlas).Scouts(iScout).Handles(iHandles);
                             hDelete = [sHandles.hScout, sHandles.hLabel, sHandles.hVertices, sHandles.hPatch, sHandles.hContour];
+                            if isfield(sHandles, 'hGeodesic'), hDelete = [hDelete, sHandles.hGeodesic]; end
                             delete(hDelete(ishandle(hDelete)));
                         end
                         % Clear handles structure
@@ -5386,8 +5395,13 @@ function RemoveScouts(iScouts, isForced)
         % Delete graphical scout contour
         hContour = [sScouts(i).Handles.hContour];
         delete(hContour(ishandle(hContour)));
+        % Delete the geodesic-link polyline overlay (geodesic-link scouts only)
+        if isfield(sScouts(i).Handles, 'hGeodesic')
+            hGeo = [sScouts(i).Handles.hGeodesic];
+            delete(hGeo(ishandle(hGeo)));
+        end
     end
-    
+
     % Remove scouts definitions from global data structure
     SetScouts([], iScouts, []);
     % Update "Scouts Manager" panel
