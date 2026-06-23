@@ -138,7 +138,7 @@ for iData = 1:numel(Data)
         case 'poisson'
             LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
             f     = i_as_vertex_scalar(F, nVtot, 'poisson');
-            Field = i_poisson(LBO, f, nVtot);                       % [nV x nT]
+            Field = bst_poisson(LBO, f);                            % [nV x nT]
             Result = struct('Method','poisson', 'Field',Field, 'nComponents',1);
         case 'divergence'
             if size(F,1) ~= 3*size(Surf.Faces,1)
@@ -214,25 +214,6 @@ function Lf = i_laplacian(LBO, f, nVtot)
     end
 end
 
-
-%% ===== POISSON: solve K phi = M f per hemisphere (pinned constant nullspace) [nV x nT] =====
-function phi = i_poisson(LBO, f, nVtot)
-    phi = zeros(nVtot, size(f,2));
-    for hh = 1:numel(LBO.Operator)
-        vH = double(LBO.GlobalVertices{hh}(:));
-        K  = LBO.Operator{hh};  M = LBO.Mass{hh};
-        n  = size(K,1);  free = (2:n)';  totMass = sum(M(:));
-        dK = decomposition(K(free,free), 'chol');
-        fh = f(vH,:);
-        ph = zeros(n, size(fh,2));
-        for c = 1:size(fh,2)
-            rhs = M * (fh(:,c) - (sum(M*fh(:,c))/totMass));   % project RHS to mean-zero
-            x = zeros(n,1);  x(free) = dK \ rhs(free);
-            ph(:,c) = x - mean(x);                            % recenter
-        end
-        phi(vH,:) = ph;
-    end
-end
 
 
 %% ===== save a results_ source map (mirrors bst_eigen's filter output) =====

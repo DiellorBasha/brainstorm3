@@ -53,13 +53,14 @@ function out = tess_cholesky(varargin)
 
     % pure getter: tess_cholesky(OperatorNode, hh, pin)
     Node = varargin{1};  hh = varargin{2};  pin = i_pin(varargin{3:end});
+    nA = size(Node.Operator{hh}, 1);   % ground-truth operator size for consistency checks
     % 1) factor already on the node?
-    if isfield(Node,'Cholesky') && iscell(Node.Cholesky) && numel(Node.Cholesky) >= hh && ~isempty(Node.Cholesky{hh})
+    if isfield(Node,'Cholesky') && iscell(Node.Cholesky) && numel(Node.Cholesky) >= hh && ~isempty(Node.Cholesky{hh}) && Node.Cholesky{hh}.n == nA
         out = Node.Cholesky{hh};  return;
     end
-    % 2) in-session memory cache?
+    % 2) in-session memory cache? (validate size to guard against stale entries for recycled keys)
     key = i_key(Node, hh, pin);
-    if isKey(MEM, key), out = MEM(key);  return; end
+    if isKey(MEM, key) && MEM(key).n == nA, out = MEM(key);  return; end
     % 3) compute + cache in memory (no disk write on the pure path)
     out = i_factor(Node.Operator{hh}, pin);
     MEM(key) = out;
