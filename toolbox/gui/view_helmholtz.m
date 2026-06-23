@@ -1,7 +1,8 @@
 function hFig = view_helmholtz(SrcResultsFile, varargin)
 % VIEW_HELMHOLTZ: Helmholtz/Hodge component view of a Dirac source map. Opens the NATIVE
 % unconstrained-source display and lets a panel choose which COMPONENT of the decomposition
-% to show -- Total |J| / Irrotational grad(phi) / Solenoidal curl(psi) / Harmonic h.
+% to show -- Total |J| / Irrotational grad(phi) / Solenoidal curl(psi). (No harmonic
+% component: the cortex is genus-0, so the harmonic space is trivial.)
 % Switching component swaps the cortex SCALAR colormap (to that component's potential); the
 % quiver always shows the (smoothed) TOTAL source field. An optional Dirac-eigenmode smoothing
 % low-passes the active frame before the decomposition. Active frame only (cached Cholesky
@@ -13,7 +14,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 %
 % USAGE:
 %   hFig = view_helmholtz(SrcResultsFile)
-%   view_helmholtz('SetComponent', hFig, name)             % 'Total'|'Irrot'|'Solen'|'Harm'
+%   view_helmholtz('SetComponent', hFig, name)             % 'Total'|'Irrot'|'Solen'
 %   view_helmholtz('SetVectors', hFig, show)
 %   view_helmholtz('SetSmoothing', hFig, isOn, name, params)  % Dirac-eigenmode low-pass
 %   view_helmholtz('Close', hFig)
@@ -136,7 +137,7 @@ function UpdateFrame(hFig)
     else
         try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
     end
-    i_readout(comp.Kind, Ht);
+    i_readout(comp.Kind);
 end
 
 %% ===== panel actions =====
@@ -222,11 +223,12 @@ end
 
 %% ===== helpers =====
 function c = i_component(Ht, name)
+    % No harmonic component: the cortex is genus-0 (topological sphere), so H^1 is
+    % trivial and the harmonic part is identically zero (numerical residual only).
     switch name
-        case 'Irrot', c = struct('Vec',Ht.Virr, 'Scal',Ht.Phi,  'Signed',true,  'Kind','source', 'HarmFrac',Ht.HarmFrac);
-        case 'Solen', c = struct('Vec',Ht.Vsol, 'Scal',Ht.Psi,  'Signed',true,  'Kind','vortex', 'HarmFrac',Ht.HarmFrac);
-        case 'Harm',  c = struct('Vec',Ht.Vharm,'Scal',Ht.Hmag, 'Signed',false, 'Kind','harm',   'HarmFrac',Ht.HarmFrac);
-        otherwise,    c = struct('Vec',Ht.Vtot, 'Scal',Ht.Fmag, 'Signed',false, 'Kind','total',  'HarmFrac',Ht.HarmFrac);
+        case 'Irrot', c = struct('Vec',Ht.Virr, 'Scal',Ht.Phi,  'Signed',true,  'Kind','source');
+        case 'Solen', c = struct('Vec',Ht.Vsol, 'Scal',Ht.Psi,  'Signed',true,  'Kind','vortex');
+        otherwise,    c = struct('Vec',Ht.Vtot, 'Scal',Ht.Fmag, 'Signed',false, 'Kind','total');
     end
 end
 function iTess = i_find_tess(hFig)
@@ -238,11 +240,10 @@ function mm = i_minmax(scal)
     m = max(abs(scal));  if m == 0; m = eps; end
     mm = [-m, m];
 end
-function i_readout(kind, Ht)
+function i_readout(kind)
     switch kind
         case 'vortex', txt = 'solenoidal: stream function \Psi';
         case 'source', txt = 'irrotational: potential \Phi';
-        case 'harm',   txt = sprintf('harmonic energy: %.1f%% of |J|^2', 100*Ht.HarmFrac);
         otherwise,     txt = 'total field |J|';
     end
     try, panel_helmholtz('SetReadout', txt); catch, end %#ok<CTCH>
