@@ -3066,6 +3066,14 @@ function AreaToolToggle() %#ok<DEFNU>
             set(hFig, 'Pointer', 'cross');
         end
         AreaCache([]);          % fresh tool session
+        % Pre-factorize the heat solver for this surface so the first click is instant
+        % (the factorization is then cached and reused for every seed/resize).
+        SurfaceFile = i_get_scout_surface(hFigures);
+        if ~isempty(SurfaceFile)
+            bst_progress('start', 'Geodesic area tool', 'Pre-factorizing the heat operator...');
+            try, tess_scout_area('prewarm', SurfaceFile); catch, end %#ok<CTCH>
+            bst_progress('stop');
+        end
     else
         % Exit selection mode (restore normal figure manipulation)
         for hFig = hFigures
@@ -3094,7 +3102,12 @@ function CreateScoutArea(vi, SurfaceFile)
         GlobalData.CurrentScoutsSurface = SurfaceFile;
     end
     R0 = 0.003;     % initial geodesic radius [m] = 3 mm
+    % Geodesic disk. The heat solver is cached per surface (built by 'prewarm' on tool
+    % activation), so this is instant after the first time; show a bar in case it is cold.
+    isProg = ~bst_progress('isVisible');
+    if isProg, bst_progress('start', 'Geodesic area tool', 'Computing geodesic distance...'); end
     [areaVerts, phi] = tess_scout_area(SurfaceFile, vi, R0);
+    if isProg, bst_progress('stop'); end
     [sScout, iScout] = CreateScout(areaVerts, vi, SurfaceFile); %#ok<ASGLU>
     AreaCache(struct('iScout',iScout, 'Seed',vi, 'phi',phi, 'Radius',R0, 'SurfaceFile',SurfaceFile));
     PlotScouts(iScout);
@@ -3107,30 +3120,66 @@ end
 % thresholding the cached geodesic distance. Returns 1 if it consumed the event, 0 otherwise
 % (so the figure falls back to the default scroll/zoom when no area scout is active).
 function handled = AreaToolScroll(scrollCount) %#ok<DEFNU>
+    global GlobalData;
     handled = 0;
-    c = AreaCache();
-    if isempty(c)
+    % Resize the currently SELECTED scout, so a scout re-picked from the list can be re-grown
+    % (just like the <</>> swell buttons act on the selected scout).
+    [sSel, iSel] = GetSelectedScouts();
+    if isempty(iSel)
+        return;
+    end
+    iScout = iSel(1);
+    sScout = sSel(1);
+    if isempty(sScout.Seed)
+        return;     % no seed -> can't grow geodesically
+    end
+    Seed = sScout.Seed(1);
+    SurfaceFile = GlobalData.CurrentScoutsSurface;
+    if isempty(SurfaceFile)
         return;
     end
     STEP = 0.003;   % 3 mm per scroll tick
-    % Scroll up (VerticalScrollCount < 0) grows; scroll down shrinks. Floor at one step.
-    c.Radius = max(STEP, c.Radius - double(scrollCount) * STEP);
-    % Re-threshold using the cached distance field (no heat re-solve)
-    areaVerts = tess_scout_area(c.SurfaceFile, c.Seed, c.Radius, c.phi);
-    % Update the scout's vertices in place
-    sScouts = GetScouts(c.SurfaceFile);
-    if (c.iScout < 1) || (c.iScout > numel(sScouts))
-        AreaCache([]);              % scout deleted underneath us
-        return;
+    % Reuse the cached geodesic distance for this seed if available; otherwise recompute it
+    % (reuses the cached nxr factorization, so it is fast) and infer the current radius from
+    % the scout's current geodesic extent.
+    c = AreaCache();
+    if ~isempty(c) && isequal(c.Seed, Seed) && strcmp(c.SurfaceFile, SurfaceFile) && (c.iScout == iScout)
+        phi = c.phi;  R = c.Radius;
+    else
+        [~, phi] = tess_scout_area(SurfaceFile, Seed, Inf);   % distance field only
+        R = max(phi(sScout.Vertices));
+        if ~isfinite(R) || (R <= 0), R = STEP; end
     end
-    sScout = sScouts(c.iScout);
+    % Scroll up (VerticalScrollCount < 0) grows; scroll down shrinks. Floor at one step.
+    R = max(STEP, R - double(scrollCount) * STEP);
+    areaVerts = tess_scout_area(SurfaceFile, Seed, R, phi);
     sScout.Vertices = areaVerts;
-    SetScouts(c.SurfaceFile, c.iScout, sScout);
-    AreaCache(c);
-    PlotScouts(c.iScout);
+    SetScouts(SurfaceFile, iScout, sScout);
+    AreaCache(struct('iScout',iScout, 'Seed',Seed, 'phi',phi, 'Radius',R, 'SurfaceFile',SurfaceFile));
+    PlotScouts(iScout);
     UpdateScoutProperties();
     UpdateScoutsDisplay('current');
     handled = 1;
+end
+
+% Resolve the cortex surface backing the scout figures (used to pre-warm the heat solver).
+function SurfaceFile = i_get_scout_surface(hFigures)
+    global GlobalData;
+    SurfaceFile = GlobalData.CurrentScoutsSurface;
+    if ~isempty(SurfaceFile)
+        return;
+    end
+    for hFig = hFigures
+        TessInfo = getappdata(hFig, 'Surface');
+        if isempty(TessInfo), continue; end
+        for i = 1:numel(TessInfo)
+            sf = TessInfo(i).SurfaceFile;
+            if ~isempty(sf) && strcmpi(file_gettype(sf), 'cortex')
+                SurfaceFile = sf;
+                return;
+            end
+        end
+    end
 end
 
 
