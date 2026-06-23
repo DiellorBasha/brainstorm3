@@ -619,8 +619,8 @@ function FigureMouseUpCallback(hFig, varargin)
         if strcmpi(clickAction, 'popup')
             DisplayFigurePopup(hFig);
             
-        % === SELECTING CORTICAL SCOUTS ===
-        elseif isSelectingCorticalSpot
+        % === SELECTING CORTICAL SCOUTS (incl. geodesic Area tool) ===
+        elseif isSelectingCorticalSpot || panel_scout('IsAreaToolActive')
             panel_scout('CreateScoutMouse', hFig);
             
         % === SELECTING POINT ===
@@ -931,10 +931,17 @@ end
 
 
 %% ===== FIGURE MOUSE WHEEL =====
-function FigureMouseWheelCallback(hFig, event, target)  
+function FigureMouseWheelCallback(hFig, event, target)
     % Parse inputs
     if (nargin < 3) || isempty(target)
         target = [];
+    end
+    % Scout geodesic Area tool: Ctrl+scroll grows/shrinks the active area scout (heat-distance
+    % disk) instead of zooming. Falls through to the default behavior if no area scout is active.
+    if ~isempty(event) && ismember('control', get(hFig,'CurrentModifier')) && panel_scout('IsAreaToolActive')
+        if panel_scout('AreaToolScroll', double(event.VerticalScrollCount))
+            return;
+        end
     end
     % ONLY FOR 3D AND 2DLayout
     if isempty(event)

@@ -173,6 +173,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 gui_component('button', jPanelScoutOptions,[], '<',  {Insets(0,0,0,0), java_scaled('dimension',22,20)}, 'Decrease scout size (only one vertex)', @(h,ev)bst_call(@EditScoutsSize, 'Shrink1'));
                 gui_component('button', jPanelScoutOptions,[], '>',  {Insets(0,0,0,0), java_scaled('dimension',22,20)}, 'Increase scout size (only one vertex)', @(h,ev)bst_call(@EditScoutsSize, 'Grow1'));
                 gui_component('button', jPanelScoutOptions,[], '>>', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Increase scout size',                   @(h,ev)bst_call(@EditScoutsSize, 'Grow'));
+                % Geodesic area tool (heat-distance disk): click a vertex to seed, Ctrl+scroll to grow/shrink
+                jToggleArea = gui_component('toggle', jPanelScoutOptions,[], 'Area', {Insets(0,0,0,0), java_scaled('dimension',44,20)}, 'Geodesic area tool: click a vertex to seed a scout, then Ctrl+scroll to grow/shrink (heat distance)', @(h,ev)bst_call(@AreaToolToggle));
                 % Separator
                 gui_component('label', jPanelScoutOptions, [], '  ');
                 % Constrained to data
@@ -225,6 +227,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                                   'jRadioAbsolute',        jRadioAbsolute, ...
                                   'jRadioRelative',        jRadioRelative, ...
                                   'jPanelScoutOptions',    jPanelScoutOptions, ...
+                                  'jToggleArea',           jToggleArea, ...
                                   'jPanelDisplay',         jPanelDisplay, ...
                                   'jLabelScoutSize',       jLabelScoutSize, ...
                                   'jLabelAreaSize',        jLabelAreaSize, ...
@@ -2948,7 +2951,15 @@ function CreateScoutMouse(hFig) %#ok<DEFNU>
     % Check that a point was selected
     if isempty(vout)
         return
-    end   
+    end
+
+    % ===== GEODESIC AREA TOOL =====
+    % When the "Area" tool is active, a click seeds a NEW scout grown as the heat-distance
+    % geodesic disk around the clicked vertex (Ctrl+scroll then resizes it). Surface only.
+    if ~isVolumeAtlas && IsAreaToolActive()
+        CreateScoutArea(vi, TessInfo(iTess).SurfaceFile);
+        return;
+    end
 
     % ===== CREATING SCOUT OR ADDING POINTS =====
     % Get selected scouts
@@ -3003,6 +3014,89 @@ function CreateScoutMouse(hFig) %#ok<DEFNU>
     end
     % OverlayCube for 3D MRI display is not updated => Need to update it
     UpdateScoutsDisplay('current');
+end
+
+
+%% ===== GEODESIC AREA TOOL =====
+% A scout grown as the heat-distance geodesic disk around a seed vertex (tess_scout_area).
+% The toggle button "Area" (Scout size section) activates the tool; a surface click seeds a
+% new disk; Ctrl+scroll (handled in figure_3d) resizes it. The geodesic distance field is
+% cached per seed so resizing only re-thresholds (no heat re-solve).
+
+% Is the "Area" tool toggle currently active? (false if the Scout panel is not loaded.)
+function isActive = IsAreaToolActive() %#ok<DEFNU>
+    isActive = false;
+    ctrl = bst_get('PanelControls', 'Scout');
+    if ~isempty(ctrl) && isfield(ctrl, 'jToggleArea') && ~isempty(ctrl.jToggleArea)
+        isActive = ctrl.jToggleArea.isSelected();
+    end
+end
+
+% Toggle callback: activating the Area tool turns off the normal point-add mode and clears
+% any previous area cache (the next click starts a fresh disk).
+function AreaToolToggle() %#ok<DEFNU>
+    if IsAreaToolActive()
+        SetSelectionState(0);       % mutually exclusive with the "New scout" point-add mode
+    end
+    AreaCache([]);                  % reset cached seed/distance
+end
+
+% Persistent cache for the active area scout: struct(iScout, Seed, phi, Radius, SurfaceFile).
+function out = AreaCache(in)
+    persistent C;
+    if (nargin >= 1)
+        C = in;
+    end
+    out = C;
+end
+
+% Click handler: seed a new scout as the geodesic disk of the initial radius around vi.
+function CreateScoutArea(vi, SurfaceFile)
+    global GlobalData;
+    if isempty(SurfaceFile)
+        return;
+    end
+    if isempty(GlobalData.CurrentScoutsSurface)
+        GlobalData.CurrentScoutsSurface = SurfaceFile;
+    end
+    R0 = 0.003;     % initial geodesic radius [m] = 3 mm
+    [areaVerts, phi] = tess_scout_area(SurfaceFile, vi, R0);
+    [sScout, iScout] = CreateScout(areaVerts, vi, SurfaceFile); %#ok<ASGLU>
+    AreaCache(struct('iScout',iScout, 'Seed',vi, 'phi',phi, 'Radius',R0, 'SurfaceFile',SurfaceFile));
+    PlotScouts(iScout);
+    UpdatePanel();
+    SetSelectedScouts(iScout);
+    UpdateScoutsDisplay('current');
+end
+
+% Ctrl+scroll handler (called from figure_3d): grow/shrink the active area scout by re-
+% thresholding the cached geodesic distance. Returns 1 if it consumed the event, 0 otherwise
+% (so the figure falls back to the default scroll/zoom when no area scout is active).
+function handled = AreaToolScroll(scrollCount) %#ok<DEFNU>
+    handled = 0;
+    c = AreaCache();
+    if isempty(c)
+        return;
+    end
+    STEP = 0.003;   % 3 mm per scroll tick
+    % Scroll up (VerticalScrollCount < 0) grows; scroll down shrinks. Floor at one step.
+    c.Radius = max(STEP, c.Radius - double(scrollCount) * STEP);
+    % Re-threshold using the cached distance field (no heat re-solve)
+    areaVerts = tess_scout_area(c.SurfaceFile, c.Seed, c.Radius, c.phi);
+    % Update the scout's vertices in place
+    sScouts = GetScouts(c.SurfaceFile);
+    if (c.iScout < 1) || (c.iScout > numel(sScouts))
+        AreaCache([]);              % scout deleted underneath us
+        return;
+    end
+    sScout = sScouts(c.iScout);
+    sScout.Vertices = areaVerts;
+    SetScouts(c.SurfaceFile, c.iScout, sScout);
+    AreaCache(c);
+    PlotScouts(c.iScout);
+    UpdateScoutProperties();
+    UpdateScoutsDisplay('current');
+    handled = 1;
 end
 
 
