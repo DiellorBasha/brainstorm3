@@ -177,9 +177,10 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 gui_component('label', jPanelScoutOptions, [], '  ');
                 % Constrained to data
                 jToggleConst = gui_component('toggle', jPanelScoutOptions,'tab hfill', 'Constrained', {Insets(0,0,0,0), java_scaled('dimension',10,20)}, 'Constrain patch growth to vertices with data above threshold.');
-                % Geodesic area tool (own row, below the swell buttons): a state button -- while
-                % pressed, click a vertex to seed a scout and Ctrl+scroll to grow/shrink it.
-                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', 'Geodesic area', {Insets(0,0,0,0), java_scaled('dimension',100,20)}, 'Geodesic area tool: select this button, click a vertex to seed a scout, then Ctrl+scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
+                % Geodesic area tool (own row, below the swell buttons): a compact state button
+                % (bullseye = concentric heat-distance isolines). While pressed, click a vertex to
+                % seed a scout and Ctrl+scroll to grow/shrink it.
+                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '<HTML>&#9678;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then Ctrl+scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
                 % Scout size in vertices/area
                 %gui_component('Label', jPanelScoutOptions, 'br', 'Number of vertices:');
                 jLabelScoutSize = gui_component('Label', jPanelScoutOptions, 'br hfill', '  No scout selected');
@@ -5314,8 +5315,9 @@ function UpdateScoutsDisplay(target)
     if (nargin < 1) || isempty(target)
         target = 'all';
     end
-    % Progress bar
-    isProgress = ~bst_progress('isVisible');
+    % Progress bar -- only for bulk 'all' refreshes. Fast incremental updates ('current' or a
+    % single figure, e.g. scout grow/shrink/resize) skip it so the dialog doesn't flash.
+    isProgress = ~bst_progress('isVisible') && ischar(target) && strcmpi(target, 'all');
     if isProgress
         bst_progress('start', 'Scouts options', 'Updating display...');
     end
