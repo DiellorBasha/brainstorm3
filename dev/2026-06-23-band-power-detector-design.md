@@ -49,28 +49,30 @@ block, percentile thresholding gives selective windows (p85 → 8 windows, ~13%)
 6. **Hysteresis scan** — enter when `sig ≥ Thi`, stay until `sig < Tlo`; an
    invalid (bad/edge) sample closes any open window. **Merge** gaps < `minGap`.
 
-**Per-cycle phase markers (from GFP at 2f):** a band-limited GFP is sign-blind,
-so it oscillates at **2f** with no fundamental. Bandpass the GFP at
-`[2·fLow, 2·fHigh]` (clamped < Nyquist) for a near-sinusoid; its **local maxima**
-(φ=0) are field-magnitude maxima = alpha extrema (consecutive peaks alternate
-alpha+/−; the source field's own sign recovers polarity downstream), and its
-**local minima** (φ=π) are alpha zero-crossings.
-7. Within each candidate period, require ≥ 2 GFP peaks (genuine oscillation),
-   **snap onset/offset to the first/last peak** (sign-consistent, integer cycles),
-   then enforce `minDuration` on the snapped bounds.
-8. Emit: extended `evt` (periods) + `markers.peak` / `markers.trough` (point
-   events, only those inside kept periods). `markerMode ∈ {both,peak,trough,none}`;
-   `none` ⇒ amplitude bounds, no snapping/markers.
+**4 per-cycle phase markers (GFP timing + reference-sensor sign):** a band-limited
+GFP is sign-blind, so it oscillates at **2f** and its extrema fall on the 4 phase
+landmarks of every cycle. Bandpass the GFP at `[2·fLow, 2·fHigh]` (clamped <
+Nyquist); its **maxima** = alpha extrema, its **minima** = alpha zero-crossings —
+robust multi-channel *timing*. The *sign* GFP cannot give is read from the single
+**highest-(band-)power sensor**, **per marker** (robust to a skipped extremum,
+unlike strict alternation):
+- GFP peak → `sign(ref)>0` = `_peak`, `<0` = `_trough` (ref at its extremum)
+- GFP trough → `slope(ref)>0` = `_rising`, `<0` = `_falling` (ref crosses zero)
+The reference sensor's positive peak defines the alpha-peak polarity.
+7. Within each candidate period, require ≥ 2 GFP peaks, **snap onset/offset to the
+   first/last alpha extremum** (integer cycles), enforce `minDuration`.
+8. Emit: extended `evt` (periods) + `markers.{peak,trough,rising,falling}` (point
+   events inside kept periods). Markers auto-disable only if 2f reaches Nyquist.
 
-`Run` stores three groups: `<name>` (extended), `<name>_peak`, `<name>_trough`
-(simple). RMS-of-per-channel-envelope is near-equivalent to smoothed GFP
-(r = 0.97) — GFP chosen for display fidelity and the free 2f phase reference.
+`Run` stores five groups: `<band> (lo-hi Hz)` (extended) + `<band>_peak` /
+`_trough` / `_rising` / `_falling` (simple). RMS-of-per-channel-envelope is
+near-equivalent to smoothed GFP (r = 0.97) — GFP chosen for display fidelity and
+the free phase reference.
 
 ## Process options (GUI) — deliberately minimal
 
 | Option | Type | Default |
 |---|---|---|
-| `eventname` | text | `power_alpha` |
 | `sensortypes` | text | `MEG` |
 | `normalize` | checkbox (mixed sensor types) | off |
 | `timewindow` | timewindow | [] (whole file) |
@@ -90,6 +92,14 @@ alpha+/−; the source field's own sign recovers polarity downstream), and its
   smoothing/minDuration/minGap overrides — `[]` means auto — for testing.)
 - Menu label: **"Detect bursts (phase polarity)"** (canonical; CFAR/Wavelet
   retired to `dev/experimental/`).
+
+**Event naming + colors (fully automatic, no name box):**
+- periods `"<band> (lo-hi Hz)"`, markers `"<band>_peak/_trough/_rising/_falling"`
+  (`<band>` = delta/theta/alpha/beta/gamma, or `custom`).
+- band fill color runs **warm→cool** by center frequency (HSV hue 30°→270°,
+  orange→violet over the delta..gamma centers [3,45] Hz log) — deliberately
+  avoids pure red/blue. Markers use fixed phase colors across all bands:
+  **peak=red, trough=blue, rising=green, falling=orange**.
 
 `Run` reads raw broadband sensor data (continuous-only; empty-sensor and
 empty-detection guards; mixed-sensor-type warning), masks bad segments, and
