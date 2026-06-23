@@ -195,7 +195,7 @@ for iData = 1:length(Data)
             if isError, break; end
         case 'filter'
             % Spatial eigen filter: project -> scale by h(Lambda) -> reconstruct, per hemisphere.
-            [Ffilt, Messages, isError] = bst_eigenfilter(F, EigenMat, OperatorMat, OPTIONS.KernelName, OPTIONS.KernelParams);
+            [Ffilt, Messages, isError] = bst_eigenfilter('Analysis', F, EigenMat, OperatorMat, OPTIONS.KernelName, OPTIONS.KernelParams);
             if isError, break; end
             Result = struct('Type', 'filter', 'Field', Ffilt);
         case 'project'

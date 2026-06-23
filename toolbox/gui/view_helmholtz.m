@@ -121,7 +121,7 @@ function UpdateFrame(hFig)
     if St.Smooth.on
         g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
         % bst_eigenfilter reads the per-hemisphere mass Oper.Mass{h}; St.Mass is {B1,B2}.
-        Jt = real(bst_eigenfilter(Jt, St.EigenMat, struct('Mass', {St.Mass}), g, struct()));
+        Jt = real(bst_eigenfilter('Analysis', Jt, St.EigenMat, struct('Mass', {St.Mass}), g, struct()));
     end
     % Detect singular points only when they are actually used (markers shown or tracking on),
     % so plain time-stepping with both off skips the per-frame persistence computation.
