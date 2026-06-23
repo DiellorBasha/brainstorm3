@@ -117,3 +117,53 @@ function b = Bounds(frame, Lambda) %#ok<DEFNU>
     A = min(S); B = max(S);
     b = struct('A', A, 'B', B, 'Tightness', B / max(A, eps));
 end
+
+
+%% ===== ANALYSIS: map -> scalogram [nSrc x nT x M] =====
+function [W, Messages, isError] = Analysis(F, EigenMat, OperatorMat, frame) %#ok<DEFNU>
+    Messages = ''; isError = 0;
+    M  = numel(frame.g);
+    nT = size(F, 2);
+    W  = zeros(size(F, 1), nT, M);
+    for h = 1:numel(EigenMat.Phi)
+        Phi = EigenMat.Phi{h};
+        if isempty(Phi); continue; end
+        Lam = EigenMat.Lambda{h}(:);
+        B   = OperatorMat.Mass{h};
+        [srcRows, dstRows, nrows, msg] = bst_eigenfilter('RowMap', F, EigenMat, h);
+        if ~isempty(msg); Messages = msg; isError = 1; return; end
+        H = Evaluate(frame, Lam);                 % [K x M]
+        U = zeros(nrows, nT);
+        U(dstRows, :) = F(srcRows, :);
+        C = manifold_ft(Phi, B, U);               % [K x nT]
+        for m = 1:M
+            Uf = manifold_ift(Phi, H(:, m) .* C);
+            W(srcRows, :, m) = Uf(dstRows, :);
+        end
+    end
+end
+
+
+%% ===== SYNTHESIS: scalogram -> map (sum of g_m(L) c_m) =====
+function [Frec, Messages, isError] = Synthesis(W, EigenMat, OperatorMat, frame) %#ok<DEFNU>
+    Messages = ''; isError = 0;
+    M  = numel(frame.g);
+    nT = size(W, 2);
+    Frec = zeros(size(W, 1), nT);
+    for h = 1:numel(EigenMat.Phi)
+        Phi = EigenMat.Phi{h};
+        if isempty(Phi); continue; end
+        Lam = EigenMat.Lambda{h}(:);
+        B   = OperatorMat.Mass{h};
+        [srcRows, dstRows, nrows, msg] = bst_eigenfilter('RowMap', W(:, :, 1), EigenMat, h);
+        if ~isempty(msg); Messages = msg; isError = 1; return; end
+        H = Evaluate(frame, Lam);
+        acc = zeros(nrows, nT);
+        for m = 1:M
+            U = zeros(nrows, nT);
+            U(dstRows, :) = W(srcRows, :, m);
+            acc = acc + manifold_ift(Phi, H(:, m) .* manifold_ft(Phi, B, U));
+        end
+        Frec(srcRows, :) = acc(dstRows, :);
+    end
+end
