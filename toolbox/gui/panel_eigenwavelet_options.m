@@ -70,16 +70,17 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
     K      = sum(cellfun(@numel, lams));
     nHemi  = numel(lams);
     Variant = EigenMat.Variant;
-    Kind    = i_variant_kind(Variant);   % 'scalar' | 'vector' | 'deferred'
+    Kind    = i_variant_kind(Variant);   % 'scalar' | 'vector' | 'complex' | 'deferred'
 
     % ---- atom-display state (shared across nested callbacks) ----
     hFigAtom = [];
-    AtomCache = [];                 % {Op, Surf, nVerts}
+    AtomCache = [];                 % {Op, Surf, nVerts [, E1,E2,Nrm for complex]}
     AtomSeed  = [];                 % seed vertex (global index)
     AtomScale = 1;                  % which frame member (scale) is shown
     AtomBase  = [];                 % base atom (full field) [rows x 1 x M] for the current seed/frame
-    AtomQuat  = [1;0;0;0];          % orientation quaternion (Dirac), identity = base dipole
-    AtomAxis  = 'x';               % current steering axis (x|y|z)
+    AtomQuat  = [1;0;0;0];          % orientation quaternion (Dirac, 'vector'), identity = base dipole
+    AtomPhase = 0;                  % orientation phase (Connection Laplacian, 'complex'), U(1)
+    AtomAxis  = 'x';               % current steering axis (x|y|z) for 'vector'
     AtomPick  = false;             % one-shot "pick seed" armed
     Frame     = [];                 % current designed frame
     M         = 0;                  % number of frame members
@@ -115,6 +116,8 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
         gui_component('button', jPanelDisp, '', 'Pick', [], [], @(hh,ee) ArmPick(), []);
         if strcmp(Kind, 'vector')
             gui_component('label', jPanelDisp, 'br', '<HTML><i>Orient: scroll=rotate, X/Y/Z=axis, R=reset</i>', [], [], [], []);
+        elseif strcmp(Kind, 'complex')
+            gui_component('label', jPanelDisp, 'br', '<HTML><i>Orient: scroll=rotate phase, R=reset</i>', [], [], [], []);
         elseif strcmp(Kind, 'deferred')
             gui_component('label', jPanelDisp, 'br', sprintf('<HTML><i>Atom display for ''%s'' is deferred.</i>', Variant), [], [], [], []);
         end
@@ -218,6 +221,19 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
             return;
         end
         AtomCache = struct('Op', Op, 'Surf', Surf, 'nVerts', size(Surf.Vertices,1));
+        if strcmp(Kind, 'complex')
+            % Global canonical tangent frame to decode complex eigenmodes -> 3-D tangent
+            % vectors: field(v) = real(z)*e1(v) + imag(z)*e2(v). Read from the operator
+            % (bst_operator_frame: stored frame, or nxr fallback for older files).
+            nVg = AtomCache.nVerts;
+            E1 = zeros(nVg,3); E2 = zeros(nVg,3); Nrm = zeros(nVg,3);
+            for hh2 = 1:numel(EigenMat.GlobalVertices)
+                gvh = EigenMat.GlobalVertices{hh2}; if isempty(gvh); continue; end
+                Fr = bst_operator_frame(Op, hh2);
+                E1(gvh,:) = Fr.e1; E2(gvh,:) = Fr.e2; Nrm(gvh,:) = Fr.normal;
+            end
+            AtomCache.E1 = E1; AtomCache.E2 = E2; AtomCache.Nrm = Nrm;
+        end
         if isempty(AtomSeed)
             gv = EigenMat.GlobalVertices{1};
             if isempty(gv); gv = (1:AtomCache.nVerts)'; end
@@ -232,9 +248,10 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
     function RecomputeBase()
         if isempty(AtomCache) || isempty(AtomSeed) || isempty(Frame); return; end
         switch Kind
-            case 'scalar', seedDir = 1;
-            case 'vector', seedDir = [1;0;0];      % base dipole; orientation steers from here
-            otherwise,     return;
+            case 'scalar',  seedDir = 1;
+            case 'vector',  seedDir = [1;0;0];     % base dipole; orientation steers from here
+            case 'complex', seedDir = 1;           % base phase (e1 axis); U(1) phase steers from here
+            otherwise,      return;
         end
         [A, msg, isErr] = bst_eigenwavelet('Atom', EigenMat, AtomCache.Op, Frame, AtomSeed, seedDir);
         if isErr; bst_error(['Wavelet atom: ' msg], 'Eigenwavelet options', 0); AtomBase = []; return; end
@@ -251,7 +268,11 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
             case 'vector'
                 As = bst_eigenwavelet('Steer', AtomBase(:, 1, m), AtomQuat, EigenMat);  % exact right-quat steer
                 V  = bst_eigenwavelet('ToVec', As, EigenMat);                            % [3nV x 1]
-                DrawVectorAtom(V);
+                DrawVectorAtom(V, sprintf('axis %s', upper(AtomAxis)));
+            case 'complex'
+                z  = exp(1i*AtomPhase) .* AtomBase(:, 1, m);    % U(1) phase steer (exact)
+                v3 = real(z).*AtomCache.E1 + imag(z).*AtomCache.E2;   % decode -> 3-D tangent
+                DrawVectorAtom(reshape(v3.', [], 1), sprintf('phase %.0f\\circ', AtomPhase*180/pi));
         end
     end
 
@@ -276,7 +297,7 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
             Frame.Family, AtomScale, M, Frame.Centers(AtomScale), AtomSeed), 'Interpreter','tex');
     end
 
-    function DrawVectorAtom(V)
+    function DrawVectorAtom(V, orientLabel)
         Surf = AtomCache.Surf;
         V3  = reshape(V, 3, [])';                       % [nV x 3]
         mag = sqrt(sum(V3.^2, 2));
@@ -303,8 +324,8 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
         hold(hAx, 'off');
         i_finish_axes(hAx, az, el, sp);
         colormap(hAx, parula(256)); m_ = max(mag); if ~(m_>0); m_=1; end; caxis(hAx, [0 m_]); colorbar(hAx);
-        title(hAx, sprintf('Dirac atom: %s  scale %d/%d  seed %d   [axis %s]', ...
-            Frame.Family, AtomScale, M, AtomSeed, upper(AtomAxis)), 'Interpreter','none');
+        title(hAx, sprintf('%s atom: %s  scale %d/%d  seed %d   [%s]', ...
+            Variant, Frame.Family, AtomScale, M, AtomSeed, orientLabel), 'Interpreter','tex');
     end
 
     function hAx = i_axes()
@@ -346,13 +367,25 @@ function [bstPanelNew, panelName] = CreatePanel(EigenFile) %#ok<DEFNU>
     end
 
     function i_atom_scroll(e)
-        if ~strcmp(Kind, 'vector'); return; end
         step = -double(e.VerticalScrollCount) * (pi/12);   % 15 deg per notch
-        AtomQuat = i_qnorm(i_qmul(i_axisangle(AtomAxis, step), AtomQuat));
+        switch Kind
+            case 'vector',  AtomQuat = i_qnorm(i_qmul(i_axisangle(AtomAxis, step), AtomQuat));
+            case 'complex', AtomPhase = mod(AtomPhase + step, 2*pi);
+            otherwise, return;
+        end
         UpdateAtom();
     end
 
     function i_atom_key(e)
+        if strcmp(Kind, 'complex')
+            switch e.Key
+                case 'r',          AtomPhase = 0;
+                case 'leftarrow',  AtomPhase = mod(AtomPhase - pi/12, 2*pi);
+                case 'rightarrow', AtomPhase = mod(AtomPhase + pi/12, 2*pi);
+                otherwise, return;
+            end
+            UpdateAtom(); return;
+        end
         if ~strcmp(Kind, 'vector'); return; end
         switch e.Key
             case 'x', AtomAxis = 'x';
@@ -403,9 +436,10 @@ end
 %% ===== internal (file-scope) =====
 function kind = i_variant_kind(Variant)
     switch Variant
-        case 'Laplace-Beltrami',                       kind = 'scalar';
-        case 'Dirac',                                  kind = 'vector';
-        otherwise,                                     kind = 'deferred';  % Connection / face variants
+        case 'Laplace-Beltrami',     kind = 'scalar';
+        case 'Dirac',                kind = 'vector';    % quaternion, ambient, right-quat steer
+        case 'Connection Laplacian', kind = 'complex';   % tangent, frame-decoded, U(1) phase steer
+        otherwise,                   kind = 'deferred';  % face variants (face-centroid display TODO)
     end
 end
 

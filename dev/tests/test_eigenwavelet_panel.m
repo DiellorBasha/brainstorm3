@@ -88,6 +88,40 @@ function test_eigenwavelet_panel()
         fprintf('SKIP LBO block: no Laplace-Beltrami eigen node.\n');
     end
 
+    % ---------- Connection Laplacian: complex tangent atom, U(1) phase orientation ----------
+    efC = i_find_variant('Connection Laplacian');
+    if ~isempty(efC)
+        fprintf('Connection node: %s\n', efC);
+        % accessor: bst_operator_frame returns an orthonormal frame (stored or nxr fallback)
+        EC = in_bst_eigen(efC); OC = in_bst_operator(EC.OperatorFile);
+        Fr = bst_operator_frame(OC, 1);
+        orthoOK = max(abs(sqrt(sum(Fr.e1.^2,2))-1))<1e-9 && max(abs(sum(Fr.e1.*Fr.e2,2)))<1e-9 ...
+                  && max(abs(sum(Fr.e1.*Fr.normal,2)))<1e-9;
+        nFail = nFail + chk('bst_operator_frame: orthonormal frame', orthoOK);
+        i_clean(figName);
+        try, bst_mutex('release','EigenwaveletOptions'); catch, end %#ok<CTCH>
+        [bp, nm] = panel_eigenwavelet_options('CreatePanel', efC);
+        gui_show(bp, 'JavaWindow', nm, 0,0,0); drawnow;
+        ctrl = bst_get('PanelControls', 'EigenwaveletOptions');
+        ctrl.jToggleAtom.doClick();
+        hF = i_wait(figName);
+        nFail = nFail + chk('Connection atom figure opens', ~isempty(hF));
+        if ~isempty(hF)
+            nFail = nFail + chk('Connection patch + tangent quiver+glyph (>=2)', ...
+                ~isempty(findobj(hF,'Type','patch')) && numel(findobj(hF,'Type','quiver'))>=2);
+            % U(1) phase steer: magnitude envelope (patch CData) is INVARIANT
+            cd0 = get(findobj(hF,'Type','patch'),'FaceVertexCData');
+            cb = get(hF,'WindowScrollWheelFcn'); cb(hF, struct('VerticalScrollCount',6));
+            pause(0.3); drawnow;
+            cd1 = get(findobj(hF,'Type','patch'),'FaceVertexCData');
+            nFail = nFail + chk('U(1) phase steer: |psi| envelope invariant', norm(cd0-cd1)/max(norm(cd0),eps) < 1e-9);
+        end
+        i_clean(figName);
+        try, gui_hide('EigenwaveletOptions'); catch, end %#ok<CTCH>
+    else
+        fprintf('SKIP Connection block: no Connection Laplacian eigen node.\n');
+    end
+
     fprintf('\n==== test_eigenwavelet_panel: %d failed ====\n', nFail);
     if nFail > 0; error('test_eigenwavelet_panel FAILED'); end
     disp('ALL TESTS PASSED');
