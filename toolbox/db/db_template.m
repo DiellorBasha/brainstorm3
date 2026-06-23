@@ -323,6 +323,45 @@ switch lower(structureName)
             'Options',  [], ...
             'History',  []);
         
+    % ==== SPATIOTEMPORAL SPARSE MARKER (fuses Events + Scouts) ====
+    case 'atom'
+        % One spatiotemporal sparse marker: a REFERENCE (time x space x band x
+        % scale) + descriptors + provenance, sufficient to re-derive the data.
+        template = struct(...
+            'label',       '', ...   % type name, e.g. 'vortex'
+            'category',    '', ...   % 'source'|'sink'|'vortex'|'antivortex'
+            'color',       [], ...   % [r g b]
+            'time',        [], ...   % seconds (ref into recording; cf. Events)
+            'sample',      [], ...   % sample index (convenience)
+            'sourceEvent', '', ...   % originating event group, e.g. 'alpha_peak'
+            'vertex',      [], ...   % seed vertex index (ref into surface; cf. Scouts)
+            'pos',         [], ...   % [x y z] position
+            'hemi',        [], ...   % 1=L, 2=R
+            'region',      '', ...   % atlas region label (optional)
+            'band',        [], ...   % [fLo fHi] Hz
+            'bandName',    '', ...   % 'alpha'
+            'scale',       [], ...   % [k1 k2] eigenmode range (reserved; [] for now)
+            'scaleName',   '', ...
+            'strength',    [], ...   % |J|, omega, or |Phi|/|Psi| extremum value
+            'charge',      [], ...   % +1/-1 topological charge (source/sink sign)
+            'chirality',   [], ...   % +1/-1 vortex rotation sense
+            'persistence', [], ...   % topological persistence
+            'descriptors', struct(), ... % OPEN-ENDED extensible bag (future axes)
+            'DataFile',    '', ...   % recording (time source)
+            'ResultsFile', '', ...   % kernel/source link (the inverse used)
+            'SurfaceFile', '');      % cortex (space source)
+
+    case 'dynamicsmat'
+        % Collection of atoms (a spatiotemporal sparse table), saved dynamics_*.mat
+        template = struct(...
+            'Comment',     '', ...
+            'Atoms',       repmat(db_template('atom'), 1, 0), ...
+            'nAtoms',      0, ...
+            'DataFile',    '', ...   % default recording (if homogeneous)
+            'SurfaceFile', '', ...   % default surface
+            'Options',     [], ...   % detection parameters
+            'History',     []);
+
     case 'projector'
         template = struct(...
             'Comment',      [], ...
