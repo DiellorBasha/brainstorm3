@@ -212,6 +212,12 @@ for iData = 1:length(Data)
             frame = bst_eigenwavelet('Design', OPTIONS.KernelName, OPTIONS.Nf, lrange);
             [W, Messages, isError] = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame);
             if isError, break; end
+            % Dirac family: Analysis carries the FULL quaternion [4nV x nT x M]; project to
+            % the physical 3-vector for the saved source scalogram (the cortical viewer is
+            % 1/3-component). The full-quaternion transform stays available via bst_eigenwavelet.
+            if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+                W = bst_eigenwavelet('ToVec', W, EigenMat);
+            end
             Result = struct('Type', 'wavelet', 'W', W, 'Frame', frame);
         case 'project'
             % TODO: Coef = Phi' * B * F  (manifold Fourier transform onto the eigenbasis).
