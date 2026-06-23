@@ -936,9 +936,11 @@ function FigureMouseWheelCallback(hFig, event, target)
     if (nargin < 3) || isempty(target)
         target = [];
     end
-    % Scout geodesic Area tool: Ctrl+scroll grows/shrinks the active area scout (heat-distance
-    % disk) instead of zooming. Falls through to the default behavior if no area scout is active.
-    if ~isempty(event) && ismember('control', get(hFig,'CurrentModifier')) && panel_scout('IsAreaToolActive')
+    % Scout geodesic Area tool: while the tool is active, the wheel grows/shrinks the SELECTED
+    % scout (heat-distance disk) instead of zooming -- gated on the toggle being pressed and a
+    % scout being selected (not on a keyboard modifier, which is unreliable once the scout list
+    % has focus). With the tool off, or with no scout selected, the wheel zooms as usual.
+    if ~isempty(event) && panel_scout('IsAreaToolActive')
         if panel_scout('AreaToolScroll', double(event.VerticalScrollCount))
             return;
         end

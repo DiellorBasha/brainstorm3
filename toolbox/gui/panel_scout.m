@@ -181,6 +181,9 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 % (bullseye = concentric heat-distance isolines). While pressed, click a vertex to
                 % seed a scout and Ctrl+scroll to grow/shrink it.
                 jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '<HTML>&#9678;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then Ctrl+scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
+                jToggleArea.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+                jToggleArea.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
+                jToggleArea.setMargin(java.awt.Insets(0,0,0,0));
                 % Scout size in vertices/area
                 %gui_component('Label', jPanelScoutOptions, 'br', 'Number of vertices:');
                 jLabelScoutSize = gui_component('Label', jPanelScoutOptions, 'br hfill', '  No scout selected');
@@ -3121,24 +3124,25 @@ end
 % thresholding the cached geodesic distance. Returns 1 if it consumed the event, 0 otherwise
 % (so the figure falls back to the default scroll/zoom when no area scout is active).
 function handled = AreaToolScroll(scrollCount) %#ok<DEFNU>
-    global GlobalData;
     handled = 0;
-    % Resize the currently SELECTED scout, so a scout re-picked from the list can be re-grown
-    % (just like the <</>> swell buttons act on the selected scout).
-    [sSel, iSel] = GetSelectedScouts();
-    if isempty(iSel)
+    % Resize the currently SELECTED scout, so a scout re-picked from the list (or the figure)
+    % can be re-grown -- just like the <</>> swell buttons act on the selected scout.
+    [sSel, iSel, sSurf] = GetSelectedScouts();
+    if isempty(iSel) || isempty(sSurf)
         return;
     end
-    iScout = iSel(1);
+    iScout = double(iSel(1));
     sScout = sSel(1);
-    if isempty(sScout.Seed)
-        return;     % no seed -> can't grow geodesically
-    end
-    Seed = sScout.Seed(1);
-    SurfaceFile = GlobalData.CurrentScoutsSurface;
-    if isempty(SurfaceFile)
+    if isempty(sScout.Vertices)
         return;
     end
+    % Seed: use the scout's seed if it has one, else its first vertex (so ANY scout can be grown)
+    if ~isempty(sScout.Seed)
+        Seed = double(sScout.Seed(1));
+    else
+        Seed = double(sScout.Vertices(1));
+    end
+    SurfaceFile = sSurf.FileName;
     STEP = 0.003;   % 3 mm per scroll tick
     % Reuse the cached geodesic distance for this seed if available; otherwise recompute it
     % (reuses the cached nxr factorization, so it is fast) and infer the current radius from
@@ -3147,14 +3151,16 @@ function handled = AreaToolScroll(scrollCount) %#ok<DEFNU>
     if ~isempty(c) && isequal(c.Seed, Seed) && strcmp(c.SurfaceFile, SurfaceFile) && (c.iScout == iScout)
         phi = c.phi;  R = c.Radius;
     else
-        [~, phi] = tess_scout_area(SurfaceFile, Seed, Inf);   % distance field only
-        R = max(phi(sScout.Vertices));
+        [~, phi] = tess_scout_area(SurfaceFile, Seed, Inf);   % distance field only (fast: cached factor)
+        dv = phi(sScout.Vertices);  dv = dv(isfinite(dv));
+        if isempty(dv), R = STEP; else, R = max(dv); end
         if ~isfinite(R) || (R <= 0), R = STEP; end
     end
     % Scroll up (VerticalScrollCount < 0) grows; scroll down shrinks. Floor at one step.
     R = max(STEP, R - double(scrollCount) * STEP);
     areaVerts = tess_scout_area(SurfaceFile, Seed, R, phi);
     sScout.Vertices = areaVerts;
+    sScout.Seed     = Seed;       % record the seed so later resizes are consistent
     SetScouts(SurfaceFile, iScout, sScout);
     AreaCache(struct('iScout',iScout, 'Seed',Seed, 'phi',phi, 'Radius',R, 'SurfaceFile',SurfaceFile));
     PlotScouts(iScout);
