@@ -26,10 +26,12 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 % INPUTS:
 %     - Data : one of: a results_/matrix filename, a cell of filenames, a matrix [nSrc x nT],
 %              or a cell of such matrices. Per-Method input layout (per vertex, both hemispheres):
-%                 'gradient'  : scalar field   F [nV  x nT]   -> per-FACE vector field [3nF x nT] (manifold DEC)
-%                 'laplacian' : scalar field   F [nV  x nT]   -> Laplace-Beltrami    [nV  x nT]
-%                 'poisson'   : scalar RHS     F [nV  x nT]   -> potential phi        [nV  x nT]  (K phi = M f)
-%                 'helmholtz' : 3-vector field F [3nV x nT]   -> delegates bst_helmholtz (vorticity Curl primary)
+%                 'gradient'   : scalar field        F [nV  x nT] -> per-FACE tangent vector [3nF x nT] (manifold DEC: #d0)
+%                 'divergence' : tangent face field  F [3nF x nT] -> per-VERTEX scalar       [nV  x nT] (manifold DEC: -*0^-1 d0' #' W_F)
+%                 'curl'       : tangent face field  F [3nF x nT] -> per-VERTEX vorticity    [nV  x nT] (manifold DEC: -div(N x V))
+%                 'laplacian'  : scalar field        F [nV  x nT] -> Laplace-Beltrami        [nV  x nT]
+%                 'poisson'    : scalar RHS          F [nV  x nT] -> potential phi            [nV  x nT]  (K phi = M f)
+%                 'helmholtz'  : 3-vector field      F [3nV x nT] -> delegates bst_helmholtz (vorticity Curl primary)
 %     - OPTIONS : struct (call bst_operators() with no args for defaults), fields below.
 %
 % OUTPUTS:
@@ -138,6 +140,22 @@ for iData = 1:numel(Data)
             f     = i_as_vertex_scalar(F, nVtot, 'poisson');
             Field = i_poisson(LBO, f, nVtot);                       % [nV x nT]
             Result = struct('Method','poisson', 'Field',Field, 'nComponents',1);
+        case 'divergence'
+            if size(F,1) ~= 3*size(Surf.Faces,1)
+                Messages = sprintf('bst_operators: divergence needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
+                isError = 1; break;
+            end
+            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            Field = bst_divergence(F, Mani);                        % [nV x nT] per-vertex scalar
+            Result = struct('Method','divergence', 'Field',Field, 'nComponents',1);
+        case 'curl'
+            if size(F,1) ~= 3*size(Surf.Faces,1)
+                Messages = sprintf('bst_operators: curl needs a [3nF x nT] tangent face field (got %d rows, 3nF=%d).', size(F,1), 3*size(Surf.Faces,1));
+                isError = 1; break;
+            end
+            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
+            Field = bst_curl(F, Mani);                              % [nV x nT] per-vertex vorticity scalar
+            Result = struct('Method','curl', 'Field',Field, 'nComponents',1);
         case 'helmholtz'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
             Dir   = bst_get_operator_node(SurfaceFile, 'Dirac');

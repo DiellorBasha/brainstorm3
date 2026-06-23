@@ -101,7 +101,7 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
                       || (Mcand.Embedded(1).schemaVersion < REQUIRED_EMBEDDED_SCHEMA) ...
                       || ~isfield(Mcand.Embedded(1).face, 'area') ...
                       || ~isfield(Mcand, 'DEC') || isempty(Mcand.DEC) ...     % node predates the DEC group
-                      || ~isfield(Mcand.DEC, 'sharp');
+                      || ~isfield(Mcand.DEC, 'sharp') || isfield(Mcand.DEC, 'flat');   % 'flat' = old unstable build -> recompute
             if ~isStale
                 if Interactive
                     % Prompt Overwrite / Cancel. Cancel reuses; Overwrite deletes and recomputes.
@@ -220,8 +220,12 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
         dh1 = nxr_compute('operators', h, 'hodge', 'h1');
         dh2 = nxr_compute('operators', h, 'hodge', 'h2');
         nxr_compute('destroy', h);
-        % Whitney sharp ♯ [3F x E] (musical isomorphism): nxr only APPLIES Whitney, so assemble
-        % the matrix here, using the WINDING normal (matches Whitney's face-normal convention).
+        % Whitney sharp ♯ [3F x E] (musical isomorphism): 1-form -> tangent face vector. nxr only
+        % APPLIES Whitney, so assemble the matrix here, using the WINDING normal (Whitney's
+        % face-normal convention). The flat ♭ is NOT stored: the metric flat ⋆1^{-1}♯'W_F is
+        % numerically unstable (⋆1 = cotan has negative/near-zero entries on obtuse triangles),
+        % and toolbox/differential builds div/curl as STABLE composites that avoid ⋆1^{-1}
+        % (div = -⋆0^{-1} d0' ♯' W_F ; curl v = -div(N x v), the surface Hodge rotation).
         e1f = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
         e2f = Vloc(Floc(:,3),:) - Vloc(Floc(:,1),:);
         Ncr = cross(e1f, e2f, 2);  twoA = sqrt(sum(Ncr.^2, 2));
@@ -238,7 +242,8 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
             Arr.(Groups{f})(hh) = s;  %#ok<AGROW>
         end
         % store the DEC group (same scatter-map attachment as the facets)
-        decArr(hh) = struct('d0', DC.d0, 'd1', DC.d1, 'h0', dh0, 'h1', dh1, 'h2', dh2, 'sharp', sharp, ...
+        decArr(hh) = struct('d0', DC.d0, 'd1', DC.d1, 'h0', dh0, 'h1', dh1, 'h2', dh2, ...
+                            'sharp', sharp, ...
                             'GlobalVertices', vH, 'GlobalFaces', find(fMask), ...
                             'Hemisphere', tags{hh}, 'Provenance', prov);
     end
