@@ -28,24 +28,27 @@ This keeps the table tiny and infinitely re-analyzable.
 
 ```
 % --- identity ---
-label        char      % type, e.g. 'vortex' / 'source'
-category     char      % 'source' | 'sink' | 'vortex' | 'antivortex'
+label        char      % free type name, e.g. 'vortex'
+category     char      % singular-point type 'source'|'sink'|'vortex'|'antivortex' (derived)
 color        [r g b]
 % --- TIME coordinate (ref into recording; cf. Events) ---
 time         double    % seconds
 sample       double    % sample index (convenience)
+phase        char      % oscillation phase 'peak'|'trough'|'rising'|'falling'  [COLUMN]
 sourceEvent  char      % originating event group, e.g. 'alpha_peak'
 % --- SPACE coordinate (ref into surface; cf. Scouts) ---
-vertex       double    % seed vertex index on SurfaceFile
+vertex       double    % seed vertex index on SurfaceFile          [COLUMN: Scout]
 pos          [x y z]   % position (display without loading the surface)
-hemi         uint8     % 1=L, 2=R
+hemi         uint8     % 1=L, 2=R                                   [COLUMN]
 region       char      % atlas region label (optional)
 % --- FREQUENCY coordinate ---
 band         [fLo fHi] % Hz
-bandName     char      % 'alpha'
-% --- SCALE coordinate (eigenmode band via bst_eigen; reserved, [] for now) ---
+bandName     char      % 'alpha'|'beta'|'gamma'|...                 [COLUMN: Frequency]
+% --- SCALE coordinate (dominant bst_eigen spectrum band; reserved, [] for now) ---
 scale        [k1 k2]   % eigenmode index range, or []
-scaleName    char      % or ''
+scaleName    char      % dominant eigenspectrum band (eigen-populated later)  [COLUMN: Scale]
+% --- FUNCTION (which scalar field the atom is an extremum of; cf. Scout.Function) ---
+Function     char      % 'potential'(Phi)|'stream'(Psi)|'magnitude'(|J|)|...  [COLUMN]
 % --- descriptors (measured at the extremum) ---
 strength     double    % |J|, omega, or |Phi|/|Psi| extremum value
 charge       int8      % +1/-1 topological charge (source/sink sign)
@@ -57,6 +60,16 @@ DataFile     char      % recording (time source)
 ResultsFile  char      % kernel/source link (the inverse used)
 SurfaceFile  char      % cortex (space source)
 ```
+
+Panel columns (panel_dynamics): **Time | Phase | Freq | Scale | Function | Hemisphere | Vertex**.
+
+### Atoms are a table, not "built from" Events/Scouts
+
+The atoms table is the primary object; Events and Scouts are *projections* of it,
+not its parents. A planned `bst_dynamics` projector will split a table into a
+standard Events group (by `time`/`phase`) and/or a Scouts atlas (by `vertex`) so
+Brainstorm's native event/scout navigation can be reused on demand. `Function`
+(cf. `Scout.Function`) records which scalar field the atom is an extremum of.
 
 ### Table (collection) — `db_template('dynamicsmat')`
 

@@ -81,6 +81,16 @@ function T = Load(DynamicsFile)
     % with file_gettype/file_fullpath; that comes with the Phase 2 tree node).
     T = load(DynamicsFile);
     T = struct_copy_fields(db_template('dynamicsmat'), T, 1);
+    % Forward-compat: normalize each atom against the current template so tables
+    % saved before a schema change gain the new fields (defaulted).
+    if ~isempty(T.Atoms)
+        tmpl = db_template('atom');
+        A = repmat(tmpl, 1, 0);
+        for i = 1:numel(T.Atoms)
+            A(i) = struct_copy_fields(tmpl, T.Atoms(i), 1);
+        end
+        T.Atoms = A;
+    end
     T.nAtoms = numel(T.Atoms);
 end
 
