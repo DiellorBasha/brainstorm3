@@ -31,5 +31,18 @@ function test_tess_cholesky
     assert(isfield(dF2,'marker') && dF2.marker == 42, 'getter did not reuse attached factor');
     fprintf('  getter reuses attached factor  [OK]\n');
 
+    % 'attach' path: simulate an old node that has no Cholesky field at all
+    NodeOld = rmfield(Node, 'Cholesky');   % drop the field to mimic a pre-Cholesky node
+    % file_fullpath only accepts known BST prefixes; use operator_ so it passes through
+    tempname_mat = [tempdir 'operator_test_chol_' num2str(randi(1e6)) '.mat'];
+    Node2 = tess_cholesky('attach', NodeOld, tempname_mat, pin);
+    assert(iscell(Node2.Cholesky) && ~isempty(Node2.Cholesky{1}) && ~isempty(Node2.Cholesky{2}), ...
+        'attach did not populate both hemispheres');
+    xa = tess_cholesky('solve', Node2.Cholesky{1}, b);
+    err_attach = norm(xa - xref) / max(norm(xref), eps);
+    assert(err_attach < 1e-10, 'attach solve mismatch vs backslash: %g', err_attach);
+    if exist(tempname_mat, 'file'), delete(tempname_mat); end
+    fprintf('  attach populates both hemis, solve rel err = %g  [OK]\n', err_attach);
+
     fprintf('PASS\n');
 end

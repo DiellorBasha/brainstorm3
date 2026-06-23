@@ -99,7 +99,7 @@ end
 
 function Node = i_attach(Node, OperatorFile, pin)
     nH = numel(Node.Operator);
-    if ~iscell(Node.Cholesky), Node.Cholesky = cell(1, nH); end
+    if ~isfield(Node,'Cholesky') || ~iscell(Node.Cholesky), Node.Cholesky = cell(1, nH); end
     for hh = 1:nH
         if isempty(Node.Operator{hh}), continue; end
         Node.Cholesky{hh} = i_factor(Node.Operator{hh}, pin);
