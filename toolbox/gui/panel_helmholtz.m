@@ -2,9 +2,12 @@ function varargout = panel_helmholtz(varargin)
 % PANEL_HELMHOLTZ: Controls for the Helmholtz components view (view_helmholtz). A Smoothing
 % section (shared Dirac-eigenmode kernel + scale, on/off) low-passes the active frame before
 % the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal / Harmonic)
-% swaps the cortex colormap + markers (the quiver stays the total field); a persistence gate
-% slider prunes low-persistence singular points. Plus Show vectors, Show singular points, a readout, and
-% Close.
+% swaps the cortex colormap (the quiver stays the total field). Plus Show vectors, a readout,
+% and Close.
+%
+% NOTE: the Derivative (velocity/acceleration), Show-singular-points, persistence gate and
+% trajectory-tracking controls were removed -- that machinery is being rebuilt on top of the
+% atom system (bst_dynamics).
 % Authors: Diellor Basha, 2026
     eval(macro_method);
 end
@@ -39,37 +42,18 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
     end
     jRadio(1).setSelected(true);   % Total: native start
 
-    % --- Derivative order ---
-    gui_component('label', jSec, 'br', 'Derivative:');
-    dnames = {'Field','Velocity','Acceleration'};
-    grpD = ButtonGroup(); jDeriv = javaArray('javax.swing.JRadioButton', numel(dnames));
-    for i = 1:numel(dnames)
-        jDeriv(i) = gui_component('radio', jSec, 'br', dnames{i});
-        grpD.add(jDeriv(i));
-        java_setcb(jDeriv(i), 'ActionPerformedCallback', @(h,e) OnDeriv(panelName, i-1));
-    end
-    jDeriv(1).setSelected(true);   % Field (order 0)
-    jVec  = gui_component('checkbox', jSec, 'br', 'Show vectors');           jVec.setSelected(true);
-    jMark = gui_component('checkbox', jSec, 'br', 'Show singular points');   jMark.setSelected(true);
-    java_setcb(jVec,  'ActionPerformedCallback', @(h,e) OnVectors(panelName));
-    java_setcb(jMark, 'ActionPerformedCallback', @(h,e) OnMarkers(panelName));
+    % --- Vectors ---
+    jVec = gui_component('checkbox', jSec, 'br', 'Show vectors');   jVec.setSelected(true);
+    java_setcb(jVec, 'ActionPerformedCallback', @(h,e) OnVectors(panelName));
 
-    % --- Marker threshold (persistence gate) ---
-    gui_component('label', jSec, 'br', 'Persistence gate:');
-    jThresh = JSlider(0, 100, 0);  jThresh.setPreferredSize(java_scaled('dimension', 120, 22));
-    jSec.add('br hfill', jThresh);
-    java_setcb(jThresh, 'StateChangedCallback', @(h,e) OnGate(panelName));
-
-    jTrack = gui_component('checkbox', jSec, 'br', 'Track trajectory');
-    java_setcb(jTrack, 'ActionPerformedCallback', @(h,e) OnTrack(panelName));
     jReadout = gui_component('label', jSec, 'br', '');
-    jClose  = gui_component('button', jSec, 'br', 'Close');
+    jClose   = gui_component('button', jSec, 'br', 'Close');
     java_setcb(jClose, 'ActionPerformedCallback', @(h,e) OnClose(panelName));
 
     jOpt.add(jSec); jPanelNew.add(jOpt, java.awt.BorderLayout.NORTH);
-    ctrl = struct('hFig',hFig, 'jVec',jVec, 'jMark',jMark, 'jReadout',jReadout, ...
+    ctrl = struct('hFig',hFig, 'jVec',jVec, 'jReadout',jReadout, ...
                   'jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
-                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda, 'jThresh',jThresh, 'jTrack',jTrack, 'jDeriv',jDeriv);
+                  'jSmoothOn',jSmoothOn, 'Lambda',Lambda);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
@@ -80,18 +64,6 @@ end
 function OnVectors(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
     view_helmholtz('SetVectors', ctrl.hFig, ctrl.jVec.isSelected());
-end
-function OnMarkers(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    view_helmholtz('SetMarkers', ctrl.hFig, ctrl.jMark.isSelected());
-end
-function OnTrack(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    view_helmholtz('SetTrack', ctrl.hFig, ctrl.jTrack.isSelected());
-end
-function OnDeriv(panelName, order) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    view_helmholtz('SetDeriv', ctrl.hFig, order);
 end
 function OnKernel(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
@@ -104,11 +76,6 @@ function OnSmooth(panelName) %#ok<DEFNU>
     name   = panel_eigenfilter_design('CurrentKernel', ctrl.jKernel, ctrl.KernelKeys);
     params = panel_eigenfilter_design('ReadParams', ctrl.jParams, ctrl.Lambda);
     view_helmholtz('SetSmoothing', ctrl.hFig, ctrl.jSmoothOn.isSelected(), name, params);
-end
-function OnGate(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    if ctrl.jThresh.getValueIsAdjusting(); return; end
-    view_helmholtz('SetGate', ctrl.hFig, double(ctrl.jThresh.getValue())/100);
 end
 function tf = i_valid(ctrl)
     tf = ~isempty(ctrl) && isfield(ctrl,'hFig') && ~isempty(ctrl.hFig) && all(ishandle(ctrl.hFig));
