@@ -185,18 +185,15 @@ function [L_face, FaceGeom] = i_unconstrained(SurfaceFile, Channel, Param, Block
     % --- face geometry from the canonical manifold backbone (not tess_tangents) ---
     M = tess_manifold(SurfaceFile);                         % find-or-load-or-create
     TessMat  = in_tess_bst(SurfaceFile);
-    Vertices = TessMat.Vertices;  Faces = double(TessMat.Faces);
+    Faces = double(TessMat.Faces);
     nF = size(Faces, 1);
-    x_f   = zeros(nF, 3);  n_hat = zeros(nF, 3);
+    x_f   = zeros(nF, 3);  n_hat = zeros(nF, 3);  A_f = zeros(nF, 1);
     for hh = 1:numel(M.Embedded)
         gf = M.Embedded(hh).GlobalFaces;
         x_f(gf,:)   = M.Embedded(hh).face.centroid;         % == barycentric centroid (exact)
         n_hat(gf,:) = M.Embedded(hh).face.normal;           % unit, gauge-consistent orientation
+        A_f(gf)     = M.Embedded(hh).face.area;             % canonical face area (schemaVersion>=2)
     end
-    % face areas (pure geometry; tess_manifold carries no face-area field) -- metadata only
-    edge_a = Vertices(Faces(:,2),:) - Vertices(Faces(:,1),:);
-    edge_b = Vertices(Faces(:,3),:) - Vertices(Faces(:,1),:);
-    A_f    = sqrt(sum(cross(edge_a, edge_b, 2).^2, 2)) / 2;
 
     FaceGeom = struct('Centroids', x_f, 'Normals', n_hat, 'Areas', A_f);
 
