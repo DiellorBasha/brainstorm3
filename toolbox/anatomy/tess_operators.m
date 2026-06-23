@@ -205,6 +205,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     FirstOrderExt  = cell(1, 2);   % Dirac: extrinsic first-order D     [4F x 4V] per hemisphere
     FaceMass       = cell(1, 2);   % Dirac: face-area mass W_F [4F x 4F] per hemisphere
     FaceAux        = cell(1, 2);   % Hodge-Face: struct(ScalarMass,GradFace,FaceNormal) for the Hodge lift
+    Frame          = cell(1, 2);   % Connection Laplacian: canonical per-vertex tangent frame (e1,e2,normal)
 
     for hh = 1:2
         vH = hemis{hh};
@@ -234,6 +235,14 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     % gauge/facets call required, verified on the canonical cortex).
                     A = nxr_compute('operators', h, 'laplacian', 'connection');
                     B = nxr_compute('operators', h, 'mass', 'galerkin');
+                    % Capture the CANONICAL per-vertex tangent frame the complex
+                    % eigenmodes decode in: field(v) = real(U)*e1(v) + imag(U)*e2(v).
+                    % Same deterministic nxr routine that builds the operator, so the
+                    % stored frame is provably the operator's frame (validated in
+                    % dev/tests/test_frame_sync.m). This is the raw (levi-civita) frame;
+                    % any gauge combing lives separately in the manifold's Gauge node.
+                    VF = nxr_compute('vertexFrames', h);
+                    Frame{hh} = struct('e1', VF.e1, 'e2', VF.e2, 'normal', VF.normals);
                 case 'Dirac'
                     % Full frame-transport Dirac operator ("f and N together"):
                     % (1-Tau)*D_int^2 + Tau*E. BOTH blocks couple the quaternion
@@ -352,6 +361,9 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     OperatorMat.GlobalFaces    = GlobalFaces;     % 1x2 cell of global face indices (face-domain variants)
     if strcmpi(Variant, 'Hodge-Face')
         OperatorMat.FaceAux = FaceAux;            % 1x2 struct: ScalarMass / GradFace / FaceNormal (Hodge lift)
+    end
+    if strcmpi(Variant, 'Connection Laplacian')
+        OperatorMat.Frame = Frame;               % 1x2 struct: canonical (e1,e2,normal) the eigenmodes decode in
     end
     if strcmpi(Variant, 'Dirac')
         OperatorMat.FirstOrder = struct('Intrinsic', {FirstOrderInt}, 'Extrinsic', {FirstOrderExt});
