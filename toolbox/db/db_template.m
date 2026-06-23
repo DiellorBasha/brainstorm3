@@ -918,7 +918,7 @@ switch lower(structureName)
             'Label',       '', ...
             'Function',    'Mean', ... % Scout function: PCA, FastPCA, Mean, Mean_norm, Max, Power, All
             'Region',      'UU', ...      % 1st letter: Left/Right/Unknown, 2nd letter: Frontal/Parietal/Temporal/Occipital/Central/Unkown
-            'Geodesic',    [], ...   % [nPts x 3] geodesic polyline points for a "geodesic link" scout (the geodesic line connecting its 2 endpoint vertices); [] for a normal region scout
+            'Geodesic',    [], ...   % "geodesic link" scout: struct(Edges [nPts x 2 global vertex ids], T [nPts x 1] in 0..1, Points [nPts x 3]) parametrizing the geodesic line connecting its 2 endpoints along surface edges, so it can be reconstructed on the CURRENTLY DISPLAYED surface (follows smoothing/inflation); [] for a normal region scout
             'Handles',     repmat(struct( ...
                 'hFig',        [], ... % Figure handle in which the scout is displayed
                 'hScout',      [], ... % Handles to the graphical scout objects

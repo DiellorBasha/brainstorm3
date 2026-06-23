@@ -3306,10 +3306,14 @@ function CreateGeodesicMouse(vi, SurfaceFile)
             return;
         end
         bst_progress('stop');
+        % Parametrize the polyline along surface edges (v1,v2,t) so it can be reconstructed on
+        % the currently displayed surface (anatomical / smoothed / inflated).
+        Tess = in_tess_bst(SurfaceFile, 0);
+        [E, Tp] = i_geodesic_edgeparam(pts, Tess.Vertices, Tess.VertConn);
         sScout = sScouts(iPending);
         sScout.Vertices = unique([A, vi]);
         sScout.Seed     = A;
-        sScout.Geodesic = pts;
+        sScout.Geodesic = struct('Edges', E, 'T', Tp, 'Points', pts);
         SetScouts(SurfaceFile, iPending, sScout);
         GeodesicPending([]);
         PlotScouts(iPending);
@@ -3324,6 +3328,30 @@ function CreateGeodesicMouse(vi, SurfaceFile)
         SetSelectedScouts(iScout);
         UpdateScoutsDisplay('current');
     end
+end
+
+% Parametrize geodesic polyline points along surface edges: for each point, an incident edge
+% (v1,v2) of its nearest vertex and the parameter t in [0,1] with pt ~= (1-t)*V(v1) + t*V(v2).
+% Projecting onto the actual incident edges (via VertConn) is exact even where the two nearest
+% vertices do not share an edge. This lets PlotScouts redraw the line on whatever surface is
+% currently displayed (anatomical / smoothed / inflated).
+function [E, T] = i_geodesic_edgeparam(pts, V, VertConn)
+    n  = size(pts, 1);
+    v1 = dsearchn(V, pts);            % nearest surface vertex for each polyline point
+    v2 = v1;
+    T  = zeros(n, 1);
+    for k = 1:n
+        nb = find(VertConn(v1(k), :));            % neighbors of v1 (the incident-edge endpoints)
+        if isempty(nb), continue; end
+        d  = V(nb,:) - V(v1(k),:);                % edge vectors
+        tk = sum((pts(k,:) - V(v1(k),:)) .* d, 2) ./ max(sum(d.^2,2), eps);
+        tk = min(max(tk, 0), 1);                  % clamp to the segment
+        proj = V(v1(k),:) + tk .* d;              % projection of pt onto each incident edge
+        [~, im] = min(sum((proj - pts(k,:)).^2, 2));   % closest incident edge
+        v2(k) = nb(im);
+        T(k)  = tk(im);
+    end
+    E = [v1, v2];
 end
 
 
@@ -5099,11 +5127,21 @@ function PlotScouts(iScouts, hFigSel)
 
                 % === DRAW GEODESIC LINE (geodesic-link scout: a polyline between its 2 endpoints) ===
                 hasGeoFld = isfield(sScouts(i).Handles, 'hGeodesic');
-                isGeoLink = isfield(sScouts(i), 'Geodesic') && ~isempty(sScouts(i).Geodesic) && (size(sScouts(i).Geodesic,2) == 3);
+                G = [];
+                if isfield(sScouts(i), 'Geodesic'), G = sScouts(i).Geodesic; end
+                isGeoLink = ~isempty(G);
                 if isGeoLink
-                    geoPts = sScouts(i).Geodesic;
-                    % Lift the polyline just above the surface, along the nearest displayed-vertex
-                    % normal, so it is not occluded by (z-fighting with) the opaque cortex patch.
+                    % Reconstruct the polyline on the CURRENTLY DISPLAYED vertices, so it tracks
+                    % surface smoothing / inflation (the path is stored as edge-parametrized
+                    % (v1,v2,t)). Fall back to raw stored points for any legacy scout.
+                    if isstruct(G) && isfield(G, 'Edges')
+                        Vd = get(sSurface.hPatch, 'Vertices');
+                        geoPts = (1 - G.T) .* Vd(G.Edges(:,1),:) + G.T .* Vd(G.Edges(:,2),:);
+                    else
+                        geoPts = G;
+                    end
+                    % Lift the polyline just above the (displayed) surface, along the nearest
+                    % displayed-vertex normal, so it is not occluded by the opaque cortex patch.
                     if ~isempty(VertexNormals) && ~isempty(Vertices)
                         iNear  = dsearchn(Vertices, geoPts);
                         geoPts = geoPts + 0.0006 * VertexNormals(iNear,:);
