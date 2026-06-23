@@ -63,7 +63,7 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment      = '';
-Def_OPTIONS.Method       = 'gradient';        % {'gradient','laplacian','poisson','helmholtz'}
+Def_OPTIONS.Method       = 'gradient';        % {'gradient','divergence','curl','laplacian','poisson','helmholtz'}
 Def_OPTIONS.SurfaceFile  = [];                % cortex tying the data to its operators ([] => from the results file)
 Def_OPTIONS.Gauge        = 'trivial';         % manifold_ gauge for node resolution
 Def_OPTIONS.TimeWindow   = [];                % restrict the input time series
@@ -211,17 +211,19 @@ function stratum = i_field_stratum(F, nVtot, nFtot, explicit)
         stratum = 'ambient';
     elseif nr == 3*nFtot
         stratum = 'tangent';
-    elseif nr == nVtot && ~isreal(F)
-        stratum = 'tangent';        % connection (complex) representation
     elseif nr == nVtot
-        stratum = 'scalar';
+        if nVtot == nFtot
+            error('bst_operators:badFieldType', ...
+                'Ambiguous layout (nV==nF); set OPTIONS.FieldType explicitly.');
+        end
+        if ~isreal(F)
+            stratum = 'tangent';        % connection (complex) representation
+        else
+            stratum = 'scalar';
+        end
     else
         error('bst_operators:badFieldType', ...
             'Cannot infer field stratum from %d rows (nV=%d, nF=%d); set OPTIONS.FieldType.', nr, nVtot, nFtot);
-    end
-    if nVtot == nFtot
-        error('bst_operators:badFieldType', ...
-            'Ambiguous layout (nV==nF); set OPTIONS.FieldType explicitly.');
     end
 end
 
