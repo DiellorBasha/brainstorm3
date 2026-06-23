@@ -73,13 +73,14 @@ function [OutputFiles, Messages, isError] = bst_eigen(Data, OPTIONS)
 
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment       = '';
-Def_OPTIONS.Method        = 'spectrum';  % {'spectrum','filter'} wired; 'project' stub
+Def_OPTIONS.Method        = 'spectrum';  % {'spectrum','filter','wavelet'} wired; 'project' stub
 Def_OPTIONS.EigenFile     = [];          % eigen_ node (the spatial axis); [] => resolve from SurfaceFile
 Def_OPTIONS.Variant       = [];          % operator family hint ('Laplace-Beltrami'|'Connection Laplacian'|'Dirac'|...)
 Def_OPTIONS.nModes        = [];          % use a subset of modes (the spatial "band"); [] => all
 Def_OPTIONS.Measure       = 'power';     % spectrum measure {'power','magnitude'}
 Def_OPTIONS.KernelName    = 'flat';      % 'filter' method: eigfilter kernel name (or handle / [K x 1] gain)
 Def_OPTIONS.KernelParams  = struct();    % 'filter' method: kernel parameters
+Def_OPTIONS.Nf            = 6;           % 'wavelet' method: number of frame members (per family)
 Def_OPTIONS.WinLength     = [];          % windowing: window length in SECONDS ([] => one window)
 Def_OPTIONS.WinOverlap    = 50;          % windowing: overlap in percent
 Def_OPTIONS.WinFunc       = 'mean';      % windowing: aggregate across windows {'mean','std','mean+std'}
@@ -198,6 +199,20 @@ for iData = 1:length(Data)
             [Ffilt, Messages, isError] = bst_eigenfilter('Analysis', F, EigenMat, OperatorMat, OPTIONS.KernelName, OPTIONS.KernelParams);
             if isError, break; end
             Result = struct('Type', 'filter', 'Field', Ffilt);
+        case 'wavelet'
+            % Spatial graph-wavelet transform: design a frame, analyze -> scalogram.
+            % The frame must span the GLOBAL spectrum (max over hemispheres), else a hemi
+            % whose lambda exceeds the design lmax would have those modes zeroed.
+            lams = EigenMat.Lambda(~cellfun(@isempty, EigenMat.Lambda));
+            if isempty(lams)
+                Messages = 'bst_eigen: eigen node has no eigenvalues for the wavelet frame.';
+                isError = 1; break;
+            end
+            lrange = [min(cellfun(@min, lams)), max(cellfun(@max, lams))];
+            frame = bst_eigenwavelet('Design', OPTIONS.KernelName, OPTIONS.Nf, lrange);
+            [W, Messages, isError] = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame);
+            if isError, break; end
+            Result = struct('Type', 'wavelet', 'W', W, 'Frame', frame);
         case 'project'
             % TODO: Coef = Phi' * B * F  (manifold Fourier transform onto the eigenbasis).
         otherwise
@@ -241,6 +256,9 @@ bst_progress('stop');
             case 'filter'
                 FileMat    = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVector, SurfaceFile);
                 filePrefix = 'results_eigenfilter';
+            case 'wavelet'
+                FileMat    = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile);
+                filePrefix = 'timefreq_eigenwavelet';
             otherwise
                 error('bst_eigen:OutputType', 'Unknown result type: %s', Result.Type);
         end
@@ -523,4 +541,49 @@ function FileMat = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVe
     FileMat.Options.KernelName   = kstr;
     FileMat.Options.KernelParams = OPTIONS.KernelParams;
     FileMat = bst_history('add', FileMat, 'compute', 'Eigen-domain spatial filter (bst_eigen)');
+end
+
+
+%% ===== BUILD THE EIGEN-WAVELET (SCALOGRAM) TIMEFREQMAT =====
+function FileMat = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile)
+    % Spatial graph-wavelet scalogram W [nSrc x nTime x M] -> source TimefreqMat, with the
+    % per-member centroid sqrt(lambda) as the (spatial-)frequency axis (reuses the cortical
+    % time-freq viewer). Unconstrained (3-vector) for Dirac/face variants; scalar otherwise.
+    W = Result.W;                          % [nSrc x nTime x M]
+    [~, nT, M] = size(W);
+    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+        nComp = 3;
+    else
+        nComp = 1;
+    end
+    FileMat = db_template('timefreqmat');
+    FileMat.TF          = W;
+    FileMat.Freqs       = Result.Frame.Centers(:)';   % per-member centroid sqrt(lambda)
+    if ~isempty(TimeVector) && (numel(TimeVector) == nT)
+        FileMat.Time = TimeVector;
+    else
+        FileMat.Time = 0:(nT-1);
+    end
+    FileMat.Measure     = 'other';
+    FileMat.Method      = 'eigenwavelet';
+    FileMat.DataType    = DataType;
+    FileMat.SurfaceFile = SurfaceFile;
+    FileMat.nComponents = nComp;
+    FileMat.RowNames    = [];                          % source rows
+    FileMat.nAvg = 1; FileMat.Leff = 1;
+    if ~isempty(DataFile)
+        FileMat.DataFile = file_short(DataFile);
+    end
+    if isempty(OPTIONS.Comment)
+        FileMat.Comment = sprintf('Eigenwavelet (%s, %s, %d scales)', EigenMat.Variant, Result.Frame.Family, M);
+    else
+        FileMat.Comment = OPTIONS.Comment;
+    end
+    FileMat.Options.Method    = 'eigenwavelet';
+    FileMat.Options.Variant   = EigenMat.Variant;
+    FileMat.Options.EigenFile = OPTIONS.EigenFile;
+    FileMat.Options.Family    = Result.Frame.Family;
+    FileMat.Options.Nf        = Result.Frame.Nf;
+    FileMat.Options.Centers   = Result.Frame.Centers;
+    FileMat = bst_history('add', FileMat, 'compute', 'Spatial graph-wavelet transform (bst_eigen)');
 end
