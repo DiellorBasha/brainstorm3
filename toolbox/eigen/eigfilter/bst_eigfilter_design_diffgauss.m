@@ -1,8 +1,8 @@
-function out = bst_eigfilter_design_dog(params)
-% BST_EIGFILTER_DESIGN_DOG: Difference-of-Gaussians band-pass
+function out = bst_eigfilter_design_diffgauss(params)
+% BST_EIGFILTER_DESIGN_DIFFGAUSS: Difference-of-Gaussians band-pass
 % g(l) = exp(-t1*l) - exp(-t2*l). Non-negative when t1 < t2; zero at l=0.
-% USAGE:  g = bst_eigfilter_design_dog(struct('t1',0.1,'t2',0.4))  -> handle
-%         m = bst_eigfilter_design_dog('meta')                      -> metadata
+% USAGE:  g = bst_eigfilter_design_diffgauss(struct('t1',0.1,'t2',0.4))  -> handle
+%         m = bst_eigfilter_design_diffgauss('meta')                      -> metadata
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -25,7 +25,7 @@ function out = bst_eigfilter_design_dog(params)
 % Authors: Diellor Basha, 2026
 
 if nargin >= 1 && ischar(params) && strcmpi(params,'meta')
-    out = struct('name','dog','display','Difference of Gaussians (band-pass)', ...
+    out = struct('name','diffgauss','display','Difference of Gaussians (band-pass)', ...
         'params', struct('t1', struct('default',0.01,'range',[0 Inf]), ...
                          't2', struct('default',0.04,'range',[0 Inf])), ...
         'bandpass', true, 'priorAdmissible', false);
@@ -34,9 +34,9 @@ end
 if nargin < 1 || isempty(params); params = struct(); end
 if ~isfield(params,'t1') || isempty(params.t1); params.t1 = 0.01; end
 if ~isfield(params,'t2') || isempty(params.t2); params.t2 = 0.04; end
-if params.t1 < 0; error('bst_eigfilter_design_dog: t1 must be >= 0.'); end
+if params.t1 < 0; error('bst_eigfilter_design_diffgauss: t1 must be >= 0.'); end
 if params.t1 >= params.t2
-    error('bst_eigfilter_design_dog: require t1 < t2 (got t1=%g, t2=%g).', params.t1, params.t2);
+    error('bst_eigfilter_design_diffgauss: require t1 < t2 (got t1=%g, t2=%g).', params.t1, params.t2);
 end
 t1 = params.t1; t2 = params.t2;
 out = @(l) exp(-t1 * double(l(:))) - exp(-t2 * double(l(:)));

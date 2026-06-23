@@ -85,12 +85,12 @@ ghb = bst_eigfilter_design_mexhat(struct('t',[0.05 0.1 0.2]));
 assert(iscell(ghb) && numel(ghb)==3, 'mexhat vector t must return a bank.');
 mh = bst_eigfilter_design_mexhat('meta');
 assert(mh.priorAdmissible == false, 'mexhat must be flagged not prior-admissible.');
-% dog band-pass: non-negative for t1<t2, zero at 0
-gd = bst_eigfilter_design_dog(struct('t1',0.1,'t2',0.4));
-assert(abs(gd(0)) < 1e-12, 'dog must be 0 at lambda=0.');
-assert(all(gd(lpp) >= -1e-12), 'dog must be non-negative for t1<t2.');
-md = bst_eigfilter_design_dog('meta');
-assert(md.priorAdmissible == false, 'dog must be flagged not prior-admissible.');
+% diffgauss band-pass: non-negative for t1<t2, zero at 0
+gd = bst_eigfilter_design_diffgauss(struct('t1',0.1,'t2',0.4));
+assert(abs(gd(0)) < 1e-12, 'diffgauss must be 0 at lambda=0.');
+assert(all(gd(lpp) >= -1e-12), 'diffgauss must be non-negative for t1<t2.');
+md = bst_eigfilter_design_diffgauss('meta');
+assert(md.priorAdmissible == false, 'diffgauss must be flagged not prior-admissible.');
 
 % ---- meta contract: every registered kernel exposes the full field set ----
 % (mechanically enforces the contract the future filter-design GUI relies on)
@@ -106,13 +106,13 @@ for k = allNames
     assert(islogical(mt.bandpass) || isnumeric(mt.bandpass), 'meta.bandpass must be logical/numeric.');
     assert(islogical(mt.priorAdmissible) || isnumeric(mt.priorAdmissible), 'meta.priorAdmissible must be logical/numeric.');
 end
-% only mexhat and dog are analysis-only (priorAdmissible=false)
+% only mexhat and diffgauss are analysis-only (priorAdmissible=false)
 inadmissible = {};
 for k = allNames
     mt = bst_eigfilter_kernel('info', k{1});
     if ~mt.priorAdmissible; inadmissible{end+1} = k{1}; end %#ok<AGROW>
 end
-assert(isequal(sort(inadmissible), {'dog','mexhat'}), 'only dog and mexhat must be prior-inadmissible.');
+assert(isequal(sort(inadmissible), {'diffgauss','mexhat'}), 'only diffgauss and mexhat must be prior-inadmissible.');
 
 disp('ALL TESTS PASSED');
 end

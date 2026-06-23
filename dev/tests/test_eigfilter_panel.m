@@ -17,14 +17,14 @@ function test_eigfilter_panel()
     js = jP.getClientProperty('slider_t'); k = double(js.getValue());
     nFail = nFail + chk('t = 1/lambda_k', abs(p.t - 1/max(Lambda(k),eps)) < 1e-9);
 
-    % dog: two params, ordered t1<t2 regardless of slider positions
-    panel_eigenfilter_design('BuildSliders', jP, 'dog', Lambda, @() []);
+    % diffgauss: two params, ordered t1<t2 regardless of slider positions
+    panel_eigenfilter_design('BuildSliders', jP, 'diffgauss', Lambda, @() []);
     names = panel_eigenfilter_design('ParamNames', jP);
-    nFail = nFail + chk('dog has t1,t2', numel(names)==2);
+    nFail = nFail + chk('diffgauss has t1,t2', numel(names)==2);
     jP.getClientProperty('slider_t1').setValue(300);   % force t1 mode > t2 mode
     jP.getClientProperty('slider_t2').setValue(50);
     p = panel_eigenfilter_design('ReadParams', jP, Lambda);
-    nFail = nFail + chk('dog t1 < t2 enforced', p.t1 < p.t2);
+    nFail = nFail + chk('diffgauss t1 < t2 enforced', p.t1 < p.t2);
 
     fprintf('\n==== test_eigfilter_panel: %d failed ====\n', nFail);
     if nFail > 0, error('test_eigfilter_panel FAILED'); end

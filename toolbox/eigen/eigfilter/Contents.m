@@ -22,7 +22,7 @@
 %   ideal         - g = 1[lo <= lambda <= hi]   (brick-wall band)
 %   matern        - g = (kappa^2 + lambda)^-nu  (SPDE / Gaussian field)
 %   mexhat        - g = (t*lambda).*exp(-t*lambda)     (band-pass; bank-capable)
-%   dog           - g = exp(-t1*lambda) - exp(-t2*lambda)  (band-pass)
+%   diffgauss     - g = exp(-t1*lambda) - exp(-t2*lambda)  (band-pass)
 %
 % Consumed by the file-based eigen filter path: bst_eigen 'filter' -> bst_eigenfilter.
 % NOTE: the legacy scalar-LBO eigenmode clusters (bst_eigenmodes_*/process_eigenmodes_*, the

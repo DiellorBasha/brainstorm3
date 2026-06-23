@@ -12,8 +12,8 @@ function varargout = panel_eigenfilter_design(varargin)
 %   panel_eigenfilter_design('DrawResponse', hAxes, kernelName, params, Lambda)
 %
 % The scale sliders live in mode-index space (1..K): mode k maps to eigenvalue
-% Lambda(k), then to the kernel's scale parameter (t = 1/lambda_k for heat/mexhat/dog,
-% beta = lambda_k for tikhonov). dog's t1<t2 is enforced in ReadParams. onSettle is a
+% Lambda(k), then to the kernel's scale parameter (t = 1/lambda_k for heat/mexhat/diffgauss,
+% beta = lambda_k for tikhonov). diffgauss's t1<t2 is enforced in ReadParams. onSettle is a
 % no-arg handle called when a slider drag settles (the owner's live recompute).
 %
 % Authors: Diellor Basha, 2026
@@ -21,7 +21,7 @@ function varargout = panel_eigenfilter_design(varargin)
 end
 
 function [keys, displays] = Kernels() %#ok<DEFNU>
-    keys = {'mexhat','dog','heat','inverse_heat','tikhonov'};
+    keys = {'mexhat','diffgauss','heat','inverse_heat','tikhonov'};
     displays = cell(1, numel(keys));
     for i = 1:numel(keys)
         try
@@ -45,7 +45,7 @@ function BuildSliders(jParams, kernelKey, Lambda, onSettle) %#ok<DEFNU>
     nP = numel(pf);
     for i = 1:nP
         nm = pf{i};
-        % stagger defaults so multi-scale kernels (dog: t1,t2) start at distinct modes
+        % stagger defaults so multi-scale kernels (diffgauss: t1,t2) start at distinct modes
         defMode = max(1, min(K, round(K * i/(nP+1))));
         [js, jTitle] = i_labeled_slider(jParams, ...
             sprintf('%s: mode %d', i_param_label(nm), defMode), 'coarse', 'fine', 1, K, defMode);
@@ -94,7 +94,7 @@ function params = ReadParams(jParams, Lambda) %#ok<DEFNU>
         k = max(1, min(K, double(js.getValue())));
         params.(nm) = i_param_value(nm, Lambda(k));
     end
-    % dog requires t1 < t2 (the two sliders are independent): order + separate
+    % diffgauss requires t1 < t2 (the two sliders are independent): order + separate
     if isfield(params,'t1') && isfield(params,'t2')
         lo = min(params.t1, params.t2);  hi = max(params.t1, params.t2);
         if hi <= lo * (1 + 1e-3); hi = lo * 1.5; end
