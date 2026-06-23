@@ -107,8 +107,10 @@ function Op = i_prepare_vertex(OperatorNode, ManifoldMat, Surf)
         Floc  = mapV(Fcs(gf, :));                          % [nFh x 3] local indices
         Vloc  = E.vertex.position;                         % [nVh x 3] canonical positions (manifold)
         % canonical per-face geometry (manifold): unit normal + TRUE area (no cross/flip, no 2A/Af hazard)
-        Nf    = E.face.normal;                             % [nFh x 3]
         Af    = E.face.area;                               % [nFh x 1] true area
+        % orient the (consistently-wound) manifold normals OUTWARD so the divergence sign
+        % (div = imag . n) and source/sink charge follow the physical convention
+        Nf    = i_orient_outward(E.face.normal, E.face.centroid, Af);   % [nFh x 3]
         % per-hemisphere 1-ring (LOCAL) for core detection
         eLoc = [Floc(:,[1 2]); Floc(:,[2 3]); Floc(:,[3 1])];
         Aloc = sparse([eLoc(:,1);eLoc(:,2)], [eLoc(:,2);eLoc(:,1)], true, nVh, nVh);
@@ -273,9 +275,9 @@ function Op = i_prepare_face(OperatorNode, ManifoldMat, Surf)
         nFh = numel(fH);
         % gradFace from the operator node (NOT a fresh nxr build); geometry from the manifold
         G   = OperatorNode.FaceAux{hh}.GradFace;            % [3F x F]
-        Nf  = E.face.normal;                               % gauge-consistent outward
         Af  = E.face.area;                                 % true area
         Cf  = E.face.centroid;                             % barycentric centroid
+        Nf  = i_orient_outward(E.face.normal, Cf, Af);     % outward (physical divergence sign)
         % local face->vertex connectivity (for the dual adjacency only)
         nVh = numel(vH);  mapV = zeros(max([vH;1]),1); mapV(vH) = 1:nVh;
         Floc = mapV(double(Surf.Faces(fH,:)));
@@ -369,6 +371,19 @@ function cores = i_find_cores_face(field, Op, omega)
         end
     end
     if ~isempty(cores), [~,ord]=sort([cores.persistence],'descend'); cores=cores(ord); end
+end
+
+%% ===== orient consistently-wound face normals outward (both domains) =====
+function Nf = i_orient_outward(Nf, Cf, Af)
+% Globally flip the per-face normals to point OUTWARD. The manifold (nxr/geometry-central)
+% normals are consistently oriented by mesh winding but the global sign is gauge-dependent;
+% for a closed surface the divergence theorem gives sum_f Af * n_f . (c_f - c0) = 3*Volume,
+% positive iff n_f is outward. One robust global sign per hemisphere -- no per-face VertNormals
+% flip (so no VertNormals noise), restoring the physical divergence/source-sink convention.
+    c0 = mean(Cf, 1);
+    if sum(Af .* sum(Nf .* (Cf - c0), 2)) < 0
+        Nf = -Nf;
+    end
 end
 
 %% ===== shared cached-factor solver (both domains) =====

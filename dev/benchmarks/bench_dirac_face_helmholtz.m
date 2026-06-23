@@ -1,8 +1,8 @@
 function R = bench_dirac_face_helmholtz(frameTime)
 % BENCH_DIRAC_FACE_HELMHOLTZ  Compare vertex vs face-NATIVE Helmholtz on a real Dirac frame.
 % Interpolates the unconstrained vertex dSPM solution to face centroids and decomposes it
-% with bst_dirac_helmholtz_face (face-native gradFace/lapFace coupled Hodge), against
-% bst_dirac_helmholtz (vertex). Now apples-to-apples (both self-consistent, genus-0 harmonic~0).
+% with bst_helmholtz Domain=face (face-native gradFace coupled Hodge), against
+% bst_helmholtz Domain=vertex. Now apples-to-apples (both self-consistent, genus-0 harmonic~0).
 % USAGE: R = bench_dirac_face_helmholtz(22.6)
 % Author: Diellor Basha, 2026
     if nargin<1 || isempty(frameTime), frameTime = 22.6; end
@@ -22,18 +22,20 @@ function R = bench_dirac_face_helmholtz(frameTime)
     SurfaceFile = HMos.SurfaceFile;  Surf = in_tess_bst(SurfaceFile,0);
     V = Surf.Vertices; F = double(Surf.Faces);
     Dirac = i_op(SurfaceFile,'Dirac'); LBO = i_op(SurfaceFile,'Laplace-Beltrami');
+    Mani  = tess_manifold(SurfaceFile);
+    FaceOp = i_op(SurfaceFile,'Hodge-Face');                 % carries FaceAux.GradFace
 
     % vertex pipeline
-    OpV = bst_dirac_helmholtz('Prepare', Dirac, LBO, Surf);
-    HtV = bst_dirac_helmholtz('Frame', OpV, Jt);
+    OpV = bst_helmholtz('Prepare', {Dirac, LBO}, Mani, Surf, 'Domain','vertex');
+    HtV = bst_helmholtz('Frame', OpV, Jt);
 
     % interpolate vertex field -> face centroids (barycentric mean of the 3 vertex vectors)
     J3 = reshape(Jt,3,[])';                                  % [nV x 3]
     Jf = (J3(F(:,1),:) + J3(F(:,2),:) + J3(F(:,3),:))/3;     % [nF x 3]
 
     % face pipeline (intrinsic dual)
-    OpF = bst_dirac_helmholtz_face('Prepare', Dirac, LBO, Surf);
-    HtF = bst_dirac_helmholtz_face('Frame', OpF, Jf);
+    OpF = bst_helmholtz('Prepare', FaceOp, Mani, Surf, 'Domain','face');
+    HtF = bst_helmholtz('Frame', OpF, Jf);
 
     % ---- compare (count only persistence-significant cores; the 3-valence face dual
     %      yields many tiny-persistence raw extrema, so gate both sides identically) ----
