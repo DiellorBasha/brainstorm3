@@ -28,7 +28,7 @@ function test_bst_eigen_resolve()
         nFail = nFail + chk('implicit resolve: returns a struct', ok);
         if ok
             nFail = nFail + chk('spectrum has Freqs (sqrt-lambda)', isfield(out{1}, 'Freqs') && ~isempty(out{1}.Freqs));
-            nFail = nFail + chk('spectrum Method == spectrum', isfield(out{1}, 'Method') && strcmp(out{1}.Method, 'spectrum'));
+            nFail = nFail + chk('spectrum Method == eigenspectrum', isfield(out{1}, 'Method') && strcmp(out{1}.Method, 'eigenspectrum'));
         end
     end
 

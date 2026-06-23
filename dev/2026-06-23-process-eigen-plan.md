@@ -71,7 +71,7 @@ function test_bst_eigen_resolve()
         nFail = nFail + chk('implicit resolve: returns a struct', ok);
         if ok
             nFail = nFail + chk('spectrum has Freqs (sqrt-lambda)', isfield(out{1}, 'Freqs') && ~isempty(out{1}.Freqs));
-            nFail = nFail + chk('spectrum Method == spectrum', isfield(out{1}, 'Method') && strcmp(out{1}.Method, 'spectrum'));
+            nFail = nFail + chk('spectrum Method == eigenspectrum', isfield(out{1}, 'Method') && strcmp(out{1}.Method, 'eigenspectrum'));
         end
     end
 
@@ -259,7 +259,7 @@ function test_process_eigen()
     nFail = nFail + chk('process_eigen returns a saved node', ok);
     if ok
         R = in_bst_timefreq(Out{1}, 'Method', 'Freqs');
-        nFail = nFail + chk('node Method == spectrum', strcmp(R.Method, 'spectrum'));
+        nFail = nFail + chk('node Method == eigenspectrum', strcmp(R.Method, 'eigenspectrum'));
         nFail = nFail + chk('node has Freqs', ~isempty(R.Freqs));
         try, file_delete(file_fullpath(Out{1}), 1); db_reload_studies(sInputs.iStudy); catch; end
     end
@@ -504,7 +504,7 @@ function test_process_eigenspectrum()
                 nFail = nFail + chk('node prefix timefreq_eigenspectrum', ...
                     ~isempty(strfind(Out{1}, 'timefreq_eigenspectrum'))); %#ok<STREMP>
                 R = in_bst_timefreq(Out{1}, 'Method');
-                nFail = nFail + chk('node Method == spectrum', strcmp(R.Method, 'spectrum'));
+                nFail = nFail + chk('node Method == eigenspectrum', strcmp(R.Method, 'eigenspectrum'));
                 try, file_delete(file_fullpath(Out{1}), 1); db_reload_studies(sInputs.iStudy); catch; end
             end
         end
