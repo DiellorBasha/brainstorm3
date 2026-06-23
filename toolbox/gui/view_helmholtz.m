@@ -15,14 +15,13 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
 % USAGE:
 %   hFig = view_helmholtz(SrcResultsFile)
 %   view_helmholtz('SetComponent', hFig, name)             % 'Total'|'Irrot'|'Solen'
-%   view_helmholtz('SetVectors', hFig, show)
 %   view_helmholtz('SetSmoothing', hFig, isOn, name, params)  % Dirac-eigenmode low-pass
 %   view_helmholtz('Close', hFig)
 %   view_helmholtz('UpdateFrame', hFig)
 % Authors: Diellor Basha, 2026
     global GlobalData;
     hFig = [];
-    VERBS = {'SetComponent','SetVectors','SetSmoothing','Close','UpdateFrame'};
+    VERBS = {'SetComponent','SetSmoothing','Close','UpdateFrame'};
     if (nargin >= 1) && ischar(SrcResultsFile) && any(strcmp(SrcResultsFile, VERBS))
         if ~strcmp(SrcResultsFile, 'Close') && ...
                 (isempty(varargin) || isempty(varargin{1}) || ~all(ishandle(varargin{1})))
@@ -72,7 +71,7 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     try, panel_surface('UpdateSurfaceProperties'); catch, end %#ok<CTCH>
 
     St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
-                'ShowVectors',true, 'iTess',iTess, 'nV',nV, ...
+                'iTess',iTess, 'nV',nV, ...
                 'EigenMat',EigenMat, 'Mass',{OpMat.Mass}, 'Lambda',Lambda, ...
                 'Smooth',struct('on',false,'name','heat','params',struct()), ...
                 'Cache',containers.Map('KeyType','double','ValueType','any'));
@@ -128,15 +127,11 @@ function UpdateFrame(hFig)
     setappdata(hFig,'Surface',TessInfo);
     panel_surface('UpdateSurfaceColormap', hFig);
     % --- quiver is ALWAYS the (smoothed) total source field; component changes only the scalar ---
-    if St.ShowVectors
-        Vq = Ht.Vtot;
-        if numel(visV) == size(Vq,1); Vq(~visV,:) = 0; end   % zero-length arrows = hidden hemisphere
-        setappdata(hFig, 'QuiverVectorOverride', Vq);
-        try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 1); catch, end %#ok<CTCH>
-        try, figure_3d('PlotSourceVectors', hFig, St.iTess); catch, end %#ok<CTCH>
-    else
-        try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 0); catch, end %#ok<CTCH>
-    end
+    Vq = Ht.Vtot;
+    if numel(visV) == size(Vq,1); Vq(~visV,:) = 0; end   % zero-length arrows = hidden hemisphere
+    setappdata(hFig, 'QuiverVectorOverride', Vq);
+    try, figure_3d('SetShowSourceVectors', hFig, St.iTess, 1); catch, end %#ok<CTCH>
+    try, figure_3d('PlotSourceVectors', hFig, St.iTess); catch, end %#ok<CTCH>
     i_readout(comp.Kind);
 end
 
@@ -147,10 +142,6 @@ function SetComponent(hFig, name) %#ok<DEFNU>
     if any(strcmp(name, {'Irrot','Solen'})); bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     else; bst_colormaps('AddColormapToFigure', hFig, 'source'); end
     UpdateFrame(hFig);
-end
-function SetVectors(hFig, show) %#ok<DEFNU>
-    St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end
-    St.ShowVectors = show; setappdata(hFig, 'HelmholtzState', St);  UpdateFrame(hFig);
 end
 function SetSmoothing(hFig, isOn, name, params) %#ok<DEFNU>
     St = getappdata(hFig, 'HelmholtzState'); if isempty(St); return; end

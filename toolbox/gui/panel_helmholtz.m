@@ -1,69 +1,71 @@
 function varargout = panel_helmholtz(varargin)
-% PANEL_HELMHOLTZ: Controls for the Helmholtz components view (view_helmholtz). A Smoothing
-% section (shared Dirac-eigenmode kernel + scale, on/off) low-passes the active frame before
-% the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal)
-% swaps the cortex colormap (the quiver stays the total field). Plus Show vectors, a readout,
-% and Close.
+% PANEL_HELMHOLTZ: Compact controls for the Helmholtz components view (view_helmholtz).
+% Two sections: a Smooth toggle + Dirac-eigenmode kernel (low-passes the active frame
+% before the decomposition), and a bordered Component section with state buttons --
+% Potential (irrotational phi) / Stream (solenoidal psi). With both off, the default view
+% is shown: the total field |J| coloring + the total-field vector quiver.
 %
-% NOTE: the Derivative (velocity/acceleration), Show-singular-points, persistence gate and
-% trajectory-tracking controls were removed -- that machinery is being rebuilt on top of the
-% atom system (bst_dynamics).
+% NOTE: the Derivative, Show-singular-points, persistence gate, trajectory tracking and the
+% (genus-0 trivial) Harmonic component were removed -- that machinery is being rebuilt on
+% the atom system (bst_dynamics). This panel is designed to fold into a future
+% panel_bst_dynamics.
 % Authors: Diellor Basha, 2026
     eval(macro_method);
 end
 
 function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
+    import java.awt.*;
     import javax.swing.*;
     panelName = 'Helmholtz';
-    jPanelNew = gui_component('Panel');
-    jOpt = JPanel(); jOpt.setLayout(BoxLayout(jOpt, BoxLayout.Y_AXIS));
-    jSec = gui_river([2 2], [2 8 3 6], 'Helmholtz / Hodge components');
+    BTN_W = java_scaled('value', 64);
+    BTN_H = java_scaled('value', 22);
 
-    % --- Smoothing (Dirac eigenmodes) ---
-    gui_component('label', jSec, 'br', 'Smoothing (Dirac eigenmodes):');
+    jPanelNew = gui_component('Panel');
+    jOpt = JPanel();  jOpt.setLayout(BoxLayout(jOpt, BoxLayout.Y_AXIS));
+
+    % ===== Smooth: checkbox to the LEFT of the kernel dropdown (no title) =====
+    jSmoothSec = gui_river([2 2], [2 6 2 6]);
+    jSmoothOn = gui_component('checkbox', jSmoothSec, '', 'Smooth', [], 'Low-pass the frame in the Dirac eigenbasis');
     [keys, displays] = panel_eigenfilter_design('Kernels');
-    jKernel = gui_component('combobox', jSec, 'br hfill', [], {displays}, [], [], []);
-    iHeat = find(strcmp(keys,'heat'),1); if ~isempty(iHeat); jKernel.setSelectedIndex(iHeat-1); end
-    jParams = gui_river([2 2], [0 2 0 2]);  jSec.add('br hfill', jParams);
-    jSmoothOn = gui_component('checkbox', jSec, 'br', 'Smoothing on');
+    jKernel = gui_component('combobox', jSmoothSec, 'hfill', [], {displays}, [], [], []);
+    iHeat = find(strcmp(keys,'heat'),1);  if ~isempty(iHeat); jKernel.setSelectedIndex(iHeat-1); end
+    jParams = gui_river([2 2], [0 2 0 2]);  jSmoothSec.add('br hfill', jParams);
     panel_eigenfilter_design('BuildSliders', jParams, panel_eigenfilter_design('CurrentKernel', jKernel, keys), Lambda, @() OnSmooth(panelName));
     java_setcb(jKernel,   'ActionPerformedCallback', @(h,e) OnKernel(panelName));
     java_setcb(jSmoothOn, 'ActionPerformedCallback', @(h,e) OnSmooth(panelName));
+    jOpt.add(jSmoothSec);
 
-    % --- Component ---
-    gui_component('label', jSec, 'br', 'Component:');
-    names  = {'Total','Irrot','Solen'};
-    labels = {'Total field |J|','Irrotational (grad phi)','Solenoidal (curl psi)'};
-    grp = ButtonGroup(); jRadio = javaArray('javax.swing.JRadioButton', numel(names));
-    for i = 1:numel(names)
-        jRadio(i) = gui_component('radio', jSec, 'br', labels{i});
-        grp.add(jRadio(i));
-        java_setcb(jRadio(i), 'ActionPerformedCallback', @(h,e) OnComponent(panelName, names{i}));
-    end
-    jRadio(1).setSelected(true);   % Total: native start
+    % ===== Component: bordered, state toggle buttons (both off => total field + vectors) =====
+    jCompSec = gui_river([0 4], [2 6 4 6], 'Component');
+    jPot = gui_component('toggle', jCompSec, 'center', 'Potential', {Insets(0,0,0,0), Dimension(BTN_W, BTN_H)}, 'Irrotational potential \Phi (sources / sinks)');
+    jStr = gui_component('toggle', jCompSec, '',       'Stream',    {Insets(0,0,0,0), Dimension(BTN_W, BTN_H)}, 'Solenoidal stream \Psi (vortices)');
+    java_setcb(jPot, 'ActionPerformedCallback', @(h,e) OnComp(panelName, 'Irrot'));
+    java_setcb(jStr, 'ActionPerformedCallback', @(h,e) OnComp(panelName, 'Solen'));
+    jOpt.add(jCompSec);
 
-    % --- Vectors ---
-    jVec = gui_component('checkbox', jSec, 'br', 'Show vectors');   jVec.setSelected(true);
-    java_setcb(jVec, 'ActionPerformedCallback', @(h,e) OnVectors(panelName));
-
-    jReadout = gui_component('label', jSec, 'br', '');
-    jClose   = gui_component('button', jSec, 'br', 'Close');
+    % ===== readout + close =====
+    jFoot = gui_river([2 2], [2 6 2 6]);
+    jReadout = gui_component('label', jFoot, 'hfill', '');
+    jClose   = gui_component('button', jFoot, 'br right', 'Close', {Insets(2,8,2,8), Dimension(java_scaled('value',58), BTN_H)});
     java_setcb(jClose, 'ActionPerformedCallback', @(h,e) OnClose(panelName));
+    jOpt.add(jFoot);
 
-    jOpt.add(jSec); jPanelNew.add(jOpt, java.awt.BorderLayout.NORTH);
-    ctrl = struct('hFig',hFig, 'jVec',jVec, 'jReadout',jReadout, ...
+    jPanelNew.add(jOpt, BorderLayout.NORTH);
+    ctrl = struct('hFig',hFig, 'jPot',jPot, 'jStr',jStr, 'jReadout',jReadout, ...
                   'jKernel',jKernel, 'KernelKeys',{keys}, 'jParams',jParams, ...
                   'jSmoothOn',jSmoothOn, 'Lambda',Lambda);
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
 
-function OnComponent(panelName, name) %#ok<DEFNU>
+%% ===== Component state buttons (mutually exclusive; all off => Total) =====
+function OnComp(panelName, which) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
+    if strcmp(which, 'Irrot')
+        if ctrl.jPot.isSelected(); ctrl.jStr.setSelected(false); name = 'Irrot'; else; name = 'Total'; end
+    else  % Solen
+        if ctrl.jStr.isSelected(); ctrl.jPot.setSelected(false); name = 'Solen'; else; name = 'Total'; end
+    end
     view_helmholtz('SetComponent', ctrl.hFig, name);
-end
-function OnVectors(panelName) %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
-    view_helmholtz('SetVectors', ctrl.hFig, ctrl.jVec.isSelected());
 end
 function OnKernel(panelName) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', panelName); if ~i_valid(ctrl); return; end
