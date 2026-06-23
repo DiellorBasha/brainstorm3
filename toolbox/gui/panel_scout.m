@@ -180,10 +180,15 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 % Geodesic area tool (own row, below the swell buttons): a compact state button
                 % (bullseye = concentric heat-distance isolines). While pressed, click a vertex to
                 % seed a scout and Ctrl+scroll to grow/shrink it.
-                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '<HTML>&#9678;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then Ctrl+scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
+                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '<HTML>&#9678;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
                 jToggleArea.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
                 jToggleArea.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
                 jToggleArea.setMargin(java.awt.Insets(0,0,0,0));
+                % Geodesic line tool (arc icon): click two vertices -> draw + store the geodesic between them
+                jToggleGeo = gui_component('toggle', jPanelScoutOptions, '', '<HTML>&#8978;', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic line tool: select, then click two vertices -- the exact geodesic (FlipOut) line connecting them is drawn and stored as a 2-endpoint scout', @(h,ev)bst_call(@GeodesicToolToggle));
+                jToggleGeo.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+                jToggleGeo.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
+                jToggleGeo.setMargin(java.awt.Insets(0,0,0,0));
                 % Scout size in vertices/area
                 %gui_component('Label', jPanelScoutOptions, 'br', 'Number of vertices:');
                 jLabelScoutSize = gui_component('Label', jPanelScoutOptions, 'br hfill', '  No scout selected');
@@ -233,6 +238,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                                   'jRadioRelative',        jRadioRelative, ...
                                   'jPanelScoutOptions',    jPanelScoutOptions, ...
                                   'jToggleArea',           jToggleArea, ...
+                                  'jToggleGeo',            jToggleGeo, ...
                                   'jPanelDisplay',         jPanelDisplay, ...
                                   'jLabelScoutSize',       jLabelScoutSize, ...
                                   'jLabelAreaSize',        jLabelAreaSize, ...
@@ -1548,6 +1554,9 @@ function [sScout, iScout] = GetScoutWithHandle(hScout) %#ok<DEFNU>
     % Loop through scouts to find the clicked one
     for i = 1:length(sScouts)
         allHandles = [sScouts(i).Handles.hScout, sScouts(i).Handles.hLabel, sScouts(i).Handles.hVertices, sScouts(i).Handles.hPatch, sScouts(i).Handles.hContour];
+        if isfield(sScouts(i).Handles, 'hGeodesic')
+            allHandles = [allHandles, sScouts(i).Handles.hGeodesic];
+        end
         if any(allHandles == hScout)
             sScout = sScouts(i);
             iScout = i;
@@ -1900,9 +1909,12 @@ function SetSelectionState(isSelected)
     if isSelected
         % Push toolbar "AddScout" button
         ctrl.jButtonAddScout.setSelected(1);
-        % Release the geodesic Area tool (mutually exclusive selection modes)
+        % Release the geodesic Area/Line tools (mutually exclusive selection modes)
         if isfield(ctrl,'jToggleArea') && ~isempty(ctrl.jToggleArea)
             ctrl.jToggleArea.setSelected(0);
+        end
+        if isfield(ctrl,'jToggleGeo') && ~isempty(ctrl.jToggleGeo)
+            ctrl.jToggleGeo.setSelected(0);
         end
         % Unselect all the scouts in JList
         SetSelectedScouts([]);
@@ -2964,9 +2976,17 @@ function CreateScoutMouse(hFig) %#ok<DEFNU>
 
     % ===== GEODESIC AREA TOOL =====
     % When the "Area" tool is active, a click seeds a NEW scout grown as the heat-distance
-    % geodesic disk around the clicked vertex (Ctrl+scroll then resizes it). Surface only.
+    % geodesic disk around the clicked vertex (scroll then resizes it). Surface only.
     if ~isVolumeAtlas && IsAreaToolActive()
         CreateScoutArea(vi, TessInfo(iTess).SurfaceFile);
+        return;
+    end
+
+    % ===== GEODESIC LINE TOOL =====
+    % When the "Geodesic line" tool is active, two clicks define a geodesic link: click 1 places
+    % endpoint A, click 2 places B and draws/stores the geodesic line between them. Surface only.
+    if ~isVolumeAtlas && IsGeodesicToolActive()
+        CreateGeodesicMouse(vi, TessInfo(iTess).SurfaceFile);
         return;
     end
 
@@ -3056,8 +3076,9 @@ function AreaToolToggle() %#ok<DEFNU>
         hFigures = bst_figures('GetFigureWithSurfaces');
     end
     if isOn
-        % Mutually exclusive with the point-add "New scout" mode
+        % Mutually exclusive with the point-add "New scout" mode and the Geodesic line tool
         ctrl.jButtonAddScout.setSelected(0);
+        if isfield(ctrl,'jToggleGeo') && ~isempty(ctrl.jToggleGeo), ctrl.jToggleGeo.setSelected(0); end
         if isempty(hFigures)
             java_dialog('warning', 'You need to open a 3D figure before creating scouts.', 'Geodesic area tool');
             ctrl.jToggleArea.setSelected(0);
@@ -3186,6 +3207,120 @@ function SurfaceFile = i_get_scout_surface(hFigures)
                 return;
             end
         end
+    end
+end
+
+
+%% ===== GEODESIC LINE TOOL =====
+% Two clicks define a "geodesic link": the exact geodesic line (tess_scout_area 'path', the
+% geometry-central FlipOut / edge-flip algorithm) between two cortical vertices, stored as a
+% 2-endpoint scout (Vertices=[A B], Seed=A) whose .Geodesic field holds the polyline. PlotScouts
+% renders that polyline as a separate line overlay. Reuses the area tool's cached nxr context.
+
+% Is the "Geodesic line" tool toggle active? (false if the Scout panel is not loaded.)
+function isActive = IsGeodesicToolActive() %#ok<DEFNU>
+    isActive = false;
+    ctrl = bst_get('PanelControls', 'Scout');
+    if ~isempty(ctrl) && isfield(ctrl, 'jToggleGeo') && ~isempty(ctrl.jToggleGeo)
+        isActive = ctrl.jToggleGeo.isSelected();
+    end
+end
+
+% Persistent index of the in-progress endpoint scout (the 1-vertex marker placed by click 1).
+function out = GeodesicPending(in)
+    persistent P;
+    if (nargin >= 1)
+        P = in;
+    end
+    out = P;
+end
+
+% Toggle callback: enter the same cortical-spot selection mode as "New scout" (so clicks pick
+% vertices), mutually exclusive with the other tools; pre-warm the geodesic solver.
+function GeodesicToolToggle() %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'Scout');
+    if isempty(ctrl) || ~isfield(ctrl, 'jToggleGeo') || isempty(ctrl.jToggleGeo)
+        return;
+    end
+    isOn = ctrl.jToggleGeo.isSelected();
+    hFigures = bst_figures('GetFiguresForScouts');
+    if isempty(hFigures)
+        hFigures = bst_figures('GetFigureWithSurfaces');
+    end
+    if isOn
+        ctrl.jButtonAddScout.setSelected(0);
+        if isfield(ctrl,'jToggleArea') && ~isempty(ctrl.jToggleArea), ctrl.jToggleArea.setSelected(0); end
+        if isempty(hFigures)
+            java_dialog('warning', 'You need to open a 3D figure before creating scouts.', 'Geodesic line tool');
+            ctrl.jToggleGeo.setSelected(0);
+            return;
+        end
+        SetSelectedScouts([]);
+        for hFig = hFigures
+            setappdata(hFig, 'isSelectingCorticalSpot', 1);
+            set(hFig, 'Pointer', 'cross');
+        end
+        GeodesicPending([]);            % the next click is endpoint A
+        SurfaceFile = i_get_scout_surface(hFigures);
+        if ~isempty(SurfaceFile)
+            bst_progress('start', 'Geodesic line tool', 'Pre-factorizing the geodesic solver...');
+            try, tess_scout_area('prewarm', SurfaceFile); catch, end %#ok<CTCH>
+            bst_progress('stop');
+        end
+    else
+        GeodesicPending([]);
+        for hFig = hFigures
+            set(hFig, 'Pointer', 'arrow');
+            setappdata(hFig, 'isSelectingCorticalSpot', 0);
+        end
+    end
+end
+
+% Click handler: 1st click places endpoint A (a 1-vertex marker scout); 2nd click sets B and
+% computes/stores the geodesic on that scout.
+function CreateGeodesicMouse(vi, SurfaceFile)
+    global GlobalData;
+    if isempty(SurfaceFile)
+        return;
+    end
+    if isempty(GlobalData.CurrentScoutsSurface)
+        GlobalData.CurrentScoutsSurface = SurfaceFile;
+    end
+    iPending = GeodesicPending();
+    sScouts  = GetScouts(SurfaceFile);
+    if ~isempty(iPending) && (iPending >= 1) && (iPending <= numel(sScouts))
+        % ----- second click: endpoint B -> trace the geodesic -----
+        A = sScouts(iPending).Seed;
+        if isequal(A, vi)
+            return;     % same vertex twice: wait for a distinct B
+        end
+        bst_progress('start', 'Geodesic line tool', 'Tracing geodesic...');
+        try
+            pts = tess_scout_area('path', SurfaceFile, A, vi);
+        catch ME
+            bst_progress('stop');
+            GeodesicPending([]);
+            java_dialog('msgbox', ME.message, 'Geodesic line tool');
+            return;
+        end
+        bst_progress('stop');
+        sScout = sScouts(iPending);
+        sScout.Vertices = unique([A, vi]);
+        sScout.Seed     = A;
+        sScout.Geodesic = pts;
+        SetScouts(SurfaceFile, iPending, sScout);
+        GeodesicPending([]);
+        PlotScouts(iPending);
+        UpdateScoutProperties();
+        UpdateScoutsDisplay('current');
+    else
+        % ----- first click: endpoint A (a 1-vertex marker scout) -----
+        [sScout, iScout] = CreateScout(vi, vi, SurfaceFile); %#ok<ASGLU>
+        GeodesicPending(iScout);
+        PlotScouts(iScout);
+        UpdatePanel();
+        SetSelectedScouts(iScout);
+        UpdateScoutsDisplay('current');
     end
 end
 
@@ -4959,7 +5094,23 @@ function PlotScouts(iScouts, hFigSel)
                         sScouts(i).Handles(iHnd).hPatch = [];
                     end
                 end
-                
+
+                % === DRAW GEODESIC LINE (geodesic-link scout: a polyline between its 2 endpoints) ===
+                hasGeoFld = isfield(sScouts(i).Handles, 'hGeodesic');
+                isGeoLink = isfield(sScouts(i), 'Geodesic') && ~isempty(sScouts(i).Geodesic) && (size(sScouts(i).Geodesic,2) == 3);
+                if isGeoLink
+                    geoPts = sScouts(i).Geodesic;
+                    if ~hasGeoFld || isempty(sScouts(i).Handles(iHnd).hGeodesic) || ~all(ishandle(sScouts(i).Handles(iHnd).hGeodesic))
+                        sScouts(i).Handles(iHnd).hGeodesic = line(geoPts(:,1), geoPts(:,2), geoPts(:,3), ...
+                            'Color', scoutColor, 'LineWidth', 2, 'Tag', 'ScoutGeodesic', 'Parent', hAxes);
+                    else
+                        set(sScouts(i).Handles(iHnd).hGeodesic, 'XData',geoPts(:,1), 'YData',geoPts(:,2), 'ZData',geoPts(:,3), 'Color',scoutColor);
+                    end
+                elseif hasGeoFld && ~isempty(sScouts(i).Handles(iHnd).hGeodesic)
+                    delete(sScouts(i).Handles(iHnd).hGeodesic(ishandle(sScouts(i).Handles(iHnd).hGeodesic)));
+                    sScouts(i).Handles(iHnd).hGeodesic = [];
+                end
+
                 % === DRAW CONTOUR ===
                 if ScoutsOptions.displayContour && ~isStructAtlas
                     % Delete existing contours object
@@ -5086,6 +5237,10 @@ function PlotScouts(iScouts, hFigSel)
                 if ~isempty(sScouts(i).Handles(iHnd).hContour)
                     delete(sScouts(i).Handles(iHnd).hContour(ishandle(sScouts(i).Handles(iHnd).hContour)));
                     sScouts(i).Handles(iHnd).hContour = [];
+                end
+                if isfield(sScouts(i).Handles,'hGeodesic') && ~isempty(sScouts(i).Handles(iHnd).hGeodesic)
+                    delete(sScouts(i).Handles(iHnd).hGeodesic(ishandle(sScouts(i).Handles(iHnd).hGeodesic)));
+                    sScouts(i).Handles(iHnd).hGeodesic = [];
                 end
             end
         end

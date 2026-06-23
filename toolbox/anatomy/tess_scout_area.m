@@ -77,6 +77,15 @@ function [Vertices, phi] = tess_scout_area(SurfaceFile, Seed, Radius, phi)
                 end
                 phi = [];
                 return;
+            case 'path'
+                % USAGE: pts = tess_scout_area('path', SurfaceFile, vStart, vEnd)
+                %   The exact GEODESIC LINE between two vertices (geometry-central FlipOut /
+                %   edge-flip, Sharp & Crane 2020) as a [nPts x 3] polyline -- reuses the same
+                %   cached per-hemisphere context as the geodesic-disk path. Both endpoints must
+                %   be in the same hemisphere. Returned as the FIRST output.
+                [CTX, Vertices] = i_trace_path(CTX, Seed, Radius, phi);   % Seed=Surface, Radius=vStart, phi=vEnd
+                phi = [];
+                return;
         end
     end
 
@@ -96,10 +105,8 @@ end
 %% ===== heat-method geodesic distance from a seed (reuses the cached per-hemisphere solver) =====
 function [phi, CTX] = i_heat_distance(CTX, SurfaceFile, Seed)
     CTX = i_ensure_surface(CTX, SurfaceFile);
-    % hemisphere of the seed (O(1) via the local-index map: mapV(Seed)>0 iff Seed is in that hemi)
-    if     CTX.H(1).mapV(Seed) > 0, hh = 1;
-    elseif CTX.H(2).mapV(Seed) > 0, hh = 2;
-    else
+    hh = i_hemi_of(CTX, Seed);
+    if hh == 0
         error('tess_scout_area:seedNoHemisphere', ...
             'Seed vertex %d is not assigned to a hemisphere (need a Structures atlas with lh/rh).', Seed);
     end
@@ -119,6 +126,47 @@ function [phi, CTX] = i_heat_distance(CTX, SurfaceFile, Seed)
     end
     phi = inf(CTX.nVtot, 1);
     phi(CTX.H(hh).vH) = d_local;
+end
+
+
+%% ===== geodesic LINE between two same-hemisphere vertices (FlipOut, reuses the cached context) =====
+function [CTX, pts] = i_trace_path(CTX, SurfaceFile, vA, vB)
+    CTX = i_ensure_surface(CTX, SurfaceFile);
+    hhA = i_hemi_of(CTX, vA);
+    hhB = i_hemi_of(CTX, vB);
+    if hhA == 0 || hhB == 0
+        error('tess_scout_area:endpointNoHemisphere', 'A geodesic endpoint is not assigned to a hemisphere.');
+    end
+    if hhA ~= hhB
+        error('tess_scout_area:crossHemisphere', ...
+            'The two geodesic endpoints are in different hemispheres; a within-surface geodesic does not cross the gap.');
+    end
+    hh = hhA;
+    [CTX, ok] = i_build_handle(CTX, hh);
+    if ~ok, error('tess_scout_area:nxrCreateFailed', 'Could not build the nxr context for hemisphere %d.', hh); end
+    aLoc = CTX.H(hh).mapV(vA);
+    bLoc = CTX.H(hh).mapV(vB);
+    try
+        pts = nxr_compute('tracePath', CTX.H(hh).handle, aLoc, bLoc);
+    catch
+        CTX.H(hh).handle = [];
+        [CTX, ok] = i_build_handle(CTX, hh);
+        if ~ok, error('tess_scout_area:pathFailed', 'tracePath failed and the context could not be rebuilt.'); end
+        pts = nxr_compute('tracePath', CTX.H(hh).handle, aLoc, bLoc);
+    end
+end
+
+
+%% ===== which hemisphere a global vertex belongs to (1=right, 2=left, 0=none); O(1) =====
+function hh = i_hemi_of(CTX, v)
+    n = CTX.nVtot;
+    if (v >= 1) && (v <= n) && (CTX.H(1).mapV(v) > 0)
+        hh = 1;
+    elseif (v >= 1) && (v <= n) && (CTX.H(2).mapV(v) > 0)
+        hh = 2;
+    else
+        hh = 0;
+    end
 end
 
 
