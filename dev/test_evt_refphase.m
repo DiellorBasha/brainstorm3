@@ -24,13 +24,20 @@ function test_evt_refphase()
     OPT = process_evt_refphase('Compute');
     OPT.freqRange=[8 13]; OPT.thresholdMode='mad'; OPT.enterThresh=4; OPT.exitThresh=2;  % timing auto-derived
     [evt, mk, st] = process_evt_refphase('Compute', Fsyn, t, OPT);
-    ov       = ~isempty(evt) && any(evt(1,:)<=15 & evt(2,:)>=12);
+    ov        = ~isempty(evt) && any(evt(1,:)<=15 & evt(2,:)>=12);
     localized = ~isempty(evt) && (evt(1)>=10.5) && (evt(2)<=16.5);          % period hugs the burst
-    mkInPeriod = ~isempty(mk.peak) && all(mk.peak>=evt(1)-1e-9 & mk.peak<=evt(2)+1e-9) ...
-                                   && all(mk.trough>=evt(1)-1e-9 & mk.trough<=evt(2)+1e-9);
-    ok1 = (size(evt,2)==1) && ov && localized && ~isempty(mk.peak) && ~isempty(mk.trough) && mkInPeriod;
-    fprintf('T1 burst: %dp [%.1f-%.1f]s cov%.1f%% %dpk %dtr inPeriod=%d => %s\n', ...
-        size(evt,2), evt(1), evt(2), st.coverage, numel(mk.peak), numel(mk.trough), mkInPeriod, PF{ok1+1});
+    has4      = ~isempty(mk.peak) && ~isempty(mk.trough) && ~isempty(mk.rising) && ~isempty(mk.falling);
+    % Ground-truth alpha phase = sin(2*pi*10*t): extrema |sin|~1, zero-cross |sin|~0
+    sExt  = sin(2*pi*10*[mk.peak, mk.trough]);
+    sZero = sin(2*pi*10*[mk.rising, mk.falling]);
+    phaseOK = has4 && (mean(abs(sExt)) > 0.85) && (mean(abs(sZero)) < 0.35);
+    % Peaks and troughs must sit on OPPOSITE alpha polarity, consistently
+    spk = sign(sin(2*pi*10*mk.peak));  str = sign(sin(2*pi*10*mk.trough));
+    sepOK = has4 && (abs(mean(spk))>0.8) && (abs(mean(str))>0.8) && (sign(mean(spk))~=sign(mean(str)));
+    ok1 = (size(evt,2)==1) && ov && localized && has4 && phaseOK && sepOK;
+    fprintf('T1 burst: %dp [%.1f-%.1f]s | mk pk/tr/ris/fal=%d/%d/%d/%d | extrema|sin|=%.2f zero|sin|=%.2f sep=%d => %s\n', ...
+        size(evt,2), evt(1), evt(2), numel(mk.peak), numel(mk.trough), numel(mk.rising), numel(mk.falling), ...
+        mean(abs(sExt)), mean(abs(sZero)), sepOK, PF{ok1+1});
     pass = pass && ok1;
 
     % ---------- T2 + T3: real data ----------
@@ -40,17 +47,22 @@ function test_evt_refphase()
         [evt2, mk2, st2] = process_evt_refphase('Compute', F, TimeVector, OPT2);
         nW   = size(evt2,2);
         mono = all(evt2(2,:) > evt2(1,:));
-        inP  = true;
-        for k=1:numel(mk2.peak)
-            inP = inP && any(mk2.peak(k)>=evt2(1,:)-1e-9 & mk2.peak(k)<=evt2(2,:)+1e-9);
+        allMk = sort([mk2.peak, mk2.trough, mk2.rising, mk2.falling]);
+        inP  = ~isempty(allMk);
+        for k=1:numel(allMk)
+            inP = inP && any(allMk(k)>=evt2(1,:)-1e-9 & allMk(k)<=evt2(2,:)+1e-9);
         end
-        ok2 = (nW>=3) && (nW<=15) && mono && ~isempty(mk2.peak) && inP;
-        fprintf('T2 real: %dp cov%.1f%% %dpk %dtr mono=%d pkInP=%d => %s\n', nW, st2.coverage, numel(mk2.peak), numel(mk2.trough), mono, inP, PF{ok2+1});
+        % 4 phase types should be present and roughly balanced (~1 each per cycle)
+        cnts = [numel(mk2.peak) numel(mk2.trough) numel(mk2.rising) numel(mk2.falling)];
+        balanced = all(cnts>0) && (max(cnts)/min(cnts) < 1.6);
+        ok2 = (nW>=3) && (nW<=15) && mono && inP && balanced;
+        fprintf('T2 real: %dp cov%.1f%% pk/tr/ris/fal=%d/%d/%d/%d mono=%d inP=%d bal=%d => %s\n', ...
+            nW, st2.coverage, cnts(1),cnts(2),cnts(3),cnts(4), mono, inP, balanced, PF{ok2+1});
         pass = pass && ok2;
-        % 2f marker frequency: peak spacing ~ 1/(2*f_alpha)
-        dpk = diff(sort(mk2.peak));  medISI = median(dpk(dpk<0.2));  expected = 1/(2*10.5);
+        % Phase marker frequency: alpha_peak spacing ~ 1/f_alpha (one per cycle)
+        dpk = diff(sort(mk2.peak));  medISI = median(dpk(dpk<0.15));  expected = 1/10.5;
         ok3 = abs(medISI - expected) < 0.020;
-        fprintf('T3 peak ISI=%.3fs (expect ~%.3f @2x alpha) => %s\n', medISI, expected, PF{ok3+1});
+        fprintf('T3 peak ISI=%.3fs (expect ~%.3f = 1/f_alpha) => %s\n', medISI, expected, PF{ok3+1});
         pass = pass && ok3;
     else
         fprintf('T2/T3 real: SKIPPED (file not found)\n');

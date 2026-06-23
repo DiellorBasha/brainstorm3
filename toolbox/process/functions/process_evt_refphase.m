@@ -17,16 +17,17 @@ function varargout = process_evt_refphase( varargin )
 % narrowband signal the GFP is ~82% slow envelope, so SMOOTHING (lowpassing) it
 % yields a clean, free amplitude trace for thresholding.
 %
-% Reference-phase markers: a band-limited GFP is sign-blind, so it oscillates at
-% TWICE the target frequency (2f), with no energy at the fundamental. Bandpassing
-% the GFP at [2*fLow, 2*fHigh] gives a near-sinusoid whose extrema are robust
-% cycle landmarks:
-%   - GFP PEAKS  (field-magnitude maxima) = the alpha extrema. Consecutive peaks
-%     alternate alpha+/alpha- (every other peak is the same alpha phase); the
-%     source field's own sign recovers the polarity downstream.
-%   - GFP TROUGHS (field-magnitude minima) = the alpha zero-crossings.
-% Each detected period's onset/offset snap to its first/last GFP peak, so a
-% period spans an integer number of marked cycles (sign-consistent bounds).
+% Reference-phase markers (4 per cycle): a band-limited GFP is sign-blind, so it
+% oscillates at TWICE the target frequency (2f). Its extrema therefore fall on the
+% four phase landmarks of every cycle -- GFP peaks = field-magnitude maxima (alpha
+% extrema), GFP troughs = field minima (alpha zero-crossings) -- which gives robust,
+% multi-channel TIMING. The SIGN of each landmark (which it cannot resolve on its
+% own) is read from the single highest-(band-)power sensor, per marker:
+%   - GFP peak   -> ref at an extremum:  sign(ref)>0 = "_peak",  <0 = "_trough"
+%   - GFP trough -> ref crosses zero:    slope(ref)>0 = "_rising", <0 = "_falling"
+% Per-marker classification is robust to a skipped/extra extremum (unlike strict
+% alternation). The reference sensor's positive peak defines the alpha-peak polarity.
+% Each period's onset/offset snap to its first/last alpha extremum (integer cycles).
 %
 % Robustness (ported from the artifact detector process_evt_detect):
 %   - Bad segments are excluded from BOTH the threshold estimate and detection.
@@ -75,10 +76,11 @@ function sProcess = GetDescription()
     sProcess.nInputs     = 1;
     sProcess.nMinFiles   = 1;
 
-    % === EVENT NAME ===
-    sProcess.options.eventname.Comment = 'Event name: ';
-    sProcess.options.eventname.Type    = 'text';
-    sProcess.options.eventname.Value   = 'power_alpha';
+    % === EVENT NAMING (automatic) ===
+    sProcess.options.label_naming.Comment = ['<I><FONT color="#777777">Events are named from the band: "&lt;band&gt; (lo-hi Hz)" for the periods, plus 4<BR>' ...
+        'phase markers "&lt;band&gt;_peak / _trough / _rising / _falling". Band color runs warm<BR>' ...
+        '(low f) to cool (high f); markers: peak=red, trough=blue, rising=green, falling=orange.</FONT></I>'];
+    sProcess.options.label_naming.Type    = 'label';
     % Separator
     sProcess.options.sep1.Type    = 'separator';
     sProcess.options.sep1.Comment = ' ';
@@ -149,7 +151,7 @@ end
 
 %% ===== FORMAT COMMENT =====
 function Comment = FormatComment(sProcess)
-    Comment = ['Detect bursts (phase polarity): ', sProcess.options.eventname.Value];
+    Comment = ['Detect bursts (phase polarity): ', sProcess.options.freqband.Value];
 end
 
 
@@ -157,11 +159,6 @@ end
 function OutputFiles = Run(sProcess, sInputs)
     OutputFiles = {};
     % ===== GET OPTIONS =====
-    evtName = strtrim(sProcess.options.eventname.Value);
-    if isempty(evtName)
-        bst_report('Error', sProcess, [], 'Event name must be specified.');
-        return;
-    end
     % Sensor types
     SensorTypes = strtrim(sProcess.options.sensortypes.Value);
     % Frequency band
@@ -170,13 +167,29 @@ function OutputFiles = Run(sProcess, sInputs)
     bandVal = sProcess.options.freqband.Value;
     if isfield(freqBands, bandVal)
         FreqRange = freqBands.(bandVal);
+        bandTok   = bandVal;                               % 'alpha', 'beta', ...
     else
         FreqRange = sProcess.options.freqrange.Value{1};
+        bandTok   = 'custom';
     end
     if isempty(FreqRange) || (length(FreqRange) ~= 2)
         bst_report('Error', sProcess, [], 'Invalid frequency range.');
         return;
     end
+    % Standard, band-derived event labels and colors:
+    %   main   "<band> (lo-hi Hz)"  -> warm(low f) .. cool(high f) fill color
+    %   peaks  "<band>_peaks"       -> red    (same across all bands)
+    %   markers "<band>_peak/_trough/_rising/_falling" -> fixed phase colors
+    evtName     = sprintf('%s (%g-%g Hz)', bandTok, FreqRange(1), FreqRange(2));
+    peakName    = sprintf('%s_peak',    bandTok);
+    troughName  = sprintf('%s_trough',  bandTok);
+    risingName  = sprintf('%s_rising',  bandTok);
+    fallingName = sprintf('%s_falling', bandTok);
+    bandColor    = i_band_color(mean(FreqRange));
+    peakColor    = [0.90 0.10 0.10];   % red    (alpha maximum)
+    troughColor  = [0.10 0.25 0.90];   % blue   (alpha minimum)
+    risingColor  = [0.10 0.70 0.20];   % green  (rising zero-crossing)
+    fallingColor = [0.95 0.55 0.10];   % orange (falling zero-crossing)
     % Time window
     if isfield(sProcess.options, 'timewindow') && isfield(sProcess.options.timewindow, 'Value') && ...
             iscell(sProcess.options.timewindow.Value) && ~isempty(sProcess.options.timewindow.Value)
@@ -272,14 +285,12 @@ function OutputFiles = Run(sProcess, sInputs)
             if ~isfield(sFile, 'events') || isempty(sFile.events)
                 sFile.events = repmat(db_template('event'), 0);
             end
-            % Periods (extended) + optional phase-marker trains (simple)
-            sFile = i_store_event(sFile, evtName, evt);
-            if ~isempty(markers.peak)
-                sFile = i_store_event(sFile, [evtName '_peak'], markers.peak);
-            end
-            if ~isempty(markers.trough)
-                sFile = i_store_event(sFile, [evtName '_trough'], markers.trough);
-            end
+            % Periods (extended) + 4 phase-marker trains (simple), with standard colors
+            sFile = i_store_event(sFile, evtName,     evt,             bandColor);
+            sFile = i_store_event(sFile, peakName,    markers.peak,    peakColor);
+            sFile = i_store_event(sFile, troughName,  markers.trough,  troughColor);
+            sFile = i_store_event(sFile, risingName,  markers.rising,  risingColor);
+            sFile = i_store_event(sFile, fallingName, markers.falling, fallingColor);
             % Save back to file
             if isRaw
                 DataMat.F = sFile;
@@ -290,9 +301,10 @@ function OutputFiles = Run(sProcess, sInputs)
             bst_save(file_fullpath(sInputs(iFile).FileName), DataMat, 'v6', 1);
             % Report
             bst_report('Info', sProcess, sInputs(iFile), ...
-                sprintf('[Band-power] %d periods (mean dur: %.0f ms, coverage: %.1f%%), %d peak / %d trough markers (mode: %s, enter/exit: %g/%g)', ...
-                size(evt,2), 1000*mean(evt(2,:)-evt(1,:)), stats.coverage, ...
-                numel(markers.peak), numel(markers.trough), OPTIONS.thresholdMode, OPTIONS.enterThresh, OPTIONS.exitThresh));
+                sprintf('[%s] %d periods (%.1f%% coverage); markers peak/trough/rising/falling = %d/%d/%d/%d (%s %g/%g)', ...
+                evtName, size(evt,2), stats.coverage, ...
+                numel(markers.peak), numel(markers.trough), numel(markers.rising), numel(markers.falling), ...
+                OPTIONS.thresholdMode, OPTIONS.enterThresh, OPTIONS.exitThresh));
         else
             bst_report('Warning', sProcess, sInputs(iFile), ...
                 'No periods detected. Try lowering the enter threshold or the minimum duration.');
@@ -330,13 +342,13 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
     % Return defaults if no input
     if (nargin == 0)
         evt = defOptions;
-        markers = struct('peak', [], 'trough', []);
+        markers = struct('peak', [], 'trough', [], 'rising', [], 'falling', []);
         stats = [];
         return;
     end
     if (nargin < 4), validMask = []; end
     OPTIONS = struct_copy_fields(OPTIONS, defOptions, 0);
-    markers = struct('peak', [], 'trough', []);
+    markers = struct('peak', [], 'trough', [], 'rising', [], 'falling', []);
 
     % Auto-derive timing parameters from the band center (fewer GUI knobs).
     % A band GFP ripples at 2f, so a boxcar of half a period (0.5/fc) nulls that
@@ -429,36 +441,62 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
         end
     end
 
-    % ===== REFERENCE-PHASE MARKERS FROM GFP AT 2f =====
-    % A band-limited GFP oscillates at 2f; bandpass there for a near-sinusoid.
-    allPeaks = [];  allTroughs = [];
+    % ===== PHASE-MARKER TIMING FROM THE GFP AT 2f =====
+    % The band GFP is sign-blind, so it oscillates at 2f and its extrema fall on
+    % the 4 phase landmarks of every alpha cycle: GFP peaks = field-magnitude
+    % maxima (alpha extrema), GFP troughs = field minima (alpha zero-crossings).
     fLow2  = 2 * OPTIONS.freqRange(1);
     fHigh2 = min(2 * OPTIONS.freqRange(2), 0.95 * sFreq/2);
     doMarkers = (fLow2 < fHigh2);    % disabled only if 2f reaches Nyquist
     if doMarkers
         gfp2 = process_bandpass('Compute', gfp, sFreq, fLow2, fHigh2, 'bst-hfilter-2019', 0);
         dg = diff(gfp2);
-        % Local maxima (peaks, phase 0) and minima (troughs, phase pi)
-        pk = find(dg(1:end-1) > 0 & dg(2:end) <= 0) + 1;
-        tr = find(dg(1:end-1) < 0 & dg(2:end) >= 0) + 1;
-        % Keep only landmarks on valid samples
-        pk = pk(valid(pk));
-        tr = tr(valid(tr));
+        gpk = find(dg(1:end-1) > 0 & dg(2:end) <= 0) + 1;   % GFP maxima = alpha extrema
+        gtr = find(dg(1:end-1) < 0 & dg(2:end) >= 0) + 1;   % GFP minima = alpha zero-crossings
+        gpk = gpk(valid(gpk));
+        gtr = gtr(valid(gtr));
     else
-        pk = [];  tr = [];
+        gpk = [];  gtr = [];
     end
 
-    % ===== SNAP PERIODS TO CYCLES + COLLECT MARKERS =====
+    % ===== PHASE LABELS FROM THE HIGHEST-POWER SENSOR (sign only) =====
+    % GFP gives precise, robust timing but cannot tell peak from trough or rising
+    % from falling. Resolve each marker's sign against the single highest-(band-)
+    % power sensor (per-marker => robust to a skipped/extra extremum):
+    %   GFP peak   : ref is at an extremum -> sign(ref)>0 = peak,  <0 = trough
+    %   GFP trough : ref crosses zero      -> slope(ref)>0 = rising, <0 = falling
+    % The reference sensor's positive peak defines the alpha-peak polarity.
+    if size(Fbp, 1) > 1
+        [~, iRef] = max(var(Fbp(:, valid), 0, 2));
+    else
+        iRef = 1;
+    end
+    ref = Fbp(iRef, :);
+    pkPeak = []; pkTrough = []; trRise = []; trFall = [];
+    if ~isempty(gpk)
+        isPk     = ref(gpk) >= 0;
+        pkPeak   = gpk(isPk);
+        pkTrough = gpk(~isPk);
+    end
+    if ~isempty(gtr)
+        wSlope = max(1, round(sFreq / (8 * fc)));           % ~1/8 of a cycle
+        slope  = ref(min(gtr + wSlope, nSamples)) - ref(max(gtr - wSlope, 1));
+        trRise = gtr(slope >= 0);
+        trFall = gtr(slope < 0);
+    end
+
+    % ===== SNAP PERIODS TO CYCLES + COLLECT 4 PHASE MARKERS =====
     minDurSamples = round(OPTIONS.minDuration * sFreq);
     keepOn = [];  keepOff = [];
+    aPk = []; aTr = []; aRis = []; aFal = [];
     for iWin = 1:length(onsets)
         on = onsets(iWin);  off = offsets(iWin);
         if doMarkers
-            pkIn = pk(pk >= on & pk <= off);
+            pkIn = gpk(gpk >= on & gpk <= off);
             if numel(pkIn) < 2                       % no genuine oscillation: drop
                 continue;
             end
-            on  = pkIn(1);                           % snap onset/offset to first/last peak
+            on  = pkIn(1);                           % snap onset/offset to first/last alpha extremum
             off = pkIn(end);
         end
         if (off - on + 1) < minDurSamples            % enforce min duration on final bounds
@@ -467,8 +505,10 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
         keepOn(end+1)  = on;   %#ok<AGROW>
         keepOff(end+1) = off;  %#ok<AGROW>
         if doMarkers
-            allPeaks   = [allPeaks,   pk(pk >= on & pk <= off)];   %#ok<AGROW>
-            allTroughs = [allTroughs, tr(tr >= on & tr <= off)];   %#ok<AGROW>
+            aPk  = [aPk,  pkPeak(pkPeak   >= on & pkPeak   <= off)];   %#ok<AGROW>
+            aTr  = [aTr,  pkTrough(pkTrough >= on & pkTrough <= off)]; %#ok<AGROW>
+            aRis = [aRis, trRise(trRise   >= on & trRise   <= off)];   %#ok<AGROW>
+            aFal = [aFal, trFall(trFall   >= on & trFall   <= off)];   %#ok<AGROW>
         end
     end
 
@@ -478,8 +518,10 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
     else
         evt = [TimeVector(keepOn); TimeVector(keepOff)];
     end
-    if ~isempty(allPeaks),   markers.peak   = TimeVector(sort(allPeaks));   end
-    if ~isempty(allTroughs), markers.trough = TimeVector(sort(allTroughs)); end
+    if ~isempty(aPk),  markers.peak    = TimeVector(sort(aPk));  end
+    if ~isempty(aTr),  markers.trough  = TimeVector(sort(aTr));  end
+    if ~isempty(aRis), markers.rising  = TimeVector(sort(aRis)); end
+    if ~isempty(aFal), markers.falling = TimeVector(sort(aFal)); end
     stats = i_stats(keepOn, keepOff, nSamples, TimeVector, Thi, Tlo, OPTIONS);
 end
 
@@ -536,25 +578,46 @@ end
 
 %% ===== STORE EVENT GROUP =====
 % Find-or-create an event group by label and set its times (extended [2xN] or
-% simple [1xN]); returns the updated sFile.
-function sFile = i_store_event(sFile, label, times)
+% simple [1xN]) and color (RGB triplet; [] => auto). Returns the updated sFile.
+function sFile = i_store_event(sFile, label, times, color)
     if isempty(times)
         return;
     end
+    if (nargin < 4), color = []; end
     iEvt = find(strcmpi({sFile.events.label}, label));
     if isempty(iEvt)
         iEvt = length(sFile.events) + 1;
         sEvent = db_template('event');
         sEvent.label = label;
-        sEvent.color = panel_record('GetNewEventColor', iEvt, sFile.events);
+        if ~isempty(color)
+            sEvent.color = color;
+        else
+            sEvent.color = panel_record('GetNewEventColor', iEvt, sFile.events);
+        end
     else
         sEvent = sFile.events(iEvt);
+        if ~isempty(color)
+            sEvent.color = color;    % keep the standard color on re-run
+        end
     end
     sEvent.times    = times;
     sEvent.epochs   = ones(1, size(times, 2));
     sEvent.channels = [];
     sEvent.notes    = [];
     sFile.events(iEvt) = sEvent;
+end
+
+
+%% ===== BAND COLOR (warm low-f -> cool high-f) =====
+% Maps a band center frequency to a fill color along an HSV ramp from orange
+% (low frequency) to violet (high frequency), deliberately avoiding pure red
+% (reserved for peak markers) and pure blue (reserved for trough markers).
+% The center range [3,45] Hz spans the delta..gamma band centers (log scale).
+function rgb = i_band_color(fc)
+    fLo = 3;  fHi = 45;
+    t   = (log(min(max(fc, fLo), fHi)) - log(fLo)) / (log(fHi) - log(fLo));
+    hue = (30 + t*240) / 360;        % 30deg (orange) .. 270deg (violet)
+    rgb = hsv2rgb([hue, 0.75, 0.85]);
 end
 
 
