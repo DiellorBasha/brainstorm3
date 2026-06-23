@@ -1,7 +1,7 @@
 function varargout = panel_helmholtz(varargin)
 % PANEL_HELMHOLTZ: Controls for the Helmholtz components view (view_helmholtz). A Smoothing
 % section (shared Dirac-eigenmode kernel + scale, on/off) low-passes the active frame before
-% the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal / Harmonic)
+% the decomposition; a Component radio (Total |J| / Irrotational / Solenoidal)
 % swaps the cortex colormap (the quiver stays the total field). Plus Show vectors, a readout,
 % and Close.
 %
@@ -32,8 +32,8 @@ function bstPanelNew = CreatePanel(hFig, Lambda) %#ok<DEFNU>
 
     % --- Component ---
     gui_component('label', jSec, 'br', 'Component:');
-    names  = {'Total','Irrot','Solen','Harm'};
-    labels = {'Total field |J|','Irrotational (grad phi)','Solenoidal (curl psi)','Harmonic (h)'};
+    names  = {'Total','Irrot','Solen'};
+    labels = {'Total field |J|','Irrotational (grad phi)','Solenoidal (curl psi)'};
     grp = ButtonGroup(); jRadio = javaArray('javax.swing.JRadioButton', numel(names));
     for i = 1:numel(names)
         jRadio(i) = gui_component('radio', jSec, 'br', labels{i});
