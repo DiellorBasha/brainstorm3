@@ -40,6 +40,14 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 %     - isError     : 1 if an error happened
 %
 % SEE ALSO: bst_eigen, bst_helmholtz, bst_gradient, bst_get_operator_node, tess_manifold
+%
+%     TANGENT STRATUM — two Laplacians, not one. The differential ops (div/curl) use the
+%     de Rham / DEC route (delta d + d delta, the Hodge Laplacian). The SMOOTHING / eigen
+%     Laplacian for tangent fields is the CONNECTION (Bochner) Laplacian (grad* grad),
+%     supplied by the 'Connection Laplacian' operator node and bst_eigen. They differ by
+%     Gauss curvature K (Weitzenbock: Delta_Hodge = Delta_connection + Ric, Ric = K g on a
+%     surface). Use the de Rham route for div/curl/Helmholtz; the connection route for
+%     vector smoothing/spectral analysis.
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

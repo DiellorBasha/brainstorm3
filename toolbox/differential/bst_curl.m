@@ -39,6 +39,7 @@ function curlField = bst_curl(V, ManifoldMat, varargin)
 %   - curlField   : per-VERTEX scalar vorticity field [nV x nT]
 %
 % SEE ALSO: bst_operators, bst_gradient, bst_divergence, bst_helmholtz, tess_manifold (DEC group)
+% (de Rham/Hodge route; the connection Laplacian differs by Gauss curvature K — see bst_operators.)
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

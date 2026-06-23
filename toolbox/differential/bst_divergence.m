@@ -37,6 +37,7 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
 %   - divField    : per-VERTEX scalar field [nV x nT]
 %
 % SEE ALSO: bst_operators, bst_gradient, bst_curl, bst_helmholtz, tess_manifold (DEC group)
+% (de Rham/Hodge route; the connection Laplacian differs by Gauss curvature K — see bst_operators.)
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
