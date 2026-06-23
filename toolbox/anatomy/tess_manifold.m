@@ -99,7 +99,9 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
             isStale = isempty(Mcand.Embedded) || ~isfield(Mcand.Embedded, 'schemaVersion') ...
                       || isempty(Mcand.Embedded(1).schemaVersion) ...
                       || (Mcand.Embedded(1).schemaVersion < REQUIRED_EMBEDDED_SCHEMA) ...
-                      || ~isfield(Mcand.Embedded(1).face, 'area');
+                      || ~isfield(Mcand.Embedded(1).face, 'area') ...
+                      || ~isfield(Mcand, 'DEC') || isempty(Mcand.DEC) ...     % node predates the DEC group
+                      || ~isfield(Mcand.DEC, 'sharp') || isfield(Mcand.DEC, 'flat');   % 'flat' = old unstable build -> recompute
             if ~isStale
                 if Interactive
                     % Prompt Overwrite / Cancel. Cancel reuses; Overwrite deletes and recomputes.
@@ -181,6 +183,8 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
 
     Groups = {'Topology','Embedded','Intrinsic','Extrinsic','Gauge'};
     Arr    = struct();
+    decArr = repmat(struct('d0',[],'d1',[],'h0',[],'h1',[],'h2',[],'sharp',[], ...
+                           'GlobalVertices',[],'GlobalFaces',[],'Hemisphere',[],'Provenance',[]), 1, 2);
 
     for hh = 1:2
         vH = hemis{hh};
@@ -206,12 +210,29 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
             opts.singValues = [1; 1];
         end
 
-        % run nxr facets
+        % run nxr facets + the discrete exterior calculus (DEC) operators of this hemisphere.
+        % DEC is the manifold's calculus structure (not a parametrized analysis operator), so it
+        % lives here next to the geometry it derives from, NOT as a standalone operator_ node.
         h = nxr_compute('create', Vloc, Floc);
         S = nxr_compute('facets', h, Gauge, opts);
+        DC = nxr_compute('operators', h, 'dec');                 % d0 [E x V], d1 [F x E]
+        dh0 = nxr_compute('operators', h, 'hodge', 'h0');        % Hodge stars (diagonal)
+        dh1 = nxr_compute('operators', h, 'hodge', 'h1');
+        dh2 = nxr_compute('operators', h, 'hodge', 'h2');
         nxr_compute('destroy', h);
+        % Whitney sharp ♯ [3F x E] (musical isomorphism): 1-form -> tangent face vector. nxr only
+        % APPLIES Whitney, so assemble the matrix here, using the WINDING normal (Whitney's
+        % face-normal convention). The flat ♭ is NOT stored: the metric flat ⋆1^{-1}♯'W_F is
+        % numerically unstable (⋆1 = cotan has negative/near-zero entries on obtuse triangles),
+        % and toolbox/differential builds div/curl as STABLE composites that avoid ⋆1^{-1}
+        % (div = -⋆0^{-1} d0' ♯' W_F ; curl v = -div(N x v), the surface Hodge rotation).
+        e1f = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
+        e2f = Vloc(Floc(:,3),:) - Vloc(Floc(:,1),:);
+        Ncr = cross(e1f, e2f, 2);  twoA = sqrt(sum(Ncr.^2, 2));
+        Nf  = Ncr ./ max(twoA, eps);  fArea = twoA / 2;
+        sharp = local_whitney_sharp(Vloc, Floc, Nf, fArea, DC.d0);
 
-        % scatter-map attachment + store
+        % scatter-map attachment + store (facets)
         for f = 1:numel(Groups)
             s = S.(Groups{f});
             s.GlobalVertices = vH;
@@ -220,6 +241,11 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
             s.Provenance     = prov;
             Arr.(Groups{f})(hh) = s;  %#ok<AGROW>
         end
+        % store the DEC group (same scatter-map attachment as the facets)
+        decArr(hh) = struct('d0', DC.d0, 'd1', DC.d1, 'h0', dh0, 'h1', dh1, 'h2', dh2, ...
+                            'sharp', sharp, ...
+                            'GlobalVertices', vH, 'GlobalFaces', find(fMask), ...
+                            'Hemisphere', tags{hh}, 'Provenance', prov);
     end
 
     % --- assemble ManifoldMat ---
@@ -227,6 +253,7 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
     for f = 1:numel(Groups)
         ManifoldMat.(Groups{f}) = Arr.(Groups{f});
     end
+    ManifoldMat.DEC        = decArr;
     ManifoldMat.Provenance = prov;
 
     % --- save / register in DB ---
@@ -240,4 +267,43 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
         Comment = sprintf('Manifold (gauge=%s)', Gauge);
         db_add_manifold(iSubjectSave, SurfaceFile, ManifoldMat, Comment);
     end
+end
+
+
+%% ===== Whitney sharp (musical isomorphism #) operator [3F x E] =====
+function sharp = local_whitney_sharp(Vloc, Floc, Nf, Af, d0)
+% Discrete sharp ♯: edge 1-form -> per-face ambient vector, exactly geometry-central's Whitney
+% reconstruction (nxr only APPLIES it). For a face (i,j,k) in winding order:
+%   V_f = N_f x ( c_ij(e_ki - e_jk) + c_jk(e_ij - e_ki) + c_ki(e_jk - e_ij) ) / (6 A_f),
+% where c_XY is the 1-form value on that edge signed by the edge's CANONICAL orientation (from
+% d0). Rows interleaved so face k holds (x,y,z) in rows 3k-2:3k. Composing ♯ * d0 recovers the
+% FEM gradient (the correctness oracle); ♯ matches nxr's applied Whitney to machine precision.
+    nFh = size(Floc, 1);  nVh = size(Vloc, 1);  nE = size(d0, 1);
+    % per-edge tail/head from d0 ((d0 f)_e = f(head) - f(tail) => d0(e,head)=+1, d0(e,tail)=-1)
+    [er, vc, vv] = find(d0);
+    headV = zeros(nE,1);  tailV = zeros(nE,1);
+    headV(er(vv > 0)) = vc(vv > 0);  tailV(er(vv < 0)) = vc(vv < 0);
+    Elookup = sparse(min(tailV,headV), max(tailV,headV), (1:nE)', nVh, nVh);
+    vi = Floc(:,1);  vj = Floc(:,2);  vk = Floc(:,3);
+    eij = Vloc(vj,:) - Vloc(vi,:);
+    ejk = Vloc(vk,:) - Vloc(vj,:);
+    eki = Vloc(vi,:) - Vloc(vk,:);
+    [eID_ij, s_ij] = i_face_edge(vi, vj, Elookup, tailV, headV);
+    [eID_jk, s_jk] = i_face_edge(vj, vk, Elookup, tailV, headV);
+    [eID_ki, s_ki] = i_face_edge(vk, vi, Elookup, tailV, headV);
+    coef = 1 ./ (6 * Af);
+    Vij = cross(Nf, eki - ejk, 2) .* (coef .* s_ij);   % dV/dc_ij per face [nFh x 3]
+    Vjk = cross(Nf, eij - eki, 2) .* (coef .* s_jk);
+    Vki = cross(Nf, ejk - eij, 2) .* (coef .* s_ki);
+    rx = (3*(1:nFh)-2)';  ry = (3*(1:nFh)-1)';  rz = (3*(1:nFh))';
+    rows = [rx; ry; rz;  rx; ry; rz;  rx; ry; rz];
+    cols = [repmat(eID_ij,3,1); repmat(eID_jk,3,1); repmat(eID_ki,3,1)];
+    vals = [Vij(:,1); Vij(:,2); Vij(:,3);  Vjk(:,1); Vjk(:,2); Vjk(:,3);  Vki(:,1); Vki(:,2); Vki(:,3)];
+    sharp = sparse(rows, cols, vals, 3*nFh, nE);
+end
+
+% global edge index + orientation sign for a face's directed edge a->b (sign +1 iff canonical)
+function [eID, s] = i_face_edge(a, b, Elookup, tailV, headV)
+    eID = full(Elookup(sub2ind(size(Elookup), min(a,b), max(a,b))));
+    s   = 2*(tailV(eID) == a & headV(eID) == b) - 1;
 end
