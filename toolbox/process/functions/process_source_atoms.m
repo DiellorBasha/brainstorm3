@@ -1,11 +1,20 @@
 function varargout = process_source_atoms( varargin )
-% PROCESS_SOURCE_ATOMS: Populate a spatiotemporal "atom" table from source peaks.
+% PROCESS_SOURCE_ATOMS: Populate a nested spatiotemporal atom table from source peaks.
 %
-% MILESTONE-1 TEST POPULATE (deliberately trivial): at each timepoint of a
-% phase-marker event group, reconstruct the unconstrained source magnitude |J|
-% and take its strongest local maxima as "atoms" (db_template('atom')). This is
-% only to generate data for the atom system (data model + GUI); the principled
-% source/sink and vortex detection (bst_helmholtz cores) comes later.
+% MILESTONE-1 TEST POPULATE (deliberately trivial detection): builds the atom
+% hierarchy that mirrors the refphase output --
+%
+%   <band> (lo-hi Hz)          extended window  [parent]
+%   |- <band>_peak             simple points    [child]
+%   |- <band>_trough           simple points
+%   |- <band>_rising           simple points
+%   '- <band>_falling          simple points
+%
+% The parent window group carries the period time-windows (no spatial markers).
+% Each child phase group carries, per phase-marker event time, the strongest
+% local maxima of the unconstrained source magnitude |J| as occurrences (vertex,
+% pos, hemi, strength). The principled source/sink and vortex detection
+% (bst_helmholtz cores) replaces this peak populate in a later phase.
 %
 % Input  : an unconstrained source kernel link (results, nComponents==3).
 % Output : a dynamics_*.mat table (bst_dynamics), loadable with view_dynamics.
@@ -48,24 +57,17 @@ function sProcess = GetDescription()
     sProcess.nInputs     = 1;
     sProcess.nMinFiles   = 1;
 
-    % Event group
-    sProcess.options.eventname.Comment = 'Phase-marker event (timepoints): ';
-    sProcess.options.eventname.Type    = 'text';
-    sProcess.options.eventname.Value   = 'alpha_peak';
-    % Separator
-    sProcess.options.sep1.Type    = 'separator';
-    sProcess.options.sep1.Comment = ' ';
-    % Frequency band
+    % Frequency band (selects the refphase groups: "<band> (..)" window + "<band>_<phase>")
     sProcess.options.freqband.Comment = {'Delta (2-4 Hz)', 'Theta (4-8 Hz)', ...
         'Alpha (8-13 Hz)', 'Beta (13-30 Hz)', 'Gamma (30-60 Hz)', 'Custom (below)', ...
-        '<B>Bandpass applied to the sensors (match the event band):</B>'; ...
+        '<B>Band (matches the refphase event groups):</B>'; ...
         'delta', 'theta', 'alpha', 'beta', 'gamma', 'custom', ''};
     sProcess.options.freqband.Type    = 'radio_linelabel';
     sProcess.options.freqband.Value   = 'alpha';
     sProcess.options.freqrange.Comment = 'Custom frequency range:';
     sProcess.options.freqrange.Type    = 'freqrange';
     sProcess.options.freqrange.Value   = {[8, 13], 'Hz', []};
-    % Number of peaks per event
+    % Peaks per phase-marker event
     sProcess.options.npeaks.Comment = 'Peaks (local |J| maxima) per event: ';
     sProcess.options.npeaks.Type    = 'value';
     sProcess.options.npeaks.Value   = {3, '', 0};
@@ -74,92 +76,97 @@ end
 
 %% ===== FORMAT COMMENT =====
 function Comment = FormatComment(sProcess)
-    Comment = ['Detect source atoms: ', sProcess.options.eventname.Value];
+    Comment = ['Detect source atoms: ', sProcess.options.freqband.Value];
 end
 
 
 %% ===== RUN =====
 function OutputFiles = Run(sProcess, sInputs)
     OutputFiles = {};
-    evtName = strtrim(sProcess.options.eventname.Value);
-    if isempty(evtName)
-        bst_report('Error', sProcess, [], 'Event name must be specified.');
-        return;
-    end
     freqBands = struct('delta', [2 4], 'theta', [4 8], 'alpha', [8 13], 'beta', [13 30], 'gamma', [30 60]);
     bandVal = sProcess.options.freqband.Value;
     if isfield(freqBands, bandVal)
-        FreqRange = freqBands.(bandVal);
+        FreqRange = freqBands.(bandVal);  bandTok = bandVal;
     else
-        FreqRange = sProcess.options.freqrange.Value{1};
+        FreqRange = sProcess.options.freqrange.Value{1};  bandTok = 'custom';
     end
     nPeaks = sProcess.options.npeaks.Value{1};
+    phases = {'peak','trough','rising','falling'};
+    phaseColors = struct('peak',[0.90 0.10 0.10], 'trough',[0.10 0.25 0.90], ...
+                         'rising',[0.10 0.70 0.20], 'falling',[0.95 0.55 0.10]);
 
     for iFile = 1:length(sInputs)
         ResultsFile = sInputs(iFile).FileName;
-        % --- Load kernel link ---
         R = in_bst_results(ResultsFile, 0, 'ImagingKernel', 'GoodChannel', 'SurfaceFile', 'DataFile', 'nComponents');
         if isempty(R.ImagingKernel) || (R.nComponents ~= 3)
             bst_report('Error', sProcess, sInputs(iFile), 'Need an UNCONSTRAINED source kernel link (nComponents=3, ImagingKernel).');
             continue;
         end
-        % --- Recording + events ---
         ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', R.DataFile));
         [F, TimeVector, events] = i_load_recording(R.DataFile, ChannelMat);
-        if isempty(F), bst_report('Error', sProcess, sInputs(iFile), 'Could not read the recording.'); continue; end
-        iEvt = find(strcmpi({events.label}, evtName), 1);
-        if isempty(iEvt), bst_report('Error', sProcess, sInputs(iFile), sprintf('Event "%s" not found.', evtName)); continue; end
-        evtTimes = events(iEvt).times(1, :);
-        iT = bst_closest(evtTimes, TimeVector);
-        nE = numel(iT);
-        % Oscillation phase from the event name suffix ("alpha_peak" -> "peak")
-        phaseTok = '';
-        tok = regexp(evtName, '_(peak|trough|rising|falling)$', 'tokens', 'once');
-        if ~isempty(tok), phaseTok = tok{1}; end
-        % --- Bandpass + surface ---
+        if isempty(F) || isempty(events)
+            bst_report('Error', sProcess, sInputs(iFile), 'Could not read the recording / no events.');
+            continue;
+        end
         sFreq = 1 / (TimeVector(2) - TimeVector(1));
         Fbp   = process_bandpass('Compute', F(R.GoodChannel, :), sFreq, FreqRange(1), FreqRange(2), 'bst-hfilter-2019', 0);
         Surf  = in_tess_bst(R.SurfaceFile, 0);
-        nV    = size(Surf.Vertices, 1);
 
-        % --- Build the table ---
-        T = bst_dynamics('New', sprintf('%s atoms (%g-%g Hz)', evtName, FreqRange(1), FreqRange(2)));
+        T = bst_dynamics('New', sprintf('%s atoms (%g-%g Hz)', bandTok, FreqRange(1), FreqRange(2)));
         T.DataFile = R.DataFile;  T.SurfaceFile = R.SurfaceFile;
-        T.Options = struct('method','source-peak', 'eventname',evtName, 'band',FreqRange, 'nPeaks',nPeaks);
-        for k = 1:nE
-            J    = R.ImagingKernel * Fbp(:, iT(k));               % [3nV x 1]
-            Jmag = sqrt(sum(reshape(J, 3, []).^2, 1))';           % [nV x 1] source magnitude
-            vPk  = i_local_maxima(Jmag, Surf.VertConn, nPeaks);   % strongest local maxima
-            for v = vPk(:)'
-                A = bst_dynamics('NewAtom');
-                A.label       = 'peak';
-                A.category    = 'peak';        % spatial |J| maximum (test populate)
-                A.color       = [0.85 0.20 0.75];
-                A.time        = evtTimes(k);
-                A.sample      = iT(k);
-                A.phase       = phaseTok;      % oscillation phase from the event
-                A.sourceEvent = evtName;
-                A.vertex      = v;
-                A.pos         = Surf.Vertices(v, :);
-                A.hemi        = uint8(1 + (Surf.Vertices(v,2) < 0));   % SCS: Y>0 = left
-                A.band        = FreqRange;
-                A.bandName    = bandVal;
-                A.Function    = 'magnitude';   % atom is an extremum of |J|
-                A.strength    = Jmag(v);
-                A.DataFile    = R.DataFile;
-                A.ResultsFile = ResultsFile;
-                A.SurfaceFile = R.SurfaceFile;
-                T = bst_dynamics('Add', T, A);
-            end
+        T.Options  = struct('method','source-peak', 'band',FreqRange, 'bandName',bandTok, 'nPeaks',nPeaks);
+
+        % ===== PARENT: extended window group "<band> (lo-hi Hz)" =====
+        winLabel = '';
+        iWin = find(~cellfun(@isempty, regexp({events.label}, ['^' regexptranslate('escape', bandTok) ' \('], 'once')), 1);
+        if ~isempty(iWin)
+            w = events(iWin);
+            winLabel = w.label;
+            G0 = bst_dynamics('NewGroup', winLabel);
+            G0.type = 'extended';  G0.times = w.times;  G0.epochs = ones(1, size(w.times,2));
+            G0.color = w.color;  if isempty(G0.color), G0.color = [0.5 0.5 0.5]; end
+            G0.band = FreqRange;  G0.bandName = bandTok;
+            G0.DataFile = R.DataFile;  G0.ResultsFile = ResultsFile;  G0.SurfaceFile = R.SurfaceFile;
+            T = bst_dynamics('AddGroup', T, G0);
         end
 
-        % --- Save (by path; Phase-1 has no tree node yet, so NOT returned as a
-        %     tracked OutputFile -- bst_process can't resolve the dynamics type) ---
+        % ===== CHILDREN: simple phase groups "<band>_<phase>" =====
+        for ip = 1:numel(phases)
+            ph = phases{ip};
+            iE = find(strcmpi({events.label}, [bandTok '_' ph]), 1);
+            if isempty(iE), continue; end
+            et = events(iE).times(1, :);
+            iT = bst_closest(et, TimeVector);
+            accT = [];  accV = [];  accP = zeros(0,3);  accH = [];  accS = [];
+            for k = 1:numel(iT)
+                J    = R.ImagingKernel * Fbp(:, iT(k));
+                Jmag = sqrt(sum(reshape(J, 3, []).^2, 1))';
+                vPk  = i_local_maxima(Jmag, Surf.VertConn, nPeaks);
+                for v = vPk(:)'
+                    accT(end+1) = et(k);                              %#ok<AGROW>
+                    accV(end+1) = v;                                  %#ok<AGROW>
+                    accP(end+1,:) = Surf.Vertices(v, :);              %#ok<AGROW>
+                    accH(end+1) = 1 + (Surf.Vertices(v,2) < 0);       %#ok<AGROW>  SCS Y>0=left
+                    accS(end+1) = Jmag(v);                            %#ok<AGROW>
+                end
+            end
+            if isempty(accT), continue; end
+            Gp = bst_dynamics('NewGroup', [bandTok '_' ph]);
+            Gp.type = 'simple';  Gp.parent = winLabel;  Gp.phase = ph;
+            Gp.times = accT;  Gp.epochs = ones(1, numel(accT));
+            Gp.band = FreqRange;  Gp.bandName = bandTok;  Gp.Function = 'magnitude';
+            Gp.vertices = accV;  Gp.pos = accP;  Gp.hemi = accH;  Gp.strength = accS;
+            Gp.color = phaseColors.(ph);
+            Gp.DataFile = R.DataFile;  Gp.ResultsFile = ResultsFile;  Gp.SurfaceFile = R.SurfaceFile;
+            T = bst_dynamics('AddGroup', T, Gp);
+        end
+
         OutFile = bst_process('GetNewFilename', bst_fileparts(R.DataFile), 'dynamics');
         bst_dynamics('Save', OutFile, T);
+        nOcc = sum(arrayfun(@(g) numel(g.vertices), T.Groups));
         bst_report('Info', sProcess, sInputs(iFile), ...
-            sprintf('%d source atoms from %d "%s" events. Saved: %s  (open with view_dynamics).', ...
-            T.nAtoms, nE, evtName, OutFile));
+            sprintf('%d atom groups (%d spatial occurrences), parent "%s". Saved: %s  (open with view_dynamics).', ...
+            T.nGroups, nOcc, winLabel, OutFile));
     end
 end
 

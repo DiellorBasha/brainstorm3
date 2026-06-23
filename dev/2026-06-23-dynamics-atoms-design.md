@@ -71,6 +71,29 @@ standard Events group (by `time`/`phase`) and/or a Scouts atlas (by `vertex`) so
 Brainstorm's native event/scout navigation can be reused on demand. `Function`
 (cf. `Scout.Function`) records which scalar field the atom is an extremum of.
 
+### Grouped, nested, simple/extended (mirrors Events)
+
+The flat per-atom array was replaced by **atom GROUPS** that reuse the Events
+grouping system. Each group is an extended Event group + atom extensions:
+- `times` is **[1×N] simple** (point) or **[2×N] extended** (window), exactly
+  like Events; `type` tracks which.
+- per-occurrence **parallel arrays** (`vertices`/`pos`/`hemi`/`strength`/...),
+  group-level coordinates (`phase`/`band`/`scale`/`Function`), and a **`parent`**
+  label for **nesting**.
+
+The populate builds the refphase hierarchy:
+```text
+alpha (8-13 Hz)   [extended window]   parent=''
+├─ alpha_peak     [simple]            parent='alpha (8-13 Hz)'  Function=magnitude
+├─ alpha_trough   [simple]
+├─ alpha_rising   [simple]
+└─ alpha_falling  [simple]
+```
+`panel_dynamics` is now a **JTree**: top-level groups → nested child groups →
+occurrence leaves; selecting a leaf highlights its cortex marker and jumps the
+time. `view_dynamics` draws one marker set per spatial group; windows
+(temporal-only, no vertex) appear in the tree but draw no markers.
+
 ### Table (collection) — `db_template('dynamicsmat')`
 
 ```

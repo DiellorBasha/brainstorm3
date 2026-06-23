@@ -324,43 +324,43 @@ switch lower(structureName)
             'History',  []);
         
     % ==== SPATIOTEMPORAL SPARSE MARKER (fuses Events + Scouts) ====
-    case 'atom'
-        % One spatiotemporal sparse marker: a REFERENCE (time x space x band x
-        % scale) + descriptors + provenance, sufficient to re-derive the data.
-        % Coordinates are a REFERENCE (time x space x freq x scale) + descriptors
-        % + provenance, sufficient to re-derive the data; not a copy.
+    % An ATOM GROUP is an extended Event group (label/color/times, simple or
+    % extended) + atom parallel arrays (per-occurrence space + descriptors) +
+    % a parent (nesting) + group-level frequency/scale/Function coordinates.
+    % An "atom" (occurrence) is one column across the parallel arrays; the group
+    % stores a REFERENCE (time x space x freq x scale) + provenance, not a copy.
+    case 'atomgroup'
         template = struct(...
-            'label',       '', ...   % free type name (e.g. 'vortex'), for display
-            'category',    '', ...   % singular-point type: source/sink/vortex/antivortex (derived)
-            'color',       [], ...   % [r g b]
-            'time',        [], ...   % TIME: seconds (ref into recording; cf. Events)
-            'sample',      [], ...   % TIME: sample index (convenience)
-            'phase',       '', ...   % TIME: oscillation phase peak/trough/rising/falling
-            'sourceEvent', '', ...   % TIME: originating event group, e.g. alpha_peak
-            'vertex',      [], ...   % SPACE: seed vertex index (ref into surface; cf. Scouts)
-            'pos',         [], ...   % SPACE: [x y z] position
-            'hemi',        [], ...   % SPACE: 1=L, 2=R
-            'region',      '', ...   % SPACE: atlas region label (optional)
-            'band',        [], ...   % FREQUENCY: [fLo fHi] Hz
-            'bandName',    '', ...   % FREQUENCY: alpha/beta/gamma/...
-            'scale',       [], ...   % SCALE: [k1 k2] eigenmode range (bst_eigen; reserved)
-            'scaleName',   '', ...   % SCALE: dominant eigenspectrum band (eigen-populated later)
-            'Function',    '', ...   % FUNCTION: potential(Phi)/stream(Psi)/magnitude(|J|)/... (cf. Scout.Function)
-            'strength',    [], ...   % descriptor: extremum value
-            'charge',      [], ...   % descriptor: +1/-1 topological charge (source/sink sign)
-            'chirality',   [], ...   % descriptor: +1/-1 vortex rotation sense
-            'persistence', [], ...   % descriptor: topological persistence
-            'descriptors', struct(), ... % OPEN-ENDED extensible bag (future axes)
-            'DataFile',    '', ...   % provenance: recording (time source)
-            'ResultsFile', '', ...   % provenance: kernel/source link (the inverse used)
-            'SurfaceFile', '');      % provenance: cortex (space source)
+            'label',       '', ...      % group name, e.g. 'alpha_peak' or 'alpha (8-13 Hz)'
+            'color',       [], ...      % [r g b]
+            'type',        'simple', ...% 'simple' (times 1 x N) | 'extended' (times 2 x N)
+            'parent',      '', ...      % parent group label (nesting); '' = top-level
+            'epochs',      [], ...      % [1 x N] (cf. Events)
+            'times',       [], ...      % TIME: [1 x N] simple | [2 x N] extended (cf. Events)
+            'phase',       '', ...      % TIME: oscillation phase peak/trough/rising/falling
+            'band',        [], ...      % FREQUENCY: [fLo fHi] Hz
+            'bandName',    '', ...      % FREQUENCY: alpha/beta/gamma/...
+            'scale',       [], ...      % SCALE: [k1 k2] eigenmode range (bst_eigen; reserved)
+            'scaleName',   '', ...      % SCALE: dominant eigenspectrum band (later)
+            'Function',    '', ...      % FUNCTION: potential(Phi)/stream(Psi)/magnitude(|J|)/... (cf. Scout.Function)
+            'vertices',    [], ...      % SPACE: [1 x N] seed vertex per occurrence
+            'pos',         [], ...      % SPACE: [N x 3] positions
+            'hemi',        [], ...      % SPACE: [1 x N] 1=L 2=R
+            'strength',    [], ...      % descriptor: [1 x N] extremum value
+            'charge',      [], ...      % descriptor: [1 x N] +1/-1 (source/sink sign)
+            'chirality',   [], ...      % descriptor: [1 x N] +1/-1 (vortex sense)
+            'persistence', [], ...      % descriptor: [1 x N] topological persistence
+            'DataFile',    '', ...      % provenance: recording (time source)
+            'ResultsFile', '', ...      % provenance: kernel/source link (the inverse used)
+            'SurfaceFile', '');         % provenance: cortex (space source)
 
     case 'dynamicsmat'
-        % Collection of atoms (a spatiotemporal sparse table), saved dynamics_*.mat
+        % A spatiotemporal sparse table (saved dynamics_*.mat): a list of atom
+        % groups (Events-style, nestable via parent).
         template = struct(...
             'Comment',     '', ...
-            'Atoms',       repmat(db_template('atom'), 1, 0), ...
-            'nAtoms',      0, ...
+            'Groups',      repmat(db_template('atomgroup'), 1, 0), ...
+            'nGroups',     0, ...
             'DataFile',    '', ...   % default recording (if homogeneous)
             'SurfaceFile', '', ...   % default surface
             'Options',     [], ...   % detection parameters

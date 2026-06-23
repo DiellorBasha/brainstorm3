@@ -1,21 +1,27 @@
 function varargout = bst_dynamics( varargin )
 % BST_DYNAMICS: I/O and builders for the spatiotemporal sparse marker table.
 %
-% A "dynamics" table (db_template('dynamicsmat')) holds an array of Atoms
-% (db_template('atom')) -- spatiotemporal sparse markers that fuse the time
-% fields of Events with the space fields of Scouts, plus frequency, scale, and
-% an open descriptor bag. Each Atom is a REFERENCE (time x space x band x scale
-% + provenance), not a copy of the data: it is sufficient to re-derive the
-% underlying source field on demand.
+% A "dynamics" table (db_template('dynamicsmat')) holds an array of atom GROUPS
+% (db_template('atomgroup')). A group reuses the Events grouping system: a label,
+% a color, and 'times' that are [1 x N] (simple, one point) or [2 x N] (extended,
+% a window) -- plus the atom extensions: per-occurrence parallel arrays
+% (vertices/pos/hemi/strength/...), group-level frequency/scale/Function
+% coordinates, and a 'parent' label for NESTING (e.g. an extended "alpha (8-13
+% Hz)" window containing simple "alpha_peak" / "alpha_trough" / ... children).
+%
+% Each group stores a REFERENCE (time x space x freq x scale) + provenance, not a
+% copy of the data. Groups can be projected back to standard Events (drop the
+% atom extensions) and Scouts (the vertices) for native Brainstorm navigation.
 %
 % USAGE:
-%    T = bst_dynamics('New', Comment)                 % empty table
-%    A = bst_dynamics('NewAtom')                       % empty atom (template)
-%    T = bst_dynamics('Add', T, Atom)                  % append atom(s); keeps nAtoms in sync
-%    T = bst_dynamics('Load', DynamicsFile)            % load + template-fill
+%    T = bst_dynamics('New', Comment)                  % empty table
+%    G = bst_dynamics('NewGroup', Label)               % empty atom group (template)
+%    T = bst_dynamics('AddGroup', T, G)                % append a group (normalized)
+%    [pos,color,gIdx,oIdx,labels] = bst_dynamics('Flatten', T)  % all spatial occurrences
+%    T = bst_dynamics('Load', DynamicsFile)            % load + template-fill (forward-compat)
 %    OutFile = bst_dynamics('Save', OutFile, T)        % save table to disk
 %
-% SEE ALSO: db_template('atom'/'dynamicsmat'), process_source_atoms
+% SEE ALSO: db_template('atomgroup'/'dynamicsmat'), process_source_atoms, view_dynamics
 %
 % Authors: Diellor Basha, 2026
 
@@ -49,29 +55,54 @@ function T = New(Comment)
 end
 
 
-%% ===== NEW ATOM =====
-function A = NewAtom()
-    A = db_template('atom');
+%% ===== NEW GROUP =====
+function G = NewGroup(Label)
+    G = db_template('atomgroup');
+    if (nargin >= 1), G.label = Label; end
 end
 
 
-%% ===== ADD ATOM(S) =====
-function T = Add(T, Atom)
-    if isempty(Atom)
+%% ===== ADD GROUP =====
+function T = AddGroup(T, G)
+    if isempty(G)
         return;
     end
-    % Normalize each incoming atom against the template (fill missing fields,
-    % drop unknown ones) so the struct array stays homogeneous.
-    tmpl = db_template('atom');
-    for i = 1:numel(Atom)
-        a = struct_copy_fields(tmpl, Atom(i), 1);
-        if isempty(T.Atoms)
-            T.Atoms = a;
-        else
-            T.Atoms(end+1) = a;
+    G = struct_copy_fields(db_template('atomgroup'), G, 1);
+    % Keep 'type' consistent with the times layout
+    if ~isempty(G.times) && (size(G.times,1) == 2)
+        G.type = 'extended';
+    elseif ~isempty(G.times)
+        G.type = 'simple';
+    end
+    if isempty(T.Groups)
+        T.Groups = G;
+    else
+        T.Groups(end+1) = G;
+    end
+    T.nGroups = numel(T.Groups);
+end
+
+
+%% ===== FLATTEN (all SPATIAL occurrences across groups, in a stable order) =====
+% Returns one row per occurrence that has a position (windows with no vertex are
+% skipped). gIdx/oIdx index back into T.Groups(gIdx) column oIdx.
+function [pos, color, gIdx, oIdx, labels] = Flatten(T)
+    pos = zeros(0,3);  color = zeros(0,3);  gIdx = [];  oIdx = [];  labels = {};
+    for g = 1:numel(T.Groups)
+        G = T.Groups(g);
+        if isempty(G.pos)
+            continue;   % temporal-only group (e.g. an extended window): no markers
+        end
+        n   = size(G.pos, 1);
+        col = G.color;  if isempty(col), col = [1 0 1]; end
+        pos   = [pos;   G.pos];                  %#ok<AGROW>
+        color = [color; repmat(col(:)', n, 1)];  %#ok<AGROW>
+        gIdx  = [gIdx;  g*ones(n,1)];            %#ok<AGROW>
+        oIdx  = [oIdx;  (1:n)'];                 %#ok<AGROW>
+        for o = 1:n
+            labels{end+1} = sprintf('%.3fs  v%d', G.times(1,o), G.vertices(o)); %#ok<AGROW>
         end
     end
-    T.nAtoms = numel(T.Atoms);
 end
 
 
@@ -81,23 +112,22 @@ function T = Load(DynamicsFile)
     % with file_gettype/file_fullpath; that comes with the Phase 2 tree node).
     T = load(DynamicsFile);
     T = struct_copy_fields(db_template('dynamicsmat'), T, 1);
-    % Forward-compat: normalize each atom against the current template so tables
-    % saved before a schema change gain the new fields (defaulted).
-    if ~isempty(T.Atoms)
-        tmpl = db_template('atom');
-        A = repmat(tmpl, 1, 0);
-        for i = 1:numel(T.Atoms)
-            A(i) = struct_copy_fields(tmpl, T.Atoms(i), 1);
+    % Forward-compat: normalize each group against the current template.
+    if ~isempty(T.Groups)
+        tmpl = db_template('atomgroup');
+        G = repmat(tmpl, 1, 0);
+        for i = 1:numel(T.Groups)
+            G(i) = struct_copy_fields(tmpl, T.Groups(i), 1);
         end
-        T.Atoms = A;
+        T.Groups = G;
     end
-    T.nAtoms = numel(T.Atoms);
+    T.nGroups = numel(T.Groups);
 end
 
 
 %% ===== SAVE =====
 function OutFile = Save(OutFile, T)
-    T.nAtoms = numel(T.Atoms);
+    T.nGroups = numel(T.Groups);
     bst_save(OutFile, T, 'v7');
     % Phase 1 has no dedicated tree node, so the table is not registered in the
     % DB; it is loadable by path via bst_dynamics('Load', ...). A tree node +
