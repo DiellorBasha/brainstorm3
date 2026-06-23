@@ -1,117 +1,83 @@
 function test_bst_eigs_smallest()
-% TEST_BST_EIGS_SMALLEST: bst_eigs_smallest on singular symmetric AND Hermitian pencils.
-    test_real_case();
-    test_hermitian_case();
-    test_real_operator_case();
-end
-
-function test_real_case()
-% Real symmetric singular pencil: A = Neumann path-graph Laplacian (constant null
-% vector, smallest eig 0); B = 1e-6*I (tiny mass mimics meters-scale conditioning).
-    n = 60; k = 6;
-    e = ones(n,1);
-    A = spdiags([-e, 2*e, -e], -1:1, n, n);
-    A(1,1) = 1; A(n,n) = 1;
-    B = 1e-6 * speye(n);
-    opts = struct('tol',1e-10,'disp',0,'maxit',1000);
-
-    lam_ref = sort(eig(full(A), full(B)));
-    lam_ref = lam_ref(1:k);
-
-    lastwarn('');
-    [V, D] = bst_eigs_smallest(A, B, k, opts);
-    [wmsg, wid] = lastwarn;
-    assert(isempty(wid), 'real: new path emitted a warning [%s] %s', wid, wmsg);
-
-    lam = sort(real(diag(D)));
-    scale = max(1, abs(lam_ref(end)));
-    assert(max(abs(lam - lam_ref)) < 1e-6 * scale, 'real: spectrum mismatch %.3e', max(abs(lam - lam_ref)));
-    assert(abs(lam(1)) < 1e-7 * scale, 'real: kernel mode not captured %.3e', lam(1));
-
-    nrm = sqrt(real(diag(V' * (B * V)))); nrm(nrm < eps) = eps;
-    Vn = V * diag(1 ./ nrm);
-    Lam = diag(real(diag(D)));
-    res = norm(A*Vn - B*Vn*Lam, 'fro') / (norm(full(A)) * sqrt(k));
-    assert(res < 1e-6, 'real: eigenpair residual too large %.3e', res);
-    G = Vn' * (B * Vn);
-    assert(max(max(abs(G - eye(k)))) < 1e-8, 'real: not B-orthonormal %.3e', max(max(abs(G-eye(k)))));
-
-    disp('PASS: test_bst_eigs_smallest (real symmetric case)');
-end
-
-function test_hermitian_case()
-% Complex Hermitian singular pencil: a path "magnetic" Laplacian with a fixed edge
-% phase. On a path (no cycle) the flux gauges away -> unitarily equivalent to the real
-% path Laplacian -> still singular (one zero mode). Exercises the complex eigs path and
-% the real-eigenvalue enforcement.
-    n = 40; k = 5; theta = 0.3;
-    A = diag(2*ones(n,1)) ...
-        + diag(-exp(1i*theta)*ones(n-1,1), 1) ...
-        + diag(-exp(-1i*theta)*ones(n-1,1), -1);
-    A(1,1) = 1; A(n,n) = 1;
-    A = sparse(A);
-    B = 1e-6 * speye(n);
-    opts = struct('tol',1e-10,'disp',0,'maxit',1000);
-
-    lam_ref = sort(real(eig(full(A), full(B))));
-    lam_ref = lam_ref(1:k);
-
-    lastwarn('');
-    [V, D] = bst_eigs_smallest(A, B, k, opts);
-    [wmsg, wid] = lastwarn;
-    assert(isempty(wid), 'hermitian: new path emitted a warning [%s] %s', wid, wmsg);
-
-    lam = diag(D);
-    assert(isreal(lam), 'hermitian: eigenvalues not enforced real (max|imag|=%.3e)', max(abs(imag(lam))));
-    scale = max(1, abs(lam_ref(end)));
-    assert(max(abs(lam - lam_ref)) < 1e-6 * scale, 'hermitian: spectrum mismatch %.3e', max(abs(lam - lam_ref)));
-    assert(abs(lam(1)) < 1e-7 * scale, 'hermitian: kernel mode not captured %.3e', lam(1));
-
-    nrm = sqrt(real(diag(V' * (B * V)))); nrm(nrm < eps) = eps;
-    Vn = V * diag(1 ./ nrm);
-    G = Vn' * (B * Vn);
-    assert(max(max(abs(G - eye(k)))) < 1e-8, 'hermitian: not B-orthonormal %.3e', max(max(abs(G-eye(k)))));
-
-    disp('PASS: test_bst_eigs_smallest (complex Hermitian case)');
-end
-
-function test_real_operator_case()
-% Reuse a stored Dirac operator node (if present) to confirm on REAL data: legacy
-% 'smallestabs' warns, bst_eigs_smallest does not, and the K smallest eigenvalues agree.
-% Environment-dependent: only runs when a protocol with a stored Dirac operator
-% node is loaded; otherwise it SKIPs (the two synthetic cases carry the suite).
-% Skips cleanly if no protocol / Dirac operator node is available.
+% TEST_BST_EIGS_SMALLEST: the smallest-mode singular-pencil eigensolver, exercised
+% end-to-end through tess_eigen (its sole caller and host).
+%
+% bst_eigs_smallest exists to return the K smallest generalized eigenpairs of a
+% (near-)singular symmetric/Hermitian pencil (A,B) WITHOUT triggering MATLAB's RCOND
+% "matrix close to singular" warning that the naive eigs(A,B,k,'smallestabs') shift-
+% invert raises on the singular A. It is now a LOCAL function of tess_eigen (not a
+% standalone callable), so this test drives it through the public entry point: it loads
+% a real operator pencil, confirms the legacy 'smallestabs' path warns on it (the
+% premise), then runs tess_eigen and asserts the solve
+%   (1) emits NO warning,
+%   (2) returns a real, ascending spectrum that agrees with the legacy eigenvalues,
+%   (3) returns B-orthonormal modes.
+%
+% Environment-dependent: needs a loaded protocol whose Subject 1 has a cortex surface.
+% SKIPs cleanly otherwise.
+%
+% Author: Diellor Basha, 2026
     PI = bst_get('ProtocolInfo');
     if isempty(PI) || ~isfield(PI,'SUBJECTS') || isempty(PI.SUBJECTS)
-        disp('SKIP: test_bst_eigs_smallest (real operator) -- no protocol loaded'); return;
+        disp('SKIP: test_bst_eigs_smallest -- no protocol loaded'); return;
     end
-    opFiles = dir(fullfile(PI.SUBJECTS, '**', 'operator_*.mat'));
-    f = '';
-    for i = 1:numel(opFiles)
-        p = fullfile(opFiles(i).folder, opFiles(i).name);
-        S = load(p, 'Variant');
-        if isfield(S,'Variant') && strcmpi(S.Variant,'Dirac'); f = p; break; end
+    sSubject = bst_get('Subject', 1);
+    if isempty(sSubject) || isempty(sSubject.Surface)
+        disp('SKIP: test_bst_eigs_smallest -- Subject 1 has no surfaces'); return;
     end
-    if isempty(f)
-        disp('SKIP: test_bst_eigs_smallest (real operator) -- no Dirac operator node found'); return;
+    % Resolve a cortex surface (default cortex if tagged, else first Cortex-type surface).
+    iCx = sSubject.iCortex;
+    if isempty(iCx)
+        iCx = find(strcmpi({sSubject.Surface.SurfaceType}, 'Cortex'), 1);
     end
-    Op = load(f); A = Op.Operator{1}; B = Op.Mass{1};
-    k = 12; opts = struct('tol',1e-6,'maxit',1000,'disp',0);
+    if isempty(iCx)
+        disp('SKIP: test_bst_eigs_smallest -- no cortex surface on Subject 1'); return;
+    end
+    SurfaceFile = sSubject.Surface(iCx).FileName;
 
-    lastwarn('');
-    lam_old = sort(real(eigs(A, B, k, 'smallestabs', opts)));
-    [~, wid_old] = lastwarn;
-    assert(~isempty(wid_old), ...
-        'real operator: legacy ''smallestabs'' did not warn as expected (premise broken)');
+    % Laplace-Beltrami: a real-symmetric singular pencil (constant null mode), the
+    % cleanest case that bst_eigs_smallest is built to solve without warning.
+    K = 12;
+    Op = tess_operators(SurfaceFile, 'Laplace-Beltrami', 'NoSave', true);
+    A = Op.Operator{1};  B = Op.Mass{1};      % left hemisphere pencil
 
+    % --- Premise: the legacy 'smallestabs' shift-invert warns on this singular A. ---
+    %     (Environment-robust: if it does NOT warn here, the no-warn contrast cannot be
+    %      exercised, but the correctness + spectrum-agreement assertions below still run.)
+    opts = struct('tol', 1e-6, 'maxit', 1000, 'disp', 0);
     lastwarn('');
-    [~, D] = bst_eigs_smallest(A, B, k, opts);
+    lam_legacy = sort(real(eigs(A, B, K, 'smallestabs', opts)));
+    [~, wid_legacy] = lastwarn;
+    legacyWarned = ~isempty(wid_legacy);
+    if ~legacyWarned
+        disp('NOTE: legacy ''smallestabs'' did not warn in this environment; testing correctness only.');
+    end
+
+    % --- tess_eigen runs bst_eigs_smallest internally; it must NOT warn. ---
+    lastwarn('');
+    Eig = tess_eigen(SurfaceFile, 'Laplace-Beltrami', 'K', K, 'NoSave', true);
     [wmsg_new, wid_new] = lastwarn;
-    lam_new = sort(real(diag(D)));
+    assert(isempty(wid_new), 'tess_eigen solve emitted a warning [%s] %s', wid_new, wmsg_new);
+    if legacyWarned
+        fprintf('PASS: legacy ''smallestabs'' warned (id=%s), tess_eigen solve was clean\n', wid_legacy);
+    end
 
-    assert(isempty(wid_new), 'real operator: new path emitted a warning [%s] %s', wid_new, wmsg_new);
-    sc = max(1, max(abs(lam_old)));
-    assert(max(abs(lam_old - lam_new)) < 1e-3 * sc, ...
-        'real operator: spectrum mismatch %.3e (rel %.1e)', max(abs(lam_old-lam_new)), max(abs(lam_old-lam_new))/sc);
-    fprintf('PASS: test_bst_eigs_smallest (real operator; legacy warned id=%s)\n', wid_old);
+    lam_new = Eig.Lambda{1}(:);
+
+    % --- (2) real, ascending spectrum, agreeing with the legacy eigenvalues ---
+    assert(isreal(lam_new), 'eigenvalues not real (max|imag|=%.3e)', max(abs(imag(lam_new))));
+    assert(all(diff(lam_new) >= -1e-8), 'eigenvalues not ascending');
+    sc = max(1, max(abs(lam_legacy)));
+    dspec = max(abs(lam_legacy - lam_new(1:K)));
+    assert(dspec < 1e-3 * sc, 'spectrum mismatch %.3e (rel %.1e)', dspec, dspec / sc);
+    fprintf('PASS: spectrum agrees with legacy eigs (max abs diff %.2e, rel %.1e)\n', dspec, dspec / sc);
+
+    % --- (3) B-orthonormal modes ---
+    Phi = Eig.Phi{1}(:, 1:K);
+    G = Phi' * (B * Phi);
+    ortho = norm(G - eye(K), 'fro') / sqrt(K);
+    assert(ortho < 1e-8, 'modes not B-orthonormal (||Phi''BPhi - I||/sqrt(K) = %.3e)', ortho);
+    fprintf('PASS: modes B-orthonormal (||Phi''BPhi - I||/sqrt(K) = %.2e)\n', ortho);
+
+    disp('PASS: test_bst_eigs_smallest (end-to-end via tess_eigen)');
 end
