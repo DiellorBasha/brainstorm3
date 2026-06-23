@@ -86,23 +86,36 @@ function ManifoldMat = tess_manifold(SurfaceFile, varargin)
     % If not forcing, and a manifold of the requested Gauge is already registered, load
     % and return it (tess_manifold is the single find-or-load-or-create entry point, so it
     % always hands back the complete ManifoldMat). bst_get resolves the match from the cache.
+    %
+    % Schema gate: a node whose Embedded group predates the current schema (i.e. lacks the
+    % per-face fields the consumers now rely on, e.g. face.area added in schemaVersion 2) is
+    % treated as a cache MISS and recomputed -- so callers always receive a complete node.
+    REQUIRED_EMBEDDED_SCHEMA = 2;   % nxr facets schemaVersion that first carries Embedded.face.area
     if ~ForceRecompute
         [sMan, ~, iSurfMan, iMan] = bst_get('ManifoldFileForSurface', SurfaceFile, Gauge);
         if ~isempty(iMan)
             existFile = sMan.Surface(iSurfMan).Manifold(iMan).FileName;
-            if Interactive
-                % Prompt Overwrite / Cancel. Cancel reuses; Overwrite deletes and recomputes.
-                msg = sprintf(['A manifold (gauge=%s) already exists for this surface.\n\n' ...
-                    'Overwrite it (delete and recompute)?\n[No keeps and reuses the existing one.]'], Gauge);
-                if ~java_dialog('confirm', msg, 'Compute manifold')
-                    ManifoldMat = in_bst_manifold(existFile);
+            Mcand = in_bst_manifold(existFile);
+            isStale = isempty(Mcand.Embedded) || ~isfield(Mcand.Embedded, 'schemaVersion') ...
+                      || isempty(Mcand.Embedded(1).schemaVersion) ...
+                      || (Mcand.Embedded(1).schemaVersion < REQUIRED_EMBEDDED_SCHEMA) ...
+                      || ~isfield(Mcand.Embedded(1).face, 'area');
+            if ~isStale
+                if Interactive
+                    % Prompt Overwrite / Cancel. Cancel reuses; Overwrite deletes and recomputes.
+                    msg = sprintf(['A manifold (gauge=%s) already exists for this surface.\n\n' ...
+                        'Overwrite it (delete and recompute)?\n[No keeps and reuses the existing one.]'], Gauge);
+                    if ~java_dialog('confirm', msg, 'Compute manifold')
+                        ManifoldMat = Mcand;
+                        return;
+                    end
+                    db_delete_surface_node(existFile, 1);   % overwrite: drop the old node
+                else
+                    ManifoldMat = Mcand;
                     return;
                 end
-                db_delete_surface_node(existFile, 1);   % overwrite: drop the old node
-            else
-                ManifoldMat = in_bst_manifold(existFile);
-                return;
             end
+            % stale schema -> fall through to recompute (db_add_manifold replaces the same-gauge node)
         end
     end
 
