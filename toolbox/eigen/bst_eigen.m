@@ -77,6 +77,7 @@ Def_OPTIONS.Method        = 'spectrum';  % {'spectrum','filter','wavelet'} wired
 Def_OPTIONS.EigenFile     = [];          % eigen_ node (the spatial axis); [] => resolve from SurfaceFile
 Def_OPTIONS.Variant       = [];          % operator family hint ('Laplace-Beltrami'|'Connection Laplacian'|'Dirac'|...)
 Def_OPTIONS.nModes        = [];          % use a subset of modes (the spatial "band"); [] => all
+Def_OPTIONS.Tau           = [];          % Dirac-type smoothing for basis resolution; [] => any
 Def_OPTIONS.Measure       = 'power';     % spectrum measure {'power','magnitude'}
 Def_OPTIONS.KernelName    = 'flat';      % 'filter' method: eigfilter kernel name (or handle / [K x 1] gain)
 Def_OPTIONS.KernelParams  = struct();    % 'filter' method: kernel parameters
@@ -303,9 +304,17 @@ function [EigenMat, OperatorMat] = GetEigenBasis(OPTIONS, SurfaceFile)
     % Finding is bst_get's job; loading is in_bst_eigen's / in_bst_operator's.
     EigenFile = OPTIONS.EigenFile;
     if isempty(EigenFile) && ~isempty(SurfaceFile)
-        % TODO: EigenFile = bst_get('EigenFileForSurface', SurfaceFile, OPTIONS.Variant);
-        error('bst_eigen:AutoResolveTODO', ...
-            'Auto-resolving the eigen_ basis from the surface is not implemented yet; pass OPTIONS.EigenFile.');
+        % Resolve the eigen_ node implicitly from the surface + operator family (the spatial
+        % analogue of bst_timefreq deriving its axis from the recordings). Finding is bst_get's
+        % job; a single surface can host several eigenbases, so Variant selects among them.
+        Variant = OPTIONS.Variant;
+        if isempty(Variant); Variant = 'Laplace-Beltrami'; end
+        [sSubject, ~, iSurface, iEigen] = bst_get('EigenFileForSurface', SurfaceFile, Variant, OPTIONS.nModes, OPTIONS.Tau);
+        if isempty(iEigen)
+            error('bst_eigen:NoEigenForSurface', ...
+                'No ''%s'' eigenbasis found for this surface — compute it first.', Variant);
+        end
+        EigenFile = sSubject.Surface(iSurface).Eigen(iEigen).FileName;
     end
     if isempty(EigenFile)
         error('bst_eigen:NoEigenFile', 'No eigen_ basis specified (OPTIONS.EigenFile).');
