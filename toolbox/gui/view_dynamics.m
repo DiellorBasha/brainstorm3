@@ -56,9 +56,11 @@ function varargout = view_dynamics( varargin )
     setappdata(hFig, 'DynamicsFile', DynamicsFile);
     Redraw(hFig, T);
 
-    % ===== OPEN THE PANEL (rebuild fresh) =====
+    % ===== OPEN THE PANEL (docked tools tab, like Record/Helmholtz) =====
     try, gui_hide('Dynamics'); catch, end %#ok<CTCH>
-    gui_show('panel_bst_dynamics', 'JavaWindow', sprintf('Dynamics: %s', T.Comment), [], 0, 0, 0);
+    bstPanel = panel_bst_dynamics('CreatePanel');
+    gui_show(bstPanel, 'BrainstormTab', 'tools');
+    try, gui_brainstorm('SetSelectedTab', 'Dynamics', 0); catch, end %#ok<CTCH>
     panel_bst_dynamics('SetTarget', hFig, T);
 
     if (nargout >= 1), varargout{1} = hFig; end

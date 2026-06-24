@@ -71,22 +71,19 @@ function test_dynamics_atoms()
     [hFig, Tv] = view_dynamics(dynFile);
     nMark = numel(findobj(hFig, '-regexp', 'Tag', '^AtomMarker'));   % one line per spatial group (4)
     ctrl  = bst_get('PanelControls', 'Dynamics');
-    root  = ctrl.jTree.getModel().getRoot();
-    winNode = root.getChildAt(0);
-    nNested = winNode.getChildCount();                              % 4 phase children under the window
-    % select a phase group in the tree -> occurrence list populates
+    nGroupRows = ctrl.jListGroups.getModel().getSize();             % 5 (window + 4 children, indented)
+    % select a phase group in the colored list -> occurrence list populates
     st = getappdata(0, 'DynamicsTarget');
     gPhase = find(arrayfun(@(g) ~isempty(Tv.Groups(g).vertices), 1:Tv.nGroups), 1);
-    iNode  = find(st.goList == gPhase, 1);
-    ctrl.jTree.setSelectionPath(javax.swing.tree.TreePath(st.nodeList{iNode}.getPath()));
-    drawnow;
+    row    = find(st.gIdx == gPhase, 1) - 1;   % 0-based
+    ctrl.jListGroups.setSelectedIndex(row);  drawnow;
     nOcc = ctrl.jListOccur.getModel().getSize();
     % select first occurrence -> highlight marker
     ctrl.jListOccur.setSelectedIndex(0);  drawnow;
     hSel = findobj(hFig, 'Tag', 'AtomSel');
     selOn = strcmp(get(hSel,'Visible'), 'on');
-    ok3 = ishandle(hFig) && (nMark==4) && (root.getChildCount()==1) && (nNested==4) && (nOcc>0) && selOn;
-    fprintf('T3 panel: markers=%d topLevel=%d nested=%d occ=%d highlight=%d => %s\n', nMark, root.getChildCount(), nNested, nOcc, selOn, PF{ok3+1});
+    ok3 = ishandle(hFig) && (nMark==4) && (nGroupRows==5) && (nOcc>0) && selOn;
+    fprintf('T3 panel: markers=%d groupRows=%d occ=%d highlight=%d => %s\n', nMark, nGroupRows, nOcc, selOn, PF{ok3+1});
     pass = pass && ok3;
 
     % cleanup
