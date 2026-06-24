@@ -75,17 +75,26 @@ The current `atomgroup` mixes these; the target model separates them cleanly.
   per-occurrence arrays already *are* a set of atoms sharing the group's coordinates; the model just
   names that structure.
 
-### 2.5 Atlas — labelling layer (future)
+### 2.5 Atlas = mask = labelling
 
-`center` and `extent` are **numeric**; each axis localization may carry an **optional human-readable
-label**. A tensor **atlas** maps regions of any axis to names:
+`center` and `extent` are **numeric**; an **atlas** is an *arbitrary labelling* of an axis — a partition
+into named regions. **An atlas and a mask are the same object**: a labelled extent on an axis, with no
+measurement attached. A scout (a cortical region), a frequency band, and an alpha time-window are all the
+*same kind of thing* — a labelled region of their axis.
 
-- frequency `(10 Hz, ±4)` → "alpha";
-- an eigenvalue band → a spatial scale: "column / gyrus / lobe";
-- a geodesic region → an anatomical label.
+An atlas has two sources:
 
-The atlas is a *labelling layer over the numeric tensor* — deferred, but the model reserves the
-optional-label slot so it can be added without a schema change. **Future development.**
+- **Presets** (supplied externally): frequency bands (`(10 Hz, ±4)` → "alpha"), cortical anatomical
+  atlases (Desikan-Killiany; a region centroid is a preset `center`), time events (later); an eigenvalue
+  band → a spatial scale ("column / gyrus / lobe").
+- **Data-driven** (produced by detection, §4.2): alpha windows = a *time mask* from GFP-power thresholding;
+  a cortical region = a *source mask* from `|J|`-norm thresholding; a band = a *frequency mask* from
+  spectral peak-picking. The thresholding produces a mask exactly as GFP power produces a time mask.
+
+An atlas **guides navigation** (snap `center` to a region or its centroid) and labels stored atoms; it
+carries no field measurements. The full atlas build-out (anatomical source atlases, `|J|` masks, time
+events) is **future**; the model reserves the optional-label slot and this section fixes the concept so
+later phases stay aligned.
 
 ### 2.6 Weighted windows — wavelets as soft localizations
 
@@ -113,6 +122,44 @@ So every axis has a hard form and a soft (wavelet) form from one `center`+`exten
 per-axis weightings. A joint-wavelet atom is the soft-`g` generalization of the hard-window atom: same
 4-D index, same engines, weighted instead of truncated. **Future development**, but the primitive is
 designed for it now (the `weighting` slot).
+
+### 2.7 Axis / Atlas / Measurement — three orthogonal layers
+
+Each axis carries three *separate* concerns, and conflating them muddles the panel. They must stay
+orthogonal:
+
+| Layer | What it is | time / frequency / source / scale |
+|-------|-----------|-----------------------------------|
+| **Axis** (navigation) | pure numeric `(center, extent, weighting)` — free continuous navigation | the cursor / a frequency / a vertex+radius / an eigenvalue |
+| **Atlas** = mask (§2.5) | an arbitrary labelling of the axis into named regions; **no measurement** | alpha windows / α-β-γ bands / Desikan-Killiany regions / eigen-bands |
+| **Measurement** | extrema & zero-crossings of a *reference field* along the axis (differential analysis) | refphase peak/trough/rising/falling / spectral peaks / Φ-Ψ extrema / eigen-peaks |
+
+Two consequences that the navigator and detectors must respect:
+
+- **Detection produces a data-driven atlas, and (optionally) the measurements within it.** `process_evt_refphase`
+  is the canonical example: the alpha *window* is the **atlas** (a time mask from GFP power); the phase
+  *markers* are the **measurements** (extrema/zero-crossings of the reference field) inside that mask. The
+  cortical analog: threshold the `|J|`-norm → a **mask** (atlas, no measurement), then take Φ/Ψ extrema →
+  **measurements**. Frequency: pick the band where spectral peaks live → a mask; the peaks are the
+  measurements.
+- **Each axis owns an analysis/visualization toolbox** for its measurement step — power-spectral density on
+  frequency, `process_evt_refphase` on time, the Helmholtz/vortex detectors on source, the eigen-spectrum
+  tools on scale. The navigator *invokes* these; it does not reimplement them.
+
+In the panel (§3), the pure axis is just the numeric `center`/`extent`; **atlas presets are a guidance
+overlay** that snaps the center to a labelled region (the frequency band combobox is a *frequency-atlas
+preset selector*, not the axis); **detection/measurement are a separate action** that writes a data-driven
+atlas + measurements.
+
+### 2.8 The geodesic Area tool belongs in the dynamics suite
+
+The geodesic Area tool (heat-distance disk: a seed `center` + a radius `extent`) was added as a custom
+extension to `panel_scout`, but it is **not** standard Brainstorm scout behaviour. It belongs in the
+dynamics suite, because there a seed + radius is *natively* the **source-axis point+extent primitive** of
+the tensor — not a bolt-on to scouts. Moving it (the `tess_scout_area` engine and the tool's
+UI/figure-interaction) into the dynamics suite is the prerequisite refactor for the source-axis navigator
+block. (Standard scout atlases — Desikan-Killiany and friends — remain in Scouts; they are the *source
+atlas presets* of §2.5, a different concern.)
 
 ## 3. The panel as a 4-axis navigator
 
@@ -152,20 +199,23 @@ geodesic radius, eigenfilter band, time extent).
 
 ### 4.2 Detect (intermediate guidance)
 
-Each axis runs a detector that **highlights salient centers** for the current window/params, giving
-**immediate visual feedback but persisting nothing**. It steers the user toward relevant activity:
+Detection **produces a data-driven atlas (a mask) on an axis, and optionally the measurements within it**
+(§2.7) — giving **immediate visual feedback but persisting nothing**. It steers the user toward relevant
+activity. Per axis, the *mask* and the *measurement* are distinct outputs:
 
-- **Frequency** → known ephys bands (alpha / beta / gamma / …) — already guiding.
-- **Time** → `process_evt_refphase` phase markers (rising / peak / falling / trough) inside band-power
-  periods. (Phase markers now come from the monotonic GFP phase + one-per-period polarity seed —
-  see the refphase fix; they carry a numeric phase value.)
-- **Source** → eigenmode-smoothed Φ/Ψ peaks & prominences: the **scale** axis localizes (eigenfilter
-  smoothing), then the **operator's** extrema are the candidate seeds (`bst_dynamics('Extrema')`,
-  vortex/prominence detectors).
-- **Scale** → (future) eigenvalue salience / dispersion features.
+- **Frequency** → mask: the band where spectral peaks live (or a preset band); measurement: spectral peaks
+  (PSD). Bands are also available as presets (§2.5).
+- **Time** → mask: band-power periods (GFP power threshold = the alpha-window atlas); measurement:
+  `process_evt_refphase` phase markers (rising / peak / falling / trough) within the mask. (Markers come
+  from the monotonic GFP phase + one-per-period polarity seed — see the refphase fix; numeric phase value.)
+- **Source** → mask: threshold the `|J|`-norm (or an eigenmode-smoothed field) → a cortical region (the
+  same kind of object as a scout); measurement: Φ/Ψ extrema & prominences inside the mask
+  (`bst_dynamics('Extrema')`, vortex/prominence detectors).
+- **Scale** → mask: an eigen-band (future); measurement: eigenvalue-spectrum peaks (future).
 
-Detection = "snap `center` to the salient features on this axis"; navigation steps among the
-candidates. Detection parameters are exactly the axis windows + operator already set during navigation.
+"Snap `center` to the mask region / its measured extrema"; navigation steps among the candidates.
+Detection parameters are exactly the axis windows + operator already set during navigation. **A mask is an
+atlas (§2.5); the measurement is the differential-analysis step** — keep them separate.
 
 ### 4.3 Save (explicit commit)
 
@@ -198,30 +248,36 @@ not new numerics.
 
 A migration that preserves the just-built region/phase/filter/detect work and the Events parity:
 
-1. **Localization accessor (non-breaking).** Add a uniform `(center, extent)` Get/Set layer over the
-   existing `atomgroup` fields (time ⇄ onset/offset, frequency ⇄ `[fLo fHi]`, source ⇄ seed+radius,
-   scale ⇄ `[k1 k2]`). No storage change; both representations stay in sync. This delivers the
-   conceptual unification and lets the panel treat all axes uniformly.
-2. **Navigator panel.** Reorganize `panel_bst_dynamics` into four uniform `(center,extent)` blocks
-   driven through the accessor; add the missing Time-window and Scale blocks. Relabel the operator as
-   a measurement selector.
-3. **Navigate / Detect / Save separation.** Make Detect a non-persisting guidance overlay (per-axis
-   salient-center highlighting); route all writes through an explicit Save (single index or batch).
-4. **Scale axis activation.** Wire the eigenvalue center/extent to the eigenfilter + an eigen-salience
+1. **Localization accessor (non-breaking).** ✅ DONE (`toolbox/dynamics/bst_atom.m`, merged 78f72a0d).
+   Uniform `(center, extent, weighting)` Get/Set over the existing `atomgroup` fields (time ⇄ onset/offset,
+   frequency ⇄ `[fLo fHi]`, source ⇄ seed + new `radius`, scale ⇄ `[k1 k2]`). No storage change.
+2. **Move the geodesic Area tool into the dynamics suite (§2.8).** Relocate the `tess_scout_area` engine
+   and the Area-tool UI/figure-interaction out of `panel_scout` into the dynamics suite, so seed + radius
+   become the native source-axis point+extent primitive. Prerequisite for the source-axis navigator block.
+3. **Navigator panel.** Reorganize `panel_bst_dynamics` into four uniform `(center,extent)` blocks
+   driven through the accessor; add the missing Time-window and Scale blocks. Relabel the operator as a
+   measurement selector. **Keep Axis / Atlas / Measurement separate (§2.7):** the axis blocks are pure
+   numeric navigation; atlas presets (frequency bands) are a guidance overlay; detect/measure stay actions.
+4. **Navigate / Detect / Save separation.** Make Detect a non-persisting guidance overlay that produces a
+   data-driven atlas (mask) + measurements (§2.7); route all writes through an explicit Save (single index
+   or batch).
+5. **Scale axis activation.** Wire the eigenvalue center/extent to the eigenfilter + an eigen-salience
    detector (currently `scale`/`scaleName` are reserved/unused).
-5. **(Future) Atlas labelling layer** over the numeric tensor; **(future) joint wavelet (time+freq)
-   and spatial-scale (source+scale) box markers** from the conjugate-plane grammar.
+6. **(Future) Atlas system** — presets (anatomical source atlases, ephys band presets) + data-driven masks
+   as first-class labellings (§2.5); **(future) joint wavelet (time+freq) and spatial-scale (source+scale)
+   box markers** (§2.6) from the conjugate-plane grammar.
 
-Each phase is independently testable and reversible; phase 1 is the keystone (the accessor is what
-makes every later phase uniform).
+Each phase is independently testable and reversible; phase 1 (the accessor) is the keystone that makes
+every later phase uniform. Phase 2 (geodesic-tool move) unblocks the source-axis navigator block.
 
 ## 7. Open questions for the planning stage
 
 - Canonical time representation: keep onset/offset (Events parity) as storage with `(center,extent)`
   as the accessor view (recommended), or migrate storage to center/half-width.
-- Source `extent`: store the geodesic **radius** as the window parameter (materialized region cached),
-  so the source window is a single dialable scalar like the other axes.
-- Whether the navigator replaces or coexists with the current sections during the transition.
+- Navigator replace decision: **resolved** — the four blocks replace the current Frequency/Space/Record
+  sections; Detect/Record/Capture stay as actions until the Phase-4 contract.
+- Geodesic-tool move: where the `tess_scout_area` engine lands (a dynamics-suite home) and how the
+  figure-interaction (currently `panel_scout`-routed click/scroll) is re-homed — decided in that phase's spec.
 
 ## 8. Out of scope (here)
 
