@@ -71,19 +71,31 @@ function test_dynamics_atoms()
     [hFig, Tv] = view_dynamics(dynFile);
     nMark = numel(findobj(hFig, '-regexp', 'Tag', '^AtomMarker'));   % one line per spatial group (4)
     ctrl  = bst_get('PanelControls', 'Dynamics');
-    nGroupRows = ctrl.jListGroups.getModel().getSize();             % 5 (window + 4 children, indented)
-    % select a phase group in the colored list -> occurrence list populates
+    root  = ctrl.jTree.getModel().getRoot();
+    nStacks  = root.getChildCount();                                 % 1 band stack (alpha)
+    nWindows = root.getChildAt(0).getChildCount();                   % 8 time windows under it
+    % band = top-level extended group; pick the window with the most phase atoms
+    parents  = {Tv.Groups.parent};
+    gBand    = find(cellfun(@isempty,parents) & arrayfun(@(g) size(Tv.Groups(g).times,1)==2, 1:Tv.nGroups), 1);
+    children = find(strcmpi(parents, Tv.Groups(gBand).label));
+    G = Tv.Groups(gBand);  bestW = 1;  bestN = -1;
+    for w = 1:size(G.times,2)
+        on = G.times(1,w);  off = G.times(2,w);  n = 0;
+        for c = children, gc = Tv.Groups(c);  n = n + sum(gc.times(1,:)>=on-1e-9 & gc.times(1,:)<=off+1e-9);  end
+        if n > bestN, bestN = n;  bestW = w;  end
+    end
+    % select that window node -> right list = flat phase atoms within it
     st = getappdata(0, 'DynamicsTarget');
-    gPhase = find(arrayfun(@(g) ~isempty(Tv.Groups(g).vertices), 1:Tv.nGroups), 1);
-    row    = find(st.gIdx == gPhase, 1) - 1;   % 0-based
-    ctrl.jListGroups.setSelectedIndex(row);  drawnow;
+    iWinNode = find(arrayfun(@(k) strcmp(st.nodeInfo(k).kind,'window') && st.nodeInfo(k).g==gBand && st.nodeInfo(k).w==bestW, 1:numel(st.nodeInfo)), 1);
+    ctrl.jTree.setSelectionPath(javax.swing.tree.TreePath(st.nodeList{iWinNode}.getPath()));
+    drawnow;
     nOcc = ctrl.jListOccur.getModel().getSize();
-    % select first occurrence -> highlight marker
+    % select first atom in the window -> highlight
     ctrl.jListOccur.setSelectedIndex(0);  drawnow;
     hSel = findobj(hFig, 'Tag', 'AtomSel');
     selOn = strcmp(get(hSel,'Visible'), 'on');
-    ok3 = ishandle(hFig) && (nMark==4) && (nGroupRows==5) && (nOcc>0) && selOn;
-    fprintf('T3 panel: markers=%d groupRows=%d occ=%d highlight=%d => %s\n', nMark, nGroupRows, nOcc, selOn, PF{ok3+1});
+    ok3 = ishandle(hFig) && (nMark==4) && (nStacks==1) && (nWindows==8) && (nOcc>0) && selOn;
+    fprintf('T3 panel: markers=%d stacks=%d windows=%d winAtoms=%d highlight=%d => %s\n', nMark, nStacks, nWindows, nOcc, selOn, PF{ok3+1});
     pass = pass && ok3;
 
     % cleanup
