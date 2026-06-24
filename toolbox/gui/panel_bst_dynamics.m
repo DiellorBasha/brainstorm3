@@ -43,49 +43,54 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     import java.awt.*;
     import javax.swing.*;
     import org.brainstorm.list.*;
+    import org.brainstorm.icon.*;
     fontSize = java_scaled('value', 11);
 
+    % The Dynamics panel will hold several sections; the Atoms table is one of them.
     jPanelNew = gui_component('Panel');
-    jPanelTop = gui_component('Panel');  jPanelNew.add(jPanelTop, BorderLayout.NORTH);
 
-    % ===== MENU BAR: File, Atoms (+ small toolbar) =====
-    jMenuBar = gui_component('MenuBar', jPanelTop, BorderLayout.NORTH);
-    jMenuFile = gui_component('Menu', jMenuBar, [], 'File', [], [], [], 11);
-    gui_component('MenuItem', jMenuFile, [], 'Open dynamics table...', [], [], @(h,e)bst_call(@FileOpen));
-    gui_component('MenuItem', jMenuFile, [], 'Save',                   [], [], @(h,e)bst_call(@FileSave));
-    gui_component('MenuItem', jMenuFile, [], 'Save as...',             [], [], @(h,e)bst_call(@FileSaveAs));
-    jMenuAtoms = gui_component('Menu', jMenuBar, [], 'Atoms', [], [], [], 11);
-    gui_component('MenuItem', jMenuAtoms, [], 'Add group',    [], [], @(h,e)bst_call(@AtomAddGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Rename group', [], [], @(h,e)bst_call(@AtomRenameGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Delete group', [], [], @(h,e)bst_call(@AtomDeleteGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Set color...', [], [], @(h,e)bst_call(@AtomSetColor));
+    % ===== ATOMS section (own bordered/titled component, like Events in Record) =====
+    jPanelAtoms = gui_component('Panel');
+    jPanelAtoms.setBorder(BorderFactory.createCompoundBorder( ...
+        BorderFactory.createEmptyBorder(0,7,7,7), java_scaled('titledborder', 'Atoms')));
+
+    % --- menu bar: File, Atoms (ICON_MENU + per-item icons, like Record) ---
+    jMenuBar = gui_component('MenuBar', jPanelAtoms, BorderLayout.NORTH);
+    jMenuBar.setPreferredSize(java_scaled('dimension', 20, 20));
+    jMenuFile = gui_component('Menu', jMenuBar, [], 'File', IconLoader.ICON_MENU, [], [], 11);
+    gui_component('MenuItem', jMenuFile, [], 'Open dynamics table...', IconLoader.ICON_FOLDER_OPEN, [], @(h,e)bst_call(@FileOpen));
+    jMenuFile.addSeparator();
+    gui_component('MenuItem', jMenuFile, [], 'Save',       IconLoader.ICON_SAVE, [], @(h,e)bst_call(@FileSave));
+    gui_component('MenuItem', jMenuFile, [], 'Save as...', IconLoader.ICON_SAVE, [], @(h,e)bst_call(@FileSaveAs));
+    jMenuAtoms = gui_component('Menu', jMenuBar, [], 'Atoms', IconLoader.ICON_MENU, [], [], 11);
+    gui_component('MenuItem', jMenuAtoms, [], 'Add group',    IconLoader.ICON_EVT_TYPE_ADD,     [], @(h,e)bst_call(@AtomAddGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Rename group', IconLoader.ICON_EDIT,             [], @(h,e)bst_call(@AtomRenameGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Delete group', IconLoader.ICON_EVT_TYPE_DEL,     [], @(h,e)bst_call(@AtomDeleteGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Set color',    IconLoader.ICON_COLOR_SELECTION,  [], @(h,e)bst_call(@AtomSetColor));
     jMenuAtoms.addSeparator();
-    gui_component('MenuItem', jMenuAtoms, [], 'Sort by name', [], [], @(h,e)bst_call(@()AtomSort('name')));
-    gui_component('MenuItem', jMenuAtoms, [], 'Sort by time', [], [], @(h,e)bst_call(@()AtomSort('time')));
-    jToolbar = gui_component('Toolbar', jMenuBar);
-    gui_component('ToolbarButton', jToolbar, [], 'Open',    [], 'Open a dynamics table', @(h,e)bst_call(@FileOpen));
-    gui_component('ToolbarButton', jToolbar, [], 'Save',    [], 'Save the dynamics table', @(h,e)bst_call(@FileSave));
-    gui_component('ToolbarButton', jToolbar, [], '+ Group', [], 'Add an atom group', @(h,e)bst_call(@AtomAddGroup));
+    jMenuSort = gui_component('Menu', jMenuAtoms, [], 'Sort groups', IconLoader.ICON_EVT_TYPE, [], []);
+    gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
+    gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
 
-    % ===== SPLIT PANE: colored group list | occurrence list (Events-section components) =====
+    % --- split pane: colored group list | occurrence list (Events-section components) ---
     jListGroups = JList();
     jListGroups.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     jListGroups.setCellRenderer(BstColorListRenderer(fontSize));
     java_setcb(jListGroups, 'ValueChangedCallback', @(h,e)GroupSel_Callback());
-    jScrollGroups = JScrollPane(jListGroups);
-    jScrollGroups.setBorder([]);
+    jScrollGroups = JScrollPane(jListGroups);  jScrollGroups.setBorder([]);
 
     jListOccur = JList();
     jListOccur.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     jListOccur.setCellRenderer(BstStringListRenderer(fontSize));
     java_setcb(jListOccur, 'ValueChangedCallback', @(h,e)OccurSel_Callback());
-    jScrollOccur = JScrollPane(jListOccur);
-    jScrollOccur.setBorder([]);
+    jScrollOccur = JScrollPane(jListOccur);  jScrollOccur.setBorder([]);
 
     jSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, jScrollGroups, jScrollOccur);
     jSplit.setResizeWeight(0.6);  jSplit.setDividerSize(java_scaled('value', 4));  jSplit.setBorder([]);
-    jPanelNew.add(jSplit, BorderLayout.CENTER);
+    jSplit.setPreferredSize(java_scaled('dimension', 340, 420));
+    jPanelAtoms.add(jSplit, BorderLayout.CENTER);
 
+    jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, ...
         struct('jListGroups',jListGroups, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms));
 end
