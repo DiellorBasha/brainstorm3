@@ -51,11 +51,19 @@ returns the display-filtered source when `FullSourcesEnabled` is on — so one b
 the time series and the Helmholtz 3D. Re-clicking the active band (or none) disables the filter.
 The selected band is the atom's **frequency coordinate**.
 
-### Space section (Increment 2 — not now)
-The view_helmholtz engine already provides eigenfilter **Smooth** (`bst_eigfilter_kernel`,
-view_helmholtz.m:109) and **Φ/Ψ** = divergence/curl. Increment 2 folds those controls into the panel
-as the bordered "Space" section and extends the operator palette via `bst_operators`
-(gradient/divergence/curl/Laplacian). Until then, the linked Helmholtz panel *is* the Space control.
+### Space section (Increment 2 — DONE)
+Bordered "Space" section between Frequency and Atoms, driving the linked Helmholtz figure via
+`view_helmholtz('SetSmoothing'/'SetComponent', hFig, …)`:
+- **Smooth** = eigenfilter low-pass (the **scale** axis): a checkbox + kernel combobox + a parameter
+  slider built with the SAME `panel_eigenfilter_design` machinery the Helmholtz panel uses (the 'heat'
+  kernel's `t` slider = *Scale*). Built at `SetTarget` from `St.Lambda` read off the Helmholtz figure.
+- **Op** = differential operator: Φ (Potential / divergence) and Ψ (Stream / curl) toggles, mutually
+  exclusive, all-off = Total |J| — `view_helmholtz('SetComponent', …, 'Irrot'/'Solen'/'Total')`.
+- The standalone Helmholtz panel is hidden on launch (`gui_hide('Helmholtz')`); the figure stays live
+  and the Dynamics panel's Space section is its sole controller. The chosen operator/scale are stashed
+  on the atom target (`st.curOp`, `st.curScale`) as the atom's space/scale coordinates.
+- Extending the operator palette to gradient/Laplacian (full `bst_operators`) is a later refinement —
+  div/curl (Φ/Ψ) are the core differential quantities for a source vector field.
 
 ## Out of scope (later)
 - Atom storage: writing the manipulated field's extrema at the chosen (band, scale, operator) as atoms.

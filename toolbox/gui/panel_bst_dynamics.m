@@ -107,11 +107,30 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         jBands(i) = jb;
     end
     jCtrl.add(jFreq);
+
+    % --- SPACE section: eigenfilter smoothing (scale) + differential operator ---
+    % Drives the linked Helmholtz source 3D via view_helmholtz verbs. The eigenfilter UI
+    % is the SAME panel_eigenfilter_design machinery the Helmholtz panel uses (no new DSP).
+    jSpace = gui_river([2 2], [0 7 2 7], 'Space');
+    jSpaceSmoothOn = gui_component('checkbox', jSpace, '', 'Smooth', [], 'Eigenfilter low-pass on the source (spatial scale)', @(h,e)bst_call(@OnSpaceSmooth));
+    [spaceKeys, spaceDisp] = panel_eigenfilter_design('Kernels');
+    jSpaceKernel = gui_component('combobox', jSpace, 'tab hfill', [], {spaceDisp}, [], [], []);
+    iHeat = find(strcmp(spaceKeys,'heat'), 1);  if ~isempty(iHeat), jSpaceKernel.setSelectedIndex(iHeat-1); end
+    java_setcb(jSpaceKernel, 'ActionPerformedCallback', @(h,e)bst_call(@OnSpaceKernel));
+    jSpaceParams = gui_river([2 2], [0 2 0 2]);
+    jSpace.add('br hfill', jSpaceParams);
+    gui_component('label', jSpace, 'br', 'Op: ', [], [], [], []);
+    jSpacePot = gui_component('toggle', jSpace, '', char(934), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Potential \Phi (divergence: sources / sinks)', @(h,e)bst_call(@()OnSpaceComp('Irrot')));
+    jSpaceStr = gui_component('toggle', jSpace, '', char(936), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Stream \Psi (curl: vortices)', @(h,e)bst_call(@()OnSpaceComp('Solen')));
+    jCtrl.add(jSpace);
+
     jPanelNew.add(jCtrl, BorderLayout.NORTH);
 
     jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
-    bstPanelNew = BstPanel(panelName, jPanelNew, ...
-        struct('jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands));
+    bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
+        'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands, ...
+        'jSpaceSmoothOn',jSpaceSmoothOn, 'jSpaceKernel',jSpaceKernel, 'SpaceKernelKeys',{spaceKeys}, ...
+        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr));
 end
 
 
@@ -146,13 +165,71 @@ function b = i_bands()
 end
 
 
+%% ===== SPACE controls -> drive the linked Helmholtz figure (view_helmholtz verbs) =====
+function OnSpaceSmooth()
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || isempty(st.Lambda) || ~ishandle(st.hFig), return; end
+    name   = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
+    params = panel_eigenfilter_design('ReadParams', ctrl.jSpaceParams, st.Lambda);
+    view_helmholtz('SetSmoothing', st.hFig, ctrl.jSpaceSmoothOn.isSelected(), name, params);
+    st.curScale = struct('on',ctrl.jSpaceSmoothOn.isSelected(), 'name',name, 'params',params);
+    setappdata(0, 'DynamicsTarget', st);
+end
+function OnSpaceKernel()
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || isempty(st.Lambda), return; end
+    key = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
+    panel_eigenfilter_design('BuildSliders', ctrl.jSpaceParams, key, st.Lambda, @() OnSpaceSmooth());
+    OnSpaceSmooth();
+end
+function OnSpaceComp(which)
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    if strcmp(which, 'Irrot')
+        if ctrl.jSpacePot.isSelected(), ctrl.jSpaceStr.setSelected(false); name = 'Irrot'; else, name = 'Total'; end
+    else
+        if ctrl.jSpaceStr.isSelected(), ctrl.jSpacePot.setSelected(false); name = 'Solen'; else, name = 'Total'; end
+    end
+    view_helmholtz('SetComponent', st.hFig, name);
+    st.curOp = name;  setappdata(0, 'DynamicsTarget', st);   % the atom's operator coordinate
+end
+function [ctrl, st] = i_cs()
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    st   = getappdata(0, 'DynamicsTarget');
+end
+function i_space_enable(ctrl, tf)
+    for f = {'jSpaceSmoothOn','jSpaceKernel','jSpacePot','jSpaceStr'}
+        if isfield(ctrl, f{1}) && ~isempty(ctrl.(f{1})), ctrl.(f{1}).setEnabled(tf); end
+    end
+end
+
+
 %% ===== SET TARGET (called by view_dynamics) =====
 function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
-        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[]));
+        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[]));
+    SetupSpace(hFig);
     BuildTree();
+end
+
+
+%% ===== SPACE controls: bind to the linked Helmholtz figure (or disable) =====
+function SetupSpace(hFig)
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    st   = getappdata(0, 'DynamicsTarget');
+    if isempty(ctrl) || ~isfield(ctrl, 'jSpaceParams'), return; end
+    St = [];
+    if ~isempty(hFig) && ishandle(hFig), St = getappdata(hFig, 'HelmholtzState'); end
+    if ~isempty(St) && isfield(St, 'Lambda') && ~isempty(St.Lambda)
+        st.Lambda = St.Lambda;  setappdata(0, 'DynamicsTarget', st);
+        key = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
+        panel_eigenfilter_design('BuildSliders', ctrl.jSpaceParams, key, st.Lambda, @() OnSpaceSmooth());
+        i_space_enable(ctrl, true);
+    else
+        i_space_enable(ctrl, false);   % fallback surface (no source 3D) -> Space inert
+    end
 end
 
 

@@ -88,7 +88,10 @@ function varargout = view_dynamics( varargin )
     Redraw(hFig, T);
 
     % ===== OPEN THE PANEL (docked tools tab, like Record/Helmholtz) =====
+    % The Dynamics panel's Space section now drives the Helmholtz figure, so hide the
+    % standalone Helmholtz panel (the figure + its state stay live).
     try, gui_hide('Dynamics'); catch, end %#ok<CTCH>
+    try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     bstPanel = panel_bst_dynamics('CreatePanel');
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Dynamics', 0); catch, end %#ok<CTCH>
