@@ -152,6 +152,26 @@ function test_dynamics_atoms()
     fprintf('T5 detect: band-window=%d nWin=%d phaseChildren=%d temporal=%d recordKept=%d => %s\n', ~isempty(gW), size(Td.Groups(gW).times,2), numel(chN), temporal, streamKept, PF{ok5+1});
     pass = pass && ok5;
 
+    % T6: AttachRegion + Redraw -> region patch + seed marker on the cortex (capture render path)
+    st = getappdata(0,'DynamicsTarget');  Tt = st.T;
+    gPh = find(arrayfun(@(k) ~isempty(Tt.Groups(k).phase) && ~isempty(Tt.Groups(k).times), 1:Tt.nGroups), 1);
+    SurfaceFile = Tt.SurfaceFile;
+    SurfT = in_tess_bst(SurfaceFile, 0);
+    seed = round(size(SurfT.Vertices,1)/3);
+    regionVerts = tess_scout_area(SurfaceFile, seed, 0.008);     % 8 mm geodesic disk
+    pos = SurfT.Vertices(seed,:);  hemi = 1 + (pos(2) < 0);
+    G6  = bst_dynamics('AttachRegion', Tt.Groups(gPh), 1, regionVerts, seed, pos, hemi);
+    Tt.Groups(gPh) = G6;  st.T = Tt;  setappdata(0, 'DynamicsTarget', st);
+    view_dynamics('Redraw', hFig, st.T);  drawnow;
+    nReg6 = numel(findobj(hFig, '-regexp', 'Tag', sprintf('^AtomRegion%d_', gPh)));
+    nMk6  = numel(findobj(hFig, 'Tag', sprintf('AtomMarker%d', gPh)));
+    fr6 = fullfile(bst_get('BrainstormTmpDir'), 'dyn_region_t6.mat');
+    bst_dynamics('Save', fr6, st.T);  Tr6 = bst_dynamics('Load', fr6);
+    rt6 = isequal(Tr6.Groups(gPh).region{1}, double(regionVerts(:)'));
+    ok6 = ~isempty(regionVerts) && (nReg6>=1) && (nMk6==1) && isfinite(G6.vertices(1)) && rt6;
+    fprintf('T6 capture-render: regionVerts=%d patch=%d marker=%d roundtrip=%d => %s\n', numel(regionVerts), nReg6, nMk6, rt6, PF{ok6+1});
+    pass = pass && ok6;
+
     % cleanup
     if ishandle(hFig), close(hFig); end
     if exist(dynFile,'file'), delete(dynFile); end

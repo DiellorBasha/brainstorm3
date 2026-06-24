@@ -73,6 +73,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
     jMenuAtoms.addSeparator();
     gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
+    gui_component('MenuItem', jMenuAtoms, [], 'Capture region -> active atom', IconLoader.ICON_SCOUT_NEW, [], @(h,e)bst_call(@OnCaptureRegion));
 
     % --- split: band stack TREE (left) | flat per-window atom list (right) ---
     jTree = java_create('javax.swing.JTree');
@@ -133,6 +134,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('label', jRec, '', 'Peaks: ', [], [], [], []);
     jPeaks = gui_component('text', jRec, '', '3', {Dimension(java_scaled('value',28), BH)}, 'Extrema kept per sign', []);
     gui_component('button', jRec, 'tab hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor time as atoms', @(h,e)bst_call(@OnRecord));
+    gui_component('button', jRec, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the selected Scout''s vertices into the selected atom (localizes a time-only marker)', @(h,e)bst_call(@OnCaptureRegion));
     jCtrl.add(jRec);
 
     jPanelNew.add(jCtrl, BorderLayout.NORTH);
@@ -355,6 +357,45 @@ function OnRecord() %#ok<DEFNU>
     i_apply(st);                                                  % redraw markers + rebuild tree (stores st)
     if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>  % auto-save
     bst_progress('text', sprintf('Recorded %d %s atom(s) at %.3f s', nNew, Func, tCur));
+end
+
+%% ===== CAPTURE: the selected Scout's geodesic region -> the active (selected) atom =====
+% The active atom is the occurrence selected in the right-hand list. Snapshots the currently
+% selected Scout's vertices into that occurrence (region + seed), localizing a time-only marker.
+function OnCaptureRegion() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    if isempty(st.occMap)
+        java_dialog('warning', 'Select an atom in the list first.', 'Capture region');  return;
+    end
+    row = ctrl.jListOccur.getSelectedIndex() + 1;
+    if (row < 1) || (row > size(st.occMap,1))
+        java_dialog('warning', 'Select an atom in the list first.', 'Capture region');  return;
+    end
+    g = st.occMap(row,1);  o = st.occMap(row,2);
+    if (size(st.T.Groups(g).times,1) ~= 1)
+        java_dialog('warning', 'Select a single atom, not a time window.', 'Capture region');  return;
+    end
+    SurfaceFile = st.T.SurfaceFile;
+    if isempty(SurfaceFile) && ~isempty(st.T.Groups), SurfaceFile = st.T.Groups(g).SurfaceFile; end
+    % the geodesic region = the currently selected Scout (grown with the Scout "Area" tool)
+    [sScout, ~, sSurf] = panel_scout('GetSelectedScouts');
+    if isempty(sScout) || isempty(sScout(1).Vertices)
+        java_dialog('warning', 'Grow a region with the Scout "Area" tool first.', 'Capture region');  return;
+    end
+    sScout = sScout(1);
+    if ~isempty(sSurf) && ~isempty(SurfaceFile) && ~file_compare(sSurf.FileName, SurfaceFile)
+        java_dialog('warning', 'The selected region is on a different surface than the atoms.', 'Capture region');  return;
+    end
+    if ~isempty(sScout.Seed), seed = double(sScout.Seed(1)); else, seed = double(sScout.Vertices(1)); end
+    Surf = getappdata(st.hFig, 'DynamicsSurf');
+    if isempty(Surf), Surf = in_tess_bst(SurfaceFile, 0);  setappdata(st.hFig, 'DynamicsSurf', Surf); end
+    pos  = Surf.Vertices(seed, :);
+    hemi = 1 + (pos(2) < 0);                                       % SCS Y>0 = left
+    st.T.Groups(g) = bst_dynamics('AttachRegion', st.T.Groups(g), o, sScout.Vertices, seed, pos, hemi);
+    i_apply(st);                                                   % redraw markers/regions + rebuild tree
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Captured %d-vertex region into "%s"', numel(sScout.Vertices), st.T.Groups(g).label));
 end
 
 function n = i_peaks(ctrl)
