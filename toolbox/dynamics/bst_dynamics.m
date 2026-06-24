@@ -86,6 +86,7 @@ end
 %% ===== FLATTEN (all SPATIAL occurrences across groups, in a stable order) =====
 % Returns one row per occurrence that has a position (windows with no vertex are
 % skipped). gIdx/oIdx index back into T.Groups(gIdx) column oIdx.
+% NaN-padded (unlocalized) occurrences produced by AttachRegion are silently skipped.
 function [pos, color, gIdx, oIdx, labels] = Flatten(T)
     pos = zeros(0,3);  color = zeros(0,3);  gIdx = [];  oIdx = [];  labels = {};
     for g = 1:numel(T.Groups)
@@ -100,6 +101,7 @@ function [pos, color, gIdx, oIdx, labels] = Flatten(T)
         gIdx  = [gIdx;  g*ones(n,1)];            %#ok<AGROW>
         oIdx  = [oIdx;  (1:n)'];                 %#ok<AGROW>
         for o = 1:n
+            if any(~isfinite(G.pos(o,:))), continue; end   % skip unlocalized (NaN) occurrences
             labels{end+1} = sprintf('%.3fs  v%d', G.times(1,o), G.vertices(o)); %#ok<AGROW>
         end
     end
@@ -141,6 +143,50 @@ function vPk = i_local_ext(field, VertConn, nPeaks, sgn)
     cand = find(f >= nbMax);                                % >= all neighbours
     [~, ord] = sort(f(cand), 'descend');
     vPk = cand(ord(1:min(nPeaks, numel(cand))));
+end
+
+
+%% ===== ATTACH REGION (localize occurrence o with a geodesic region + seed) =====
+% Pads the per-occurrence arrays to full length N = size(G.times,2), then writes occurrence o's
+% seed (vertices/pos/hemi) and region. A time-only marker (empty vertices/pos) becomes partially
+% localized: occurrence o gains a finite seed + region; the other occurrences stay NaN/[] (time only).
+%   o           occurrence column to localize (1..N)
+%   regionVerts [1 x k] cortex vertex indices of the geodesic disk (snapshot copy)
+%   seed        scalar seed vertex index
+%   pos         [1 x 3] seed position (SCS)
+%   hemi        scalar 1=L 2=R
+function G = AttachRegion(G, o, regionVerts, seed, pos, hemi) %#ok<DEFNU>
+    N = size(G.times, 2);
+    if (o < 1) || (o > N)
+        error('bst_dynamics:AttachRegion', 'Occurrence %d out of range (N=%d).', o, N);
+    end
+    G.vertices = i_pad_row(G.vertices, N);
+    G.hemi     = i_pad_row(G.hemi,     N);
+    G.strength = i_pad_row(G.strength, N);
+    G.charge   = i_pad_row(G.charge,   N);
+    G.pos      = i_pad_pos(G.pos,      N);
+    G.region   = i_pad_cell(G.region,  N);
+    G.vertices(o) = double(seed);
+    G.hemi(o)     = double(hemi);
+    G.pos(o, :)   = double(pos(:)');
+    G.region{o}   = double(regionVerts(:)');
+    G.type = 'simple';
+end
+
+% Pad a [1 x m] numeric row to length N with NaN ([] -> all-NaN).
+function v = i_pad_row(v, N)
+    if isempty(v),          v = nan(1, N);
+    elseif (numel(v) < N),  v(end+1:N) = NaN;  end
+end
+% Pad a [m x 3] position matrix to N rows with NaN ([] -> all-NaN).
+function p = i_pad_pos(p, N)
+    if isempty(p),           p = nan(N, 3);
+    elseif (size(p,1) < N),  p(end+1:N, :) = NaN;  end
+end
+% Pad a {1 x m} cell to length N with [] ({} -> all-empty).
+function c = i_pad_cell(c, N)
+    if isempty(c),          c = cell(1, N);
+    elseif (numel(c) < N),  c(end+1:N) = {[]};  end
 end
 
 

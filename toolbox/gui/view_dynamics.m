@@ -124,14 +124,15 @@ function DynamicsFile = AtomsFromResult(ResultsFile)
 end
 
 
-%% ===== REDRAW MARKERS FROM A (possibly edited) TABLE =====
-function Redraw(hFig, T)
+%% ===== REDRAW MARKERS + REGIONS FROM A (possibly edited) TABLE =====
+function Redraw(hFig, T, showPhase)
+    if (nargin < 3) || isempty(showPhase), showPhase = [1 1 1 1]; end
     if isempty(hFig) || ~ishandle(hFig), return; end
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
     if isempty(hAxes), return; end
     hAxes = hAxes(1);
-    set(hAxes, 'NextPlot', 'add');   % low-level line() never resets the cortex
-    % Cache the surface (normals) per figure to avoid reloading on every edit
+    set(hAxes, 'NextPlot', 'add');   % low-level line()/patch() never resets the cortex
+    % Cache the surface (normals + faces) per figure to avoid reloading on every edit
     Surf = getappdata(hFig, 'DynamicsSurf');
     if isempty(Surf)
         SurfaceFile = T.SurfaceFile;  if isempty(SurfaceFile), SurfaceFile = T.Groups(1).SurfaceFile; end
@@ -139,30 +140,72 @@ function Redraw(hFig, T)
         setappdata(hFig, 'DynamicsSurf', Surf);
     end
     hasNorm = isfield(Surf, 'VertNormals') && ~isempty(Surf.VertNormals);
-    % Clear old markers + selection
+    nVert   = size(Surf.Vertices, 1);
+    % Clear old markers, regions, selection
     delete(findobj(hAxes, '-regexp', 'Tag', '^AtomMarker'));
+    delete(findobj(hAxes, '-regexp', 'Tag', '^AtomRegion'));
     delete(findobj(hAxes, 'Tag', 'AtomSel'));
-    % One marker set per spatial group
+    % One marker set + region patches per spatial group
     GroupsPosOff = cell(1, numel(T.Groups));
     for g = 1:numel(T.Groups)
         G = T.Groups(g);
-        if isempty(G.pos)
-            GroupsPosOff{g} = zeros(0,3);   % temporal-only group (window): no markers
+        pk = i_phase_index(G.phase);
+        if (pk >= 1) && ~showPhase(pk)
+            GroupsPosOff{g} = zeros(0,3);   % phase filtered out: no marker, no region
             continue;
         end
-        vtx = double(G.vertices(:));
-        if hasNorm, nrm = Surf.VertNormals(vtx, :);
-        else,       nrm = G.pos ./ max(sqrt(sum(G.pos.^2,2)), eps); end
-        po = G.pos + 0.002 * nrm;           % ~2 mm out, clears the surface
+        if isempty(G.pos)
+            GroupsPosOff{g} = zeros(0,3);   % temporal-only group (no localized occurrence)
+            continue;
+        end
+        nOcc = size(G.pos, 1);
+        col  = G.color;  if isempty(col), col = [1 0 1]; end
+        % per-occurrence offset seed position; unlocalized (NaN) rows stay NaN -> no marker
+        po = nan(nOcc, 3);
+        for o = 1:nOcc
+            p = G.pos(o, :);
+            if any(~isfinite(p)), continue; end
+            if hasNorm && (o <= numel(G.vertices)) && isfinite(G.vertices(o))
+                nrm = Surf.VertNormals(G.vertices(o), :);
+            else
+                nrm = p ./ max(sqrt(sum(p.^2)), eps);
+            end
+            po(o, :) = p + 0.002 * nrm;     % ~2 mm out, clears the surface
+        end
         GroupsPosOff{g} = po;
-        col = G.color;  if isempty(col), col = [1 0 1]; end
         line(po(:,1), po(:,2), po(:,3), 'Parent', hAxes, ...
             'Marker','o', 'MarkerFaceColor',col, 'MarkerEdgeColor',[0 0 0], ...
             'MarkerSize',6, 'LineStyle','none', 'Tag', sprintf('AtomMarker%d', g));
+        % captured regions: a translucent patch of faces fully inside region{o}
+        if isfield(G, 'region') && ~isempty(G.region)
+            for o = 1:min(nOcc, numel(G.region))
+                rv = G.region{o};
+                if isempty(rv), continue; end
+                inReg = false(nVert, 1);  inReg(rv) = true;
+                fIn = all(inReg(Surf.Faces), 2);
+                if ~any(fIn), continue; end
+                patch('Faces', Surf.Faces(fIn,:), 'Vertices', Surf.Vertices, 'Parent', hAxes, ...
+                    'FaceColor', col, 'FaceAlpha', 0.35, 'EdgeColor', 'none', ...
+                    'Tag', sprintf('AtomRegion%d_%d', g, o));
+            end
+        end
     end
     setappdata(hFig, 'GroupsPosOff', GroupsPosOff);
     % Selection marker (hidden until an occurrence is picked)
     line(NaN, NaN, NaN, 'Parent', hAxes, ...
         'Marker','o', 'MarkerSize',13, 'MarkerEdgeColor',[1 1 0], ...
         'LineWidth',2, 'LineStyle','none', 'Visible','off', 'Tag','AtomSel');
+end
+
+
+% Phase name -> filter index (peak=1 trough=2 rising=3 falling=4; 0 = not a phase group).
+function k = i_phase_index(ph)
+    if isempty(ph), k = 0; return; end
+    switch lower(char(ph))
+        case 'peak',    k = 1;
+        case 'trough',  k = 2;
+        case 'rising',  k = 3;
+        case 'falling', k = 4;
+        otherwise,      k = 0;
+    end
 end
