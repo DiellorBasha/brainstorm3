@@ -1911,6 +1911,7 @@ function SetSelectionState(isSelected)
         % Set 3DViz figures in 'SelectingCorticalSpot' mode
         for hFig = hFigures
             setappdata(hFig, 'isSelectingCorticalSpot', 1);
+            setappdata(hFig, 'isDynamicsGeodesicPick', 0);   % mutual exclusion with dynamics Region tool
             set(hFig, 'Pointer', 'cross');
         end
     % Stop scout selection
@@ -3095,6 +3096,7 @@ function GeodesicToolToggle() %#ok<DEFNU>
         SetSelectedScouts([]);
         for hFig = hFigures
             setappdata(hFig, 'isSelectingCorticalSpot', 1);
+            setappdata(hFig, 'isDynamicsGeodesicPick', 0);   % mutual exclusion with dynamics Region tool
             set(hFig, 'Pointer', 'cross');
         end
         GeodesicPending([]);            % the next click is endpoint A

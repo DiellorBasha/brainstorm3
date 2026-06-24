@@ -32,5 +32,11 @@ function test_geodesic_move()
     fprintf('T3 scroll passthrough (tool off): consumed=%d => %s\n', passthrough, PF{ok3+1});
     pass = pass && ok3;
 
+    % T4: scout pick-mode clears the dynamics pick flag (bidirectional mutual exclusion)
+    src2 = fileread(which('panel_scout'));
+    ok4 = ~isempty(strfind(src2, 'isDynamicsGeodesicPick')); %#ok<STREMP>
+    fprintf('T4 mutual-exclusion: scout clears dyn flag=%d => %s\n', ok4, PF{ok4+1});
+    pass = pass && ok4;
+
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end
