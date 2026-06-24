@@ -65,6 +65,40 @@ function test_bst_atom()
     fprintf('T2 Set round-trip: time=%d freq=%d source=%d scale=%d => %s\n', rtT, rtF, rtS, rtK, PF{ok2+1});
     pass = pass && ok2;
 
+    % ---------- T3: read a real refphase-detected band group through bst_atom ----------
+    [linkFile, relData] = i_find_kernel_atom();
+    if isempty(linkFile)
+        fprintf('T3: SKIPPED (no unconstrained kernel link)\n');
+        fprintf('\n==== SUITE: %s ====\n', PF{pass+1});  return;
+    end
+    % build a band-window group exactly as OnDetect does: refphase on alpha
+    DataMat = in_bst_data(relData, 'F', 'Time');
+    ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', relData));
+    iMEG = channel_find(ChannelMat.Channel, 'MEG');
+    if isstruct(DataMat.F)
+        IO = db_template('ImportOptions');  IO.ImportMode='Time'; IO.UseCtfComp=1; IO.UseSsp=1;
+        IO.EventsMode='ignore'; IO.DisplayMessages=0; IO.RemoveBaseline='no';
+        [F, TimeVector] = in_fread(DataMat.F, ChannelMat, 1, [], iMEG, IO);
+    else
+        F = DataMat.F(iMEG,:);  TimeVector = DataMat.Time;
+    end
+    OPTIONS = process_evt_refphase('Compute');  OPTIONS.freqRange = [8 13];
+    [evt, ~] = process_evt_refphase('Compute', F, TimeVector, OPTIONS);
+    W = bst_dynamics('NewGroup', 'alpha (8-13 Hz)');
+    W.times = evt;  W.band = [8 13];  W.bandName = 'alpha';
+    % freq axis: center 10.5, extent 2.5, label alpha
+    lf = bst_atom('Get', W, 'freq');
+    okF = abs(lf.center-10.5)<1e-9 && abs(lf.extent-2.5)<1e-9 && strcmp(lf.label,'alpha') && strcmp(lf.state,'window');
+    % time axis: occ 1 is an extended window with center = mean(onset,offset), extent>0
+    lt = bst_atom('Get', W, 'time', 1);
+    okT = strcmp(lt.state,'window') && (lt.extent>0) && abs(lt.center-mean(evt(:,1)))<1e-9;
+    % source axis: a band-window group has no source -> unlocalized
+    ls = bst_atom('Get', W, 'source', 1);
+    okS = strcmp(ls.state,'unlocalized');
+    ok3 = (size(evt,2)>0) && okF && okT && okS;
+    fprintf('T3 real detect: nWin=%d freq=%d time=%d srcUnloc=%d => %s\n', size(evt,2), okF, okT, okS, PF{ok3+1});
+    pass = pass && ok3;
+
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end
 
@@ -73,4 +107,23 @@ function loc = i_loc(axis, c, w)
 end
 function loc = i_loc_lbl(axis, c, w, lbl)
     loc = i_loc(axis, c, w);  loc.label = lbl;
+end
+
+function [linkFile, relData] = i_find_kernel_atom()
+    linkFile = '';
+    relData = 'Subject01/S01_AEF_20131218_01_notch/data_block001_02.mat';
+    [sStudy, ~] = bst_get('DataFile', relData);
+    if isempty(sStudy), return; end
+    comments = {sStudy.Result.Comment};  fnames = {sStudy.Result.FileName};
+    isMN = ~cellfun(@isempty, regexp(comments, 'MN: MEG\(Unconstr\)', 'once')) & ...
+           ~cellfun(@isempty, regexp(fnames,   'KERNEL', 'once'));
+    for j = find(isMN)
+        try
+            r = in_bst_results(fnames{j}, 0, 'nComponents','ImagingKernel');
+            if (r.nComponents==3) && ~isempty(r.ImagingKernel)
+                linkFile = ['link|' fnames{j} '|' relData];  return;
+            end
+        catch
+        end
+    end
 end
