@@ -98,6 +98,28 @@ function test_dynamics_atoms()
     fprintf('T3 panel: markers=%d stacks=%d windows=%d winAtoms=%d highlight=%d => %s\n', nMark, nStacks, nWindows, nOcc, selOn, PF{ok3+1});
     pass = pass && ok3;
 
+    % T4: Record at cursor -> (band, Function) atom group accumulates (signed extrema)
+    ctrl.jBands(3).doClick();  drawnow;          % alpha band
+    ctrl.jSpaceStr.doClick();  drawnow;          % Psi (stream / curl) -> signed
+    ctrl.jPeaks.setText('2');  drawnow;
+    tRec = mean(Tv.Groups(gBand).times(:,bestW));
+    panel_time('SetCurrentTime', tRec);  drawnow;
+    nG0 = getappdata(0,'DynamicsTarget').T.nGroups;
+    panel_bst_dynamics('OnRecord');  drawnow;
+    st  = getappdata(0,'DynamicsTarget');
+    gS  = find(arrayfun(@(k) strcmp(st.T.Groups(k).Function,'stream') && strcmp(st.T.Groups(k).bandName,'alpha'), 1:st.T.nGroups), 1);
+    if isempty(gS), occ1 = 0;  chOK = false;
+    else,           occ1 = numel(st.T.Groups(gS).vertices);  chOK = any(st.T.Groups(gS).charge>0) && any(st.T.Groups(gS).charge<0);  end
+    newGroup = (st.T.nGroups == nG0+1);
+    panel_time('SetCurrentTime', tRec+0.05);  drawnow;     % step + record again -> accumulate
+    panel_bst_dynamics('OnRecord');  drawnow;
+    st = getappdata(0,'DynamicsTarget');
+    occ2 = 0;  if ~isempty(gS), occ2 = numel(st.T.Groups(gS).vertices);  end
+    ok4 = ~isempty(gS) && newGroup && (occ1>0) && chOK && (occ2>occ1) && (st.T.nGroups==nG0+1);
+    fprintf('T4 record: newGroup=%d Func=stream/alpha occ1=%d signed=%d accumulate(occ2=%d>occ1)=%d => %s\n', newGroup, occ1, chOK, occ2, occ2>occ1, PF{ok4+1});
+    pass = pass && ok4;
+    try, panel_filter('SetFilters',0,[],0,[],0,[],0,0); catch, end %#ok<CTCH>
+
     % cleanup
     if ishandle(hFig), close(hFig); end
     if exist(dynFile,'file'), delete(dynFile); end
