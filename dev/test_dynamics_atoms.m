@@ -120,6 +120,18 @@ function test_dynamics_atoms()
     pass = pass && ok4;
     try, panel_filter('SetFilters',0,[],0,[],0,[],0,0); catch, end %#ok<CTCH>
 
+    % T5: Detect (refphase) writes the temporal window skeleton for the selected band
+    st0 = getappdata(0,'DynamicsTarget');  haveBand = ~isempty(st0.curBand);   % alpha, from T4
+    panel_bst_dynamics('OnDetect');  drawnow;
+    st = getappdata(0,'DynamicsTarget');  Td = st.T;  parents = {Td.Groups.parent};
+    gW = find(cellfun(@isempty,parents) & arrayfun(@(k) strcmp(Td.Groups(k).bandName,'alpha') && size(Td.Groups(k).times,1)==2, 1:Td.nGroups), 1);
+    chN = [];  if ~isempty(gW), chN = find(strcmpi(parents, Td.Groups(gW).label)); end
+    temporal   = ~isempty(gW) && ~isempty(chN) && all(arrayfun(@(c) isempty(Td.Groups(c).vertices) && ~isempty(Td.Groups(c).times), chN));
+    streamKept = any(arrayfun(@(k) strcmp(Td.Groups(k).Function,'stream'), 1:Td.nGroups));   % T4 record group survives Detect
+    ok5 = haveBand && ~isempty(gW) && (numel(chN)==4) && temporal && streamKept;
+    fprintf('T5 detect: band-window=%d nWin=%d phaseChildren=%d temporal=%d recordKept=%d => %s\n', ~isempty(gW), size(Td.Groups(gW).times,2), numel(chN), temporal, streamKept, PF{ok5+1});
+    pass = pass && ok5;
+
     % cleanup
     if ishandle(hFig), close(hFig); end
     if exist(dynFile,'file'), delete(dynFile); end

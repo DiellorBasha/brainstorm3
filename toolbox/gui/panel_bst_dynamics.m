@@ -108,6 +108,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         jb  = gui_component('toggle', jFreq, '', bandDefs{i,3}, {Insets(0,0,0,0), Dimension(BW,BH)}, tip, @(h,e)bst_call(@()OnBand(i)));
         jBands(i) = jb;
     end
+    % Detect = run process_evt_refphase on the selected band -> the time-window skeleton
+    gui_component('button', jFreq, 'br hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
     jCtrl.add(jFreq);
 
     % --- SPACE section: eigenfilter smoothing (scale) + differential operator ---
@@ -171,6 +173,93 @@ function b = i_bands()
          'alpha',[8 13], char(945); ...
          'beta', [13 30],char(946); ...
          'gamma',[30 60],char(947)};
+end
+
+
+%% ===== DETECT: refphase time-window skeleton for the selected band =====
+% The FIRST atom creation: runs process_evt_refphase on the recording for the current
+% band and writes the temporal skeleton -- the band-window extended stack + the 4
+% phase-marker trains (time + phase, NO source). Space is added later by Record.
+function OnDetect() %#ok<DEFNU>
+    [~, st] = i_cs();
+    if isempty(st), return; end
+    band = i_field(st, 'curBand', []);  bandName = i_field(st, 'curBandName', '');
+    if isempty(band)
+        java_dialog('warning', ['Select a frequency band first (' char(948) '/' char(952) '/' char(945) '/' char(946) '/' char(947) ').'], 'Detect windows');
+        return;
+    end
+    DataFile = st.T.DataFile;
+    if isempty(DataFile)
+        for g = 1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
+    end
+    if isempty(DataFile)
+        java_dialog('warning', 'No recording (DataFile) is associated with this table.', 'Detect windows');  return;
+    end
+    bst_progress('start', 'Detect windows', sprintf('Running refphase on the %s band...', bandName));
+    ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', DataFile));
+    iMEG = channel_find(ChannelMat.Channel, 'MEG');
+    [F, TimeVector] = i_load_meg(DataFile, ChannelMat, iMEG);
+    if isempty(F)
+        bst_progress('stop');  java_dialog('error', 'Could not read the recording.', 'Detect windows');  return;
+    end
+    OPTIONS = process_evt_refphase('Compute');  OPTIONS.freqRange = band;
+    [evt, markers] = process_evt_refphase('Compute', F, TimeVector, OPTIONS);
+    bst_progress('stop');
+    if isempty(evt)
+        java_dialog('msgbox', sprintf('No %s windows detected (try a different band or threshold).', bandName), 'Detect windows');  return;
+    end
+    % rebuild the band's groups (replace any previous detection for this band)
+    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
+    st.T = i_remove_band(st.T, bandName);
+    W = bst_dynamics('NewGroup', winLabel);
+    W.type='extended';  W.times=evt;  W.epochs=ones(1,size(evt,2));  W.band=band;  W.bandName=bandName;
+    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
+    st.T = bst_dynamics('AddGroup', st.T, W);
+    phaseDefs = {'peak',[0.90 0.10 0.10]; 'trough',[0.10 0.25 0.90]; 'rising',[0.10 0.70 0.20]; 'falling',[0.95 0.55 0.10]};
+    for ip = 1:size(phaseDefs,1)
+        ph = phaseDefs{ip,1};  tt = markers.(ph);
+        if isempty(tt), continue; end
+        P = bst_dynamics('NewGroup', sprintf('%s_%s', bandName, ph));
+        P.type='simple';  P.parent=winLabel;  P.phase=ph;  P.times=tt(:)';  P.epochs=ones(1,numel(tt));
+        P.band=band;  P.bandName=bandName;  P.color=phaseDefs{ip,2};
+        P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
+        st.T = bst_dynamics('AddGroup', st.T, P);
+    end
+    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;          end
+    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile;     end
+    i_apply(st);                                                        % refresh tree (no cortex markers: temporal)
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Detected %d %s windows', size(evt,2), bandName));
+end
+
+% Load MEG sensor data (matrix [nMEG x nT] + time) for a data block or raw file.
+function [F, TimeVector] = i_load_meg(DataFile, ChannelMat, iMEG)
+    F = [];  TimeVector = [];
+    DataMat = in_bst_data(DataFile, 'F', 'Time');
+    if isstruct(DataMat.F)                                  % raw link
+        IO = db_template('ImportOptions');
+        IO.ImportMode='Time';  IO.UseCtfComp=1;  IO.UseSsp=1;  IO.EventsMode='ignore';  IO.DisplayMessages=0;  IO.RemoveBaseline='no';
+        [F, TimeVector] = in_fread(DataMat.F, ChannelMat, 1, [], iMEG, IO);
+    else                                                    % imported data block
+        F = DataMat.F(iMEG, :);  TimeVector = DataMat.Time;
+    end
+end
+
+% Drop the band's time-window group(s) (extended top-level, this bandName) + their phase
+% children, leaving recorded spatial groups (simple, with a Function) untouched.
+function T = i_remove_band(T, bandName)
+    if isempty(T.Groups), return; end
+    keep = true(1, numel(T.Groups));  winLabels = {};
+    for g = 1:numel(T.Groups)
+        G = T.Groups(g);  bn = G.bandName;  if isempty(bn), bn = ''; end
+        if isempty(G.parent) && strcmp(bn, bandName) && (size(G.times,1) == 2)
+            winLabels{end+1} = G.label;  keep(g) = false; %#ok<AGROW>
+        end
+    end
+    for g = 1:numel(T.Groups)
+        if any(strcmp(T.Groups(g).parent, winLabels)), keep(g) = false; end
+    end
+    T.Groups = T.Groups(keep);  T.nGroups = numel(T.Groups);
 end
 
 
@@ -458,19 +547,24 @@ function [rows, occMap] = i_window_atoms(T, gBand, w)
     times = [];  phases = {};  verts = [];  cc = [];  oo = [];
     for c = children(:)'
         Gc = T.Groups(c);
-        for o = 1:numel(Gc.vertices)
+        nO = size(Gc.times, 2);                 % iterate by occurrence (markers may have NO vertices)
+        for o = 1:nO
             t = Gc.times(1,o);
             if (t >= on - 1e-9) && (t <= off + 1e-9)
                 times(end+1)  = t;            %#ok<AGROW>
                 phases{end+1} = i_str(Gc.phase); %#ok<AGROW>
-                verts(end+1)  = Gc.vertices(o); %#ok<AGROW>
+                if (o <= numel(Gc.vertices)), verts(end+1) = Gc.vertices(o); else, verts(end+1) = NaN; end %#ok<AGROW>
                 cc(end+1) = c;  oo(end+1) = o; %#ok<AGROW>
             end
         end
     end
     [~, ord] = sort(times);
     for k = ord
-        rows{end+1} = sprintf(' %8.3fs  %-8s  v%d', times(k), phases{k}, verts(k)); %#ok<AGROW>
+        if isnan(verts(k))                      % temporal marker (no source yet): time + phase
+            rows{end+1} = sprintf(' %8.3fs  %-8s', times(k), phases{k}); %#ok<AGROW>
+        else
+            rows{end+1} = sprintf(' %8.3fs  %-8s  v%d', times(k), phases{k}, verts(k)); %#ok<AGROW>
+        end
         occMap(end+1,:) = [cc(k), oo(k), 0]; %#ok<AGROW>
     end
 end
