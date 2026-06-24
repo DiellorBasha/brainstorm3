@@ -1,14 +1,15 @@
 function varargout = panel_bst_dynamics( varargin )
 % PANEL_BST_DYNAMICS: Record-style panel for the spatiotemporal atom system (bst_dynamics).
 %
-% The atom-table component (increment 1), built by REUSING the Record panel's Events-section
-% UI components so it looks/behaves like Events: a File menu (open/save the dynamics_* table),
-% an Atoms menu (add/rename/delete/color/sort groups), and a JSplitPane with the colored group
-% list on the left (BstColorListRenderer; child phase groups indented under their window) and
-% the selected group's occurrence list on the right (BstStringListRenderer). Selecting an
-% occurrence highlights its marker on the cortex and jumps the recording time (like Record's
-% JumpToEvent). Docked as a tools tab; opened by view_dynamics. The temporal / spatial /
-% frequency / eigenmode axes fold in here in later increments.
+% The atom-table component (one bordered section of the future Dynamics panel). The LEFT is a
+% tree whose top-level band atom (e.g. "alpha (8-13 Hz)") is a STACK (ICON_DATA_LIST) that
+% expands to its time-window occurrences. Selecting a window lists, on the RIGHT, every
+% single-time atom whose time falls in that window -- FLAT, sorted by time, with a phase column
+% (peak / trough / rising / falling). Selecting an occurrence highlights its marker on the
+% cortex and jumps the recording time. A File menu opens/saves the dynamics_* table and an
+% Atoms menu adds/renames/deletes/colors/sorts band atoms. Docked as a tools tab; opened by
+% view_dynamics. The temporal / spatial / frequency / eigenmode axes fold in as sibling
+% sections in later increments.
 %
 % USAGE:  bstPanel = panel_bst_dynamics('CreatePanel')
 %                    panel_bst_dynamics('SetTarget', hFig, T)
@@ -46,7 +47,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     import org.brainstorm.icon.*;
     fontSize = java_scaled('value', 11);
 
-    % The Dynamics panel will hold several sections; the Atoms table is one of them.
     jPanelNew = gui_component('Panel');
 
     % ===== ATOMS section (own bordered/titled component, like Events in Record) =====
@@ -63,21 +63,25 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuFile, [], 'Save',       IconLoader.ICON_SAVE, [], @(h,e)bst_call(@FileSave));
     gui_component('MenuItem', jMenuFile, [], 'Save as...', IconLoader.ICON_SAVE, [], @(h,e)bst_call(@FileSaveAs));
     jMenuAtoms = gui_component('Menu', jMenuBar, [], 'Atoms', IconLoader.ICON_MENU, [], [], 11);
-    gui_component('MenuItem', jMenuAtoms, [], 'Add group',    IconLoader.ICON_EVT_TYPE_ADD,     [], @(h,e)bst_call(@AtomAddGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Rename group', IconLoader.ICON_EDIT,             [], @(h,e)bst_call(@AtomRenameGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Delete group', IconLoader.ICON_EVT_TYPE_DEL,     [], @(h,e)bst_call(@AtomDeleteGroup));
-    gui_component('MenuItem', jMenuAtoms, [], 'Set color',    IconLoader.ICON_COLOR_SELECTION,  [], @(h,e)bst_call(@AtomSetColor));
+    gui_component('MenuItem', jMenuAtoms, [], 'Add group',    IconLoader.ICON_EVT_TYPE_ADD,    [], @(h,e)bst_call(@AtomAddGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Rename group', IconLoader.ICON_EDIT,            [], @(h,e)bst_call(@AtomRenameGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Delete group', IconLoader.ICON_EVT_TYPE_DEL,    [], @(h,e)bst_call(@AtomDeleteGroup));
+    gui_component('MenuItem', jMenuAtoms, [], 'Set color',    IconLoader.ICON_COLOR_SELECTION, [], @(h,e)bst_call(@AtomSetColor));
     jMenuAtoms.addSeparator();
     jMenuSort = gui_component('Menu', jMenuAtoms, [], 'Sort groups', IconLoader.ICON_EVT_TYPE, [], []);
     gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
 
-    % --- split pane: colored group list | occurrence list (Events-section components) ---
-    jListGroups = JList();
-    jListGroups.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    jListGroups.setCellRenderer(BstColorListRenderer(fontSize));
-    java_setcb(jListGroups, 'ValueChangedCallback', @(h,e)GroupSel_Callback());
-    jScrollGroups = JScrollPane(jListGroups);  jScrollGroups.setBorder([]);
+    % --- split: band stack TREE (left) | flat per-window atom list (right) ---
+    jTree = java_create('javax.swing.JTree');
+    jTree.setRootVisible(0);  jTree.setShowsRootHandles(1);
+    jTree.getSelectionModel().setSelectionMode(javax.swing.tree.TreeSelectionModel.SINGLE_TREE_SELECTION);
+    jTree.setFont(Font('Monospaced', Font.PLAIN, fontSize));
+    rend = javax.swing.tree.DefaultTreeCellRenderer();   % band = data-list STACK icon; windows = leaf
+    rend.setClosedIcon(IconLoader.ICON_DATA_LIST);  rend.setOpenIcon(IconLoader.ICON_DATA_LIST);  rend.setLeafIcon(IconLoader.ICON_DATA);
+    jTree.setCellRenderer(rend);
+    java_setcb(jTree, 'ValueChangedCallback', @(h,e)TreeSel_Callback());
+    jScrollTree = JScrollPane(jTree);  jScrollTree.setBorder([]);
 
     jListOccur = JList();
     jListOccur.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -85,14 +89,14 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     java_setcb(jListOccur, 'ValueChangedCallback', @(h,e)OccurSel_Callback());
     jScrollOccur = JScrollPane(jListOccur);  jScrollOccur.setBorder([]);
 
-    jSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, jScrollGroups, jScrollOccur);
-    jSplit.setResizeWeight(0.6);  jSplit.setDividerSize(java_scaled('value', 4));  jSplit.setBorder([]);
-    jSplit.setPreferredSize(java_scaled('dimension', 340, 420));
+    jSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, jScrollTree, jScrollOccur);
+    jSplit.setResizeWeight(0.5);  jSplit.setDividerSize(java_scaled('value', 4));  jSplit.setBorder([]);
+    jSplit.setPreferredSize(java_scaled('dimension', 360, 420));
     jPanelAtoms.add(jSplit, BorderLayout.CENTER);
 
     jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, ...
-        struct('jListGroups',jListGroups, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms));
+        struct('jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms));
 end
 
 
@@ -100,73 +104,87 @@ end
 function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
-    setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, 'gIdx',[]));
-    BuildGroupList();
+    setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
+        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[]));
+    BuildTree();
 end
 
 
-%% ===== BUILD THE COLORED GROUP LIST (children indented under their window) =====
-function BuildGroupList()
-    import org.brainstorm.list.*;
+%% ===== BUILD THE BAND-STACK TREE =====
+% Top-level extended group = a STACK that expands to its time-window leaves.
+% Top-level simple group = a stack that expands to its single-atom leaves.
+function BuildTree()
+    import javax.swing.tree.*;
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
     if isempty(ctrl) || isempty(st), return; end
     T = st.T;
-    % Depth-first display order (top-level groups, then their nested children)
     parents = {T.Groups.parent};
-    order = [];  depth = [];  added = false(1, numel(T.Groups));
-    function addG(g, d)
-        if added(g), return; end
-        added(g) = true;  order(end+1) = g;  depth(end+1) = d; %#ok<AGROW>
-        for c = find(strcmpi(parents, T.Groups(g).label)), addG(c, d+1); end
+    root = DefaultMutableTreeNode('Atoms');
+    nodeList = {};  nodeInfo = struct('kind',{},'g',{},'w',{});
+    for g = find(cellfun(@isempty, parents))         % top-level (band) groups
+        G = T.Groups(g);
+        nWin = size(G.times, 2);
+        stackNode = DefaultMutableTreeNode(sprintf('%s  (%d)', G.label, nWin));
+        root.add(stackNode);
+        nodeList{end+1} = stackNode;  nodeInfo(end+1) = struct('kind','stack','g',g,'w',0); %#ok<AGROW>
+        isWin = (size(G.times,1) == 2);
+        for w = 1:nWin
+            if isWin
+                lab  = sprintf(' %.3f - %.3f s', G.times(1,w), G.times(2,w));
+                kind = 'window';
+            elseif (w <= numel(G.vertices))
+                lab  = sprintf(' %.3fs  v%d', G.times(1,w), G.vertices(w));
+                kind = 'atom';
+            else
+                lab  = sprintf(' %.3fs', G.times(1,w));  kind = 'atom';
+            end
+            leaf = DefaultMutableTreeNode(lab);
+            stackNode.add(leaf);
+            nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind',kind,'g',g,'w',w); %#ok<AGROW>
+        end
     end
-    for g = find(cellfun(@isempty, parents)), addG(g, 0); end
-    for g = find(~added), addG(g, 0); end
-    % Build the colored list model (disable the callback during the rebuild)
-    bak = java_getcb(ctrl.jListGroups, 'ValueChangedCallback');
-    java_setcb(ctrl.jListGroups, 'ValueChangedCallback', []);
-    model = javax.swing.DefaultListModel();
-    for k = 1:numel(order)
-        g = order(k);  G = T.Groups(g);
-        nOcc   = max(size(G.times,2), numel(G.vertices));
-        indent = repmat('   ', 1, depth(k));
-        item = BstListItem('', '', sprintf(' %s%s  (x%d)', indent, G.label, nOcc));
-        col = G.color;  if isempty(col), col = [0.6 0.6 0.6]; end
-        item.setColor(java.awt.Color(col(1), col(2), col(3)));
-        model.addElement(item);
-    end
-    ctrl.jListGroups.setModel(model);
-    ctrl.jListGroups.repaint();
-    java_setcb(ctrl.jListGroups, 'ValueChangedCallback', bak);
-    st.gIdx = order;  setappdata(0, 'DynamicsTarget', st);
+    ctrl.jTree.setModel(DefaultTreeModel(root));
+    for r = 0:(root.getChildCount()-1), ctrl.jTree.expandRow(r); end
+    st.nodeList = nodeList;  st.nodeInfo = nodeInfo;  st.occMap = [];
+    setappdata(0, 'DynamicsTarget', st);
     ctrl.jListOccur.setModel(javax.swing.DefaultListModel());
 end
 
 
-%% ===== GROUP SELECTION -> populate the occurrence list =====
-function GroupSel_Callback()
+%% ===== TREE SELECTION =====
+function TreeSel_Callback()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
     if isempty(ctrl) || isempty(st), return; end
-    row = ctrl.jListGroups.getSelectedIndex() + 1;   % Java 0-based
-    g = 0;
-    if (row >= 1) && (row <= numel(st.gIdx)), g = st.gIdx(row); end
-    st.curGroup = g;  setappdata(0, 'DynamicsTarget', st);
-    model = javax.swing.DefaultListModel();
-    if g >= 1
-        G = st.T.Groups(g);
-        for o = 1:size(G.times, 2)
-            if size(G.times,1) == 2
-                model.addElement(sprintf(' %1.3f - %1.3f s', G.times(1,o), G.times(2,o)));
-            elseif (o <= numel(G.vertices))
-                model.addElement(sprintf(' %1.3fs   v%d  %s', G.times(1,o), G.vertices(o), i_hemi(G.hemi(o))));
-            else
-                model.addElement(sprintf(' %1.3fs', G.times(1,o)));
-            end
+    sel = ctrl.jTree.getLastSelectedPathComponent();
+    info = [];
+    if ~isempty(sel)
+        for i = 1:numel(st.nodeList)
+            if sel.equals(st.nodeList{i}); info = st.nodeInfo(i); break; end
         end
     end
-    ctrl.jListOccur.setModel(model);
+    model = javax.swing.DefaultListModel();
+    occMap = zeros(0,3);  % [groupIdx, occIdx, <unused>]  -> the atom to highlight per right-list row
     hSel = findobj(st.hFig, 'Tag', 'AtomSel');  if ~isempty(hSel), set(hSel, 'Visible', 'off'); end
+    if ~isempty(info)
+        st.curGroup = info.g;
+        if strcmp(info.kind, 'window')
+            [rows, occMap] = i_window_atoms(st.T, info.g, info.w);
+            for k = 1:numel(rows), model.addElement(rows{k}); end
+        elseif strcmp(info.kind, 'atom')
+            % single atom of a simple band group: list just it (and it is highlightable)
+            G = st.T.Groups(info.g);
+            if (info.w <= numel(G.vertices))
+                model.addElement(sprintf(' %.3fs  %-8s  v%d', G.times(1,info.w), i_str(G.phase), G.vertices(info.w)));
+                occMap(end+1,:) = [info.g, info.w, 0]; %#ok<AGROW>
+            end
+        end
+    else
+        st.curGroup = 0;
+    end
+    ctrl.jListOccur.setModel(model);
+    st.occMap = occMap;  setappdata(0, 'DynamicsTarget', st);
 end
 
 
@@ -174,10 +192,11 @@ end
 function OccurSel_Callback()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
-    if isempty(ctrl) || isempty(st) || (st.curGroup < 1) || ~ishandle(st.hFig), return; end
-    o = ctrl.jListOccur.getSelectedIndex() + 1;
-    if (o < 1), return; end
-    g = st.curGroup;  G = st.T.Groups(g);
+    if isempty(ctrl) || isempty(st) || isempty(st.occMap) || ~ishandle(st.hFig), return; end
+    row = ctrl.jListOccur.getSelectedIndex() + 1;
+    if (row < 1) || (row > size(st.occMap,1)), return; end
+    g = st.occMap(row,1);  o = st.occMap(row,2);
+    G = st.T.Groups(g);
     hSel = findobj(st.hFig, 'Tag', 'AtomSel');
     GroupsPosOff = getappdata(st.hFig, 'GroupsPosOff');
     if ~isempty(hSel) && ~isempty(GroupsPosOff) && (g <= numel(GroupsPosOff)) && (o <= size(GroupsPosOff{g},1))
@@ -188,6 +207,33 @@ function OccurSel_Callback()
     end
     if (o <= size(G.times,2))
         try, panel_time('SetCurrentTime', G.times(1,o)); catch, end %#ok<CTCH>
+    end
+end
+
+
+%% ===== FLAT, TIME-SORTED ATOMS WITHIN ONE WINDOW (across the band's phase children) =====
+function [rows, occMap] = i_window_atoms(T, gBand, w)
+    rows = {};  occMap = zeros(0,3);
+    G = T.Groups(gBand);
+    on = G.times(1,w);  off = G.times(2,w);
+    children = find(strcmpi({T.Groups.parent}, G.label));
+    times = [];  phases = {};  verts = [];  cc = [];  oo = [];
+    for c = children(:)'
+        Gc = T.Groups(c);
+        for o = 1:numel(Gc.vertices)
+            t = Gc.times(1,o);
+            if (t >= on - 1e-9) && (t <= off + 1e-9)
+                times(end+1)  = t;            %#ok<AGROW>
+                phases{end+1} = i_str(Gc.phase); %#ok<AGROW>
+                verts(end+1)  = Gc.vertices(o); %#ok<AGROW>
+                cc(end+1) = c;  oo(end+1) = o; %#ok<AGROW>
+            end
+        end
+    end
+    [~, ord] = sort(times);
+    for k = ord
+        rows{end+1} = sprintf(' %8.3fs  %-8s  v%d', times(k), phases{k}, verts(k)); %#ok<AGROW>
+        occMap(end+1,:) = [cc(k), oo(k), 0]; %#ok<AGROW>
     end
 end
 
@@ -214,7 +260,7 @@ function FileSaveAs()
 end
 
 
-%% ===== ATOMS menu (edit the table, then refresh) =====
+%% ===== ATOMS menu (act on the selected band group, then refresh) =====
 function AtomAddGroup()
     st = getappdata(0, 'DynamicsTarget');  if isempty(st), return; end
     name = java_dialog('input', 'Name for the new atom group:', 'Add group', [], '');
@@ -237,12 +283,10 @@ function AtomRenameGroup()
 end
 function AtomDeleteGroup()
     [st, g] = i_selected();  if g < 1, return; end
-    if ~java_dialog('confirm', sprintf('Delete group "%s" (and its occurrences)?', st.T.Groups(g).label), 'Delete group'), return; end
+    if ~java_dialog('confirm', sprintf('Delete band "%s" and its atoms?', st.T.Groups(g).label), 'Delete group'), return; end
     lbl = st.T.Groups(g).label;
-    for c = 1:numel(st.T.Groups)
-        if strcmp(st.T.Groups(c).parent, lbl), st.T.Groups(c).parent = ''; end
-    end
-    st.T.Groups(g) = [];  st.T.nGroups = numel(st.T.Groups);  st.curGroup = 0;
+    kill = strcmpi({st.T.Groups.parent}, lbl);  kill(g) = true;   % the band + its children
+    st.T.Groups(kill) = [];  st.T.nGroups = numel(st.T.Groups);  st.curGroup = 0;
     i_apply(st);
 end
 function AtomSetColor()
@@ -268,18 +312,18 @@ function [st, g] = i_selected()
     g = 0;  st = getappdata(0, 'DynamicsTarget');
     if isempty(st), return; end
     g = st.curGroup;
-    if g < 1, java_dialog('warning', 'Select a group first.', 'Atoms'); end
+    if g < 1, java_dialog('warning', 'Select a band atom in the tree first.', 'Atoms'); end
 end
 function i_apply(st)
     setappdata(0, 'DynamicsTarget', st);
     if ~isempty(st.hFig) && ishandle(st.hFig)
         try, view_dynamics('Redraw', st.hFig, st.T); catch, end %#ok<CTCH>
     end
-    BuildGroupList();
+    BuildTree();
 end
 function t0 = i_firsttime(times)
     if isempty(times), t0 = inf; else, t0 = times(1,1); end
 end
-function s = i_hemi(h)
-    if isempty(h) || (h < 1) || (h > 2), s = '?'; else, hc = 'LR'; s = hc(double(h)); end
+function s = i_str(x)
+    if isempty(x), s = '-'; else, s = char(x); end
 end

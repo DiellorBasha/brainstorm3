@@ -149,14 +149,16 @@ A Record-style atom panel (`toolbox/gui/panel_bst_dynamics.m`, panel name `Dynam
 superseding the `panel_dynamics` skeleton (retired to `dev/experimental/`):
 - **File** menu: Open / Save / Save as a `dynamics_*` table.
 - **Atoms** menu: Add / Rename / Delete / Set color / Sort (by name / time) group.
-- **Reuses the Record Events-section components** (max UI reuse): a colored group
-  **JList** (`BstColorListRenderer` + `BstListItem`/`setColor`; child phase groups
-  *indented* under their window) on the left, the selected group's **occurrence
-  JList** (`BstStringListRenderer`) on the right, in a `JSplitPane`. Select a group
-  → its occurrences; select an occurrence → cortex marker highlight +
-  `panel_time('SetCurrentTime', …)`.
-- **Docked** as a tools tab (`gui_show(bstPanel,'BrainstormTab','tools')`), like
-  Record/Helmholtz — not a floating window.
+- Own bordered **"Atoms"** titled section; **docked** as a tools tab
+  (`gui_show(bstPanel,'BrainstormTab','tools')`), not a floating window.
+- **Left = band-stack tree**: the top-level band atom (`alpha (8-13 Hz)`) is a
+  **stack** (`ICON_DATA_LIST`) that expands to its time-**window** leaves.
+- **Right = flat per-window atom list**: selecting a window lists *every*
+  single-time atom whose time falls in it — flat (no phase grouping), time-sorted,
+  columns `time · phase · vertex` (no L/R). The phase child groups feed this list
+  (not shown as nodes). Select an atom → cortex marker + `panel_time('SetCurrentTime')`.
+- Menus reuse the Record idiom (`ICON_MENU` + per-item icons); the right list reuses
+  `BstStringListRenderer`.
 - Edits modify the in-memory table (`getappdata(0,'DynamicsTarget').T`) then
   `view_dynamics('Redraw', hFig, T)` (factored marker draw, per-group `AtomMarker<g>`
   tags, cached surface) + rebuild the tree.
