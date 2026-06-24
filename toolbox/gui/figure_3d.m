@@ -619,7 +619,10 @@ function FigureMouseUpCallback(hFig, varargin)
         if strcmpi(clickAction, 'popup')
             DisplayFigurePopup(hFig);
             
-        % === SELECTING CORTICAL SCOUTS (New scout or geodesic Area tool) ===
+        % === DYNAMICS GEODESIC REGION TOOL (heat-disk pick) ===
+        elseif getappdata(hFig, 'isDynamicsGeodesicPick')
+            bst_geodesic_tool('OnClick', hFig);
+        % === SELECTING CORTICAL SCOUTS (New scout, geodesic Line tool) ===
         elseif isSelectingCorticalSpot
             panel_scout('CreateScoutMouse', hFig);
             
@@ -936,14 +939,11 @@ function FigureMouseWheelCallback(hFig, event, target)
     if (nargin < 3) || isempty(target)
         target = [];
     end
-    % Scout geodesic Area tool: while the tool is active, the wheel grows/shrinks the SELECTED
-    % scout (heat-distance disk) instead of zooming -- gated on the toggle being pressed and a
-    % scout being selected (not on a keyboard modifier, which is unreliable once the scout list
-    % has focus). With the tool off, or with no scout selected, the wheel zooms as usual.
-    if ~isempty(event) && panel_scout('IsAreaToolActive')
-        if panel_scout('AreaToolScroll', double(event.VerticalScrollCount))
-            return;
-        end
+    % Dynamics geodesic Region tool: while active, the wheel grows/shrinks the heat-disk overlay
+    % instead of zooming. OnScroll returns true only when the tool is active and a disk is seeded;
+    % otherwise the wheel zooms as usual.
+    if ~isempty(event) && bst_geodesic_tool('OnScroll', double(event.VerticalScrollCount))
+        return;
     end
     % ONLY FOR 3D AND 2DLayout
     if isempty(event)

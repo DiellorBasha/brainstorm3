@@ -177,16 +177,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                 gui_component('label', jPanelScoutOptions, [], '  ');
                 % Constrained to data
                 jToggleConst = gui_component('toggle', jPanelScoutOptions,'tab hfill', 'Constrained', {Insets(0,0,0,0), java_scaled('dimension',10,20)}, 'Constrain patch growth to vertices with data above threshold.');
-                % Geodesic area tool (own row, below the swell buttons): a compact state button
-                % (bullseye = concentric heat-distance isolines). While pressed, click a vertex to
-                % seed a scout and Ctrl+scroll to grow/shrink it.
-                jToggleArea = gui_component('toggle', jPanelScoutOptions, 'br', '', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic area tool: select, click a vertex to seed a scout, then scroll to grow/shrink it (heat-distance isolines)', @(h,ev)bst_call(@AreaToolToggle));
-                jToggleArea.setText(char(9678));    % bullseye glyph as PLAIN text (centers; HTML label did not)
-                jToggleArea.setMargin(java.awt.Insets(0,0,0,0));
-                jToggleArea.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-                jToggleArea.setVerticalAlignment(javax.swing.SwingConstants.CENTER);
-                % Geodesic line tool (arc icon): click two vertices -> draw + store the geodesic between them
-                jToggleGeo = gui_component('toggle', jPanelScoutOptions, '', '', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic line tool: select, then click two vertices -- the exact geodesic (FlipOut) line connecting them is drawn and stored as a 2-endpoint scout', @(h,ev)bst_call(@GeodesicToolToggle));
+                % Geodesic line tool (own row, arc icon): click two vertices -> draw + store the geodesic between them
+                jToggleGeo = gui_component('toggle', jPanelScoutOptions, 'br', '', {Insets(0,0,0,0), java_scaled('dimension',26,20)}, 'Geodesic line tool: select, then click two vertices -- the exact geodesic (FlipOut) line connecting them is drawn and stored as a 2-endpoint scout', @(h,ev)bst_call(@GeodesicToolToggle));
                 jToggleGeo.setText(char(8978));     % arc glyph as PLAIN text
                 jToggleGeo.setMargin(java.awt.Insets(0,0,0,0));
                 jToggleGeo.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
@@ -239,7 +231,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
                                   'jRadioAbsolute',        jRadioAbsolute, ...
                                   'jRadioRelative',        jRadioRelative, ...
                                   'jPanelScoutOptions',    jPanelScoutOptions, ...
-                                  'jToggleArea',           jToggleArea, ...
                                   'jToggleGeo',            jToggleGeo, ...
                                   'jPanelDisplay',         jPanelDisplay, ...
                                   'jLabelScoutSize',       jLabelScoutSize, ...
@@ -1911,10 +1902,7 @@ function SetSelectionState(isSelected)
     if isSelected
         % Push toolbar "AddScout" button
         ctrl.jButtonAddScout.setSelected(1);
-        % Release the geodesic Area/Line tools (mutually exclusive selection modes)
-        if isfield(ctrl,'jToggleArea') && ~isempty(ctrl.jToggleArea)
-            ctrl.jToggleArea.setSelected(0);
-        end
+        % Release the geodesic Line tool
         if isfield(ctrl,'jToggleGeo') && ~isempty(ctrl.jToggleGeo)
             ctrl.jToggleGeo.setSelected(0);
         end
@@ -2976,14 +2964,6 @@ function CreateScoutMouse(hFig) %#ok<DEFNU>
         return
     end
 
-    % ===== GEODESIC AREA TOOL =====
-    % When the "Area" tool is active, a click seeds a NEW scout grown as the heat-distance
-    % geodesic disk around the clicked vertex (scroll then resizes it). Surface only.
-    if ~isVolumeAtlas && IsAreaToolActive()
-        CreateScoutArea(vi, TessInfo(iTess).SurfaceFile);
-        return;
-    end
-
     % ===== GEODESIC LINE TOOL =====
     % When the "Geodesic line" tool is active, two clicks define a geodesic link: click 1 places
     % endpoint A, click 2 places B and draws/stores the geodesic line between them. Surface only.
@@ -3048,150 +3028,6 @@ function CreateScoutMouse(hFig) %#ok<DEFNU>
 end
 
 
-%% ===== GEODESIC AREA TOOL =====
-% A scout grown as the heat-distance geodesic disk around a seed vertex (tess_scout_area).
-% The toggle button "Area" (Scout size section) activates the tool; a surface click seeds a
-% new disk; Ctrl+scroll (handled in figure_3d) resizes it. The geodesic distance field is
-% cached per seed so resizing only re-thresholds (no heat re-solve).
-
-% Is the "Area" tool toggle currently active? (false if the Scout panel is not loaded.)
-function isActive = IsAreaToolActive() %#ok<DEFNU>
-    isActive = false;
-    ctrl = bst_get('PanelControls', 'Scout');
-    if ~isempty(ctrl) && isfield(ctrl, 'jToggleArea') && ~isempty(ctrl.jToggleArea)
-        isActive = ctrl.jToggleArea.isSelected();
-    end
-end
-
-% Toggle callback: the Area tool is a STATE button that puts the 3D figures into the same
-% cortical-spot selection mode as "New scout" (so a click is a vertex pick, not a camera move,
-% and the figure isn't disturbed when the tool is off). Mutually exclusive with "New scout".
-function AreaToolToggle() %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', 'Scout');
-    if isempty(ctrl) || ~isfield(ctrl, 'jToggleArea') || isempty(ctrl.jToggleArea)
-        return;
-    end
-    isOn = ctrl.jToggleArea.isSelected();
-    % Figures in which a scout can be selected (same set "New scout" uses)
-    hFigures = bst_figures('GetFiguresForScouts');
-    if isempty(hFigures)
-        hFigures = bst_figures('GetFigureWithSurfaces');
-    end
-    if isOn
-        % Mutually exclusive with the point-add "New scout" mode and the Geodesic line tool
-        ctrl.jButtonAddScout.setSelected(0);
-        if isfield(ctrl,'jToggleGeo') && ~isempty(ctrl.jToggleGeo), ctrl.jToggleGeo.setSelected(0); end
-        if isempty(hFigures)
-            java_dialog('warning', 'You need to open a 3D figure before creating scouts.', 'Geodesic area tool');
-            ctrl.jToggleArea.setSelected(0);
-            return;
-        end
-        % Enter cortical-spot selection mode (clicks pick vertices; cross cursor)
-        SetSelectedScouts([]);
-        for hFig = hFigures
-            setappdata(hFig, 'isSelectingCorticalSpot', 1);
-            set(hFig, 'Pointer', 'cross');
-        end
-        AreaCache([]);          % fresh tool session
-        % Pre-factorize the heat solver for this surface so the first click is instant
-        % (the factorization is then cached and reused for every seed/resize).
-        SurfaceFile = i_get_scout_surface(hFigures);
-        if ~isempty(SurfaceFile)
-            bst_progress('start', 'Geodesic area tool', 'Pre-factorizing the heat operator...');
-            try, tess_scout_area('prewarm', SurfaceFile); catch, end %#ok<CTCH>
-            bst_progress('stop');
-        end
-    else
-        % Exit selection mode (restore normal figure manipulation)
-        for hFig = hFigures
-            set(hFig, 'Pointer', 'arrow');
-            setappdata(hFig, 'isSelectingCorticalSpot', 0);
-        end
-    end
-end
-
-% Persistent cache for the active area scout: struct(iScout, Seed, phi, Radius, SurfaceFile).
-function out = AreaCache(in)
-    persistent C;
-    if (nargin >= 1)
-        C = in;
-    end
-    out = C;
-end
-
-% Click handler: seed a new scout as the geodesic disk of the initial radius around vi.
-function CreateScoutArea(vi, SurfaceFile)
-    global GlobalData;
-    if isempty(SurfaceFile)
-        return;
-    end
-    if isempty(GlobalData.CurrentScoutsSurface)
-        GlobalData.CurrentScoutsSurface = SurfaceFile;
-    end
-    R0 = 0.003;     % initial geodesic radius [m] = 3 mm
-    % Geodesic disk. The heat solver is cached per surface (built by 'prewarm' on tool
-    % activation), so this is instant after the first time; show a bar in case it is cold.
-    isProg = ~bst_progress('isVisible');
-    if isProg, bst_progress('start', 'Geodesic area tool', 'Computing geodesic distance...'); end
-    [areaVerts, phi] = tess_scout_area(SurfaceFile, vi, R0);
-    if isProg, bst_progress('stop'); end
-    [sScout, iScout] = CreateScout(areaVerts, vi, SurfaceFile); %#ok<ASGLU>
-    AreaCache(struct('iScout',iScout, 'Seed',vi, 'phi',phi, 'Radius',R0, 'SurfaceFile',SurfaceFile));
-    PlotScouts(iScout);
-    UpdatePanel();
-    SetSelectedScouts(iScout);
-    UpdateScoutsDisplay('current');
-end
-
-% Ctrl+scroll handler (called from figure_3d): grow/shrink the active area scout by re-
-% thresholding the cached geodesic distance. Returns 1 if it consumed the event, 0 otherwise
-% (so the figure falls back to the default scroll/zoom when no area scout is active).
-function handled = AreaToolScroll(scrollCount) %#ok<DEFNU>
-    handled = 0;
-    % Resize the currently SELECTED scout, so a scout re-picked from the list (or the figure)
-    % can be re-grown -- just like the <</>> swell buttons act on the selected scout.
-    [sSel, iSel, sSurf] = GetSelectedScouts();
-    if isempty(iSel) || isempty(sSurf)
-        return;
-    end
-    iScout = double(iSel(1));
-    sScout = sSel(1);
-    if isempty(sScout.Vertices)
-        return;
-    end
-    % Seed: use the scout's seed if it has one, else its first vertex (so ANY scout can be grown)
-    if ~isempty(sScout.Seed)
-        Seed = double(sScout.Seed(1));
-    else
-        Seed = double(sScout.Vertices(1));
-    end
-    SurfaceFile = sSurf.FileName;
-    STEP = 0.003;   % 3 mm per scroll tick
-    % Reuse the cached geodesic distance for this seed if available; otherwise recompute it
-    % (reuses the cached nxr factorization, so it is fast) and infer the current radius from
-    % the scout's current geodesic extent.
-    c = AreaCache();
-    if ~isempty(c) && isequal(c.Seed, Seed) && strcmp(c.SurfaceFile, SurfaceFile) && (c.iScout == iScout)
-        phi = c.phi;  R = c.Radius;
-    else
-        [~, phi] = tess_scout_area(SurfaceFile, Seed, Inf);   % distance field only (fast: cached factor)
-        dv = phi(sScout.Vertices);  dv = dv(isfinite(dv));
-        if isempty(dv), R = STEP; else, R = max(dv); end
-        if ~isfinite(R) || (R <= 0), R = STEP; end
-    end
-    % Scroll up (VerticalScrollCount < 0) grows; scroll down shrinks. Floor at one step.
-    R = max(STEP, R - double(scrollCount) * STEP);
-    areaVerts = tess_scout_area(SurfaceFile, Seed, R, phi);
-    sScout.Vertices = areaVerts;
-    sScout.Seed     = Seed;       % record the seed so later resizes are consistent
-    SetScouts(SurfaceFile, iScout, sScout);
-    AreaCache(struct('iScout',iScout, 'Seed',Seed, 'phi',phi, 'Radius',R, 'SurfaceFile',SurfaceFile));
-    PlotScouts(iScout);
-    UpdateScoutProperties();
-    UpdateScoutsDisplay('current');
-    handled = 1;
-end
-
 % Resolve the cortex surface backing the scout figures (used to pre-warm the heat solver).
 function SurfaceFile = i_get_scout_surface(hFigures)
     global GlobalData;
@@ -3251,7 +3087,6 @@ function GeodesicToolToggle() %#ok<DEFNU>
     end
     if isOn
         ctrl.jButtonAddScout.setSelected(0);
-        if isfield(ctrl,'jToggleArea') && ~isempty(ctrl.jToggleArea), ctrl.jToggleArea.setSelected(0); end
         if isempty(hFigures)
             java_dialog('warning', 'You need to open a 3D figure before creating scouts.', 'Geodesic line tool');
             ctrl.jToggleGeo.setSelected(0);
