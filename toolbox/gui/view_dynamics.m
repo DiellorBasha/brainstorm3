@@ -149,7 +149,7 @@ function Redraw(hFig, T, showPhase)
     GroupsPosOff = cell(1, numel(T.Groups));
     for g = 1:numel(T.Groups)
         G = T.Groups(g);
-        pk = i_phase_index(G.phase);
+        pk = i_phase_index(i_phase_type(G));
         if (pk >= 1) && ~showPhase(pk)
             GroupsPosOff{g} = zeros(0,3);   % phase filtered out: no marker, no region
             continue;
@@ -208,4 +208,13 @@ function k = i_phase_index(ph)
         case 'falling', k = 4;
         otherwise,      k = 0;
     end
+end
+
+% Readable phase type from a group's label suffix ('<band>_peak' etc.); '' if none.
+% phase is now a NUMERIC value (radians), so the type is parsed from the label.
+function t = i_phase_type(G)
+    t = '';
+    if isempty(G.label), return; end
+    tok = regexp(G.label, '_(peak|trough|rising|falling)$', 'tokens', 'once');
+    if ~isempty(tok), t = tok{1}; end
 end

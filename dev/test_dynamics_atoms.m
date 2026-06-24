@@ -148,8 +148,12 @@ function test_dynamics_atoms()
     chN = [];  if ~isempty(gW), chN = find(strcmpi(parents, Td.Groups(gW).label)); end
     temporal   = ~isempty(gW) && ~isempty(chN) && all(arrayfun(@(c) isempty(Td.Groups(c).vertices) && ~isempty(Td.Groups(c).times), chN));
     streamKept = any(arrayfun(@(k) strcmp(Td.Groups(k).Function,'stream'), 1:Td.nGroups));   % T4 record group survives Detect
-    ok5 = haveBand && ~isempty(gW) && (numel(chN)==4) && temporal && streamKept;
-    fprintf('T5 detect: band-window=%d nWin=%d phaseChildren=%d temporal=%d recordKept=%d => %s\n', ~isempty(gW), size(Td.Groups(gW).times,2), numel(chN), temporal, streamKept, PF{ok5+1});
+    % phase children carry the NUMERIC phase value (peak=0); readable type is the label suffix
+    gPeak5 = chN(arrayfun(@(c) ~isempty(regexp(Td.Groups(c).label,'_peak$','once')), chN));
+    phaseNumOK = ~isempty(gPeak5) && isnumeric(Td.Groups(gPeak5(1)).phase) && (Td.Groups(gPeak5(1)).phase==0) ...
+        && all(arrayfun(@(c) isnumeric(Td.Groups(c).phase) && isscalar(Td.Groups(c).phase), chN));
+    ok5 = haveBand && ~isempty(gW) && (numel(chN)==4) && temporal && streamKept && phaseNumOK;
+    fprintf('T5 detect: band-window=%d nWin=%d phaseChildren=%d temporal=%d recordKept=%d phaseNum=%d => %s\n', ~isempty(gW), size(Td.Groups(gW).times,2), numel(chN), temporal, streamKept, phaseNumOK, PF{ok5+1});
     pass = pass && ok5;
 
     % T6: AttachRegion + Redraw -> region patch + seed marker on the cortex (capture render path)
@@ -176,7 +180,7 @@ function test_dynamics_atoms()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st = getappdata(0,'DynamicsTarget');  Tt = st.T;  parents = {Tt.Groups.parent};
     gW = find(cellfun(@isempty,parents) & arrayfun(@(k) strcmp(Tt.Groups(k).bandName,'alpha') && size(Tt.Groups(k).times,1)==2, 1:Tt.nGroups), 1);
-    gPeak = find(arrayfun(@(k) strcmpi(i_t7_str(Tt.Groups(k).phase),'peak') && strcmpi(i_t7_str(Tt.Groups(k).bandName),'alpha'), 1:Tt.nGroups), 1);
+    gPeak = find(arrayfun(@(k) ~isempty(regexp(Tt.Groups(k).label,'_peak$','once')) && strcmpi(i_t7_str(Tt.Groups(k).bandName),'alpha'), 1:Tt.nGroups), 1);
     % localize peak occurrence 1 so it actually has a cortex marker + region to hide
     SurfT = in_tess_bst(Tt.SurfaceFile, 0);  seed = round(size(SurfT.Vertices,1)/2);
     rvP = tess_scout_area(Tt.SurfaceFile, seed, 0.008);

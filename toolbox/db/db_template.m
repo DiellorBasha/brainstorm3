@@ -337,7 +337,7 @@ switch lower(structureName)
             'parent',      '', ...      % parent group label (nesting); '' = top-level
             'epochs',      [], ...      % [1 x N] (cf. Events)
             'times',       [], ...      % TIME: [1 x N] simple | [2 x N] extended (cf. Events)
-            'phase',       '', ...      % TIME: oscillation phase peak/trough/rising/falling
+            'phase',       [], ...      % TIME: numeric oscillation phase [rad] (peak=0 falling=+pi/2 trough=+/-pi rising=-pi/2); readable type = label suffix
             'band',        [], ...      % FREQUENCY: [fLo fHi] Hz
             'bandName',    '', ...      % FREQUENCY: alpha/beta/gamma/...
             'scale',       [], ...      % SCALE: [k1 k2] eigenmode range (bst_eigen; reserved)

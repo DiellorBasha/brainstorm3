@@ -231,7 +231,9 @@ function OnDetect() %#ok<DEFNU>
         ph = phaseDefs{ip,1};  tt = markers.(ph);
         if isempty(tt), continue; end
         P = bst_dynamics('NewGroup', sprintf('%s_%s', bandName, ph));
-        P.type='simple';  P.parent=winLabel;  P.phase=ph;  P.times=tt(:)';  P.epochs=ones(1,numel(tt));
+        % phase = NUMERIC alpha phase (rad): peak=0 falling=+pi/2 trough=+/-pi rising=-pi/2;
+        % the readable type lives in the label suffix ('<band>_peak' etc.).
+        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph);  P.times=tt(:)';  P.epochs=ones(1,numel(tt));
         P.band=band;  P.bandName=bandName;  P.color=phaseDefs{ip,2};
         P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
         st.T = bst_dynamics('AddGroup', st.T, P);
@@ -430,6 +432,16 @@ function k = i_phase_index(ph)
     end
 end
 
+% Readable phase type ('peak'/'trough'/'rising'/'falling') from a group's label
+% suffix; '' for non-phase groups. phase itself is now a NUMERIC value (radians),
+% so the human-readable type is parsed from the label ('<band>_peak' etc.).
+function t = i_phase_type(G)
+    t = '';
+    if isempty(G.label), return; end
+    tok = regexp(G.label, '_(peak|trough|rising|falling)$', 'tokens', 'once');
+    if ~isempty(tok), t = tok{1}; end
+end
+
 function n = i_peaks(ctrl)
     n = 3;
     if isfield(ctrl,'jPeaks') && ~isempty(ctrl.jPeaks)
@@ -577,7 +589,7 @@ function TreeSel_Callback()
             % single atom of a simple band group: list just it (and it is highlightable)
             G = st.T.Groups(info.g);
             if (info.w <= numel(G.vertices))
-                model.addElement(sprintf(' %.3fs  %-8s  v%d', G.times(1,info.w), i_str(G.phase), G.vertices(info.w)));
+                model.addElement(sprintf(' %.3fs  %-8s  v%d', G.times(1,info.w), i_phase_type(G), G.vertices(info.w)));
                 occMap(end+1,:) = [info.g, info.w, 0]; %#ok<AGROW>
             end
             i_jump(G.times(1, info.w));                     % and to the atom's time
@@ -621,14 +633,14 @@ function [rows, occMap] = i_window_atoms(T, gBand, w, showPhase)
     times = [];  phases = {};  verts = [];  cc = [];  oo = [];
     for c = children(:)'
         Gc = T.Groups(c);
-        pk = i_phase_index(Gc.phase);
+        pk = i_phase_index(i_phase_type(Gc));
         if (pk >= 1) && ~showPhase(pk), continue; end          % phase filtered out
         nO = size(Gc.times, 2);                 % iterate by occurrence (markers may have NO vertices)
         for o = 1:nO
             t = Gc.times(1,o);
             if (t >= on - 1e-9) && (t <= off + 1e-9)
                 times(end+1)  = t;            %#ok<AGROW>
-                phases{end+1} = i_str(Gc.phase); %#ok<AGROW>
+                phases{end+1} = i_phase_type(Gc); %#ok<AGROW>
                 if (o <= numel(Gc.vertices)), verts(end+1) = Gc.vertices(o); else, verts(end+1) = NaN; end %#ok<AGROW>
                 cc(end+1) = c;  oo(end+1) = o; %#ok<AGROW>
             end

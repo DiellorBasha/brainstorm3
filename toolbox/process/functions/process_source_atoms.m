@@ -152,7 +152,8 @@ function OutputFiles = Run(sProcess, sInputs)
             end
             if isempty(accT), continue; end
             Gp = bst_dynamics('NewGroup', [bandTok '_' ph]);
-            Gp.type = 'simple';  Gp.parent = winLabel;  Gp.phase = ph;
+            % phase = NUMERIC alpha phase (rad); readable type is the label suffix.
+            Gp.type = 'simple';  Gp.parent = winLabel;  Gp.phase = process_evt_refphase('PhaseValue', ph);
             Gp.times = accT;  Gp.epochs = ones(1, numel(accT));
             Gp.band = FreqRange;  Gp.bandName = bandTok;  Gp.Function = 'magnitude';
             Gp.vertices = accV;  Gp.pos = accP;  Gp.hemi = accH;  Gp.strength = accS;
