@@ -362,6 +362,7 @@ function OnRecord() %#ok<DEFNU>
     G.vertices = [G.vertices, v];                     G.pos      = [G.pos;      pos];
     G.hemi     = [G.hemi,     hemi];                  G.strength = [G.strength, ex.value(:)'];
     G.charge   = [G.charge,   ex.charge(:)'];         G.type     = 'simple';
+    if ~isempty(G.region), G.region(end+1:numel(G.vertices)) = {[]}; end
     st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
     i_apply(st);                                                  % redraw markers + rebuild tree (stores st)
     if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>  % auto-save
@@ -419,7 +420,8 @@ end
 
 % Phase name -> filter index (peak=1 trough=2 rising=3 falling=4; 0 = not a phase group -> always shown).
 function k = i_phase_index(ph)
-    switch lower(i_str(ph))
+    if isempty(ph), k = 0; return; end
+    switch lower(char(ph))
         case 'peak',    k = 1;
         case 'trough',  k = 2;
         case 'rising',  k = 3;

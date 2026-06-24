@@ -86,6 +86,7 @@ end
 %% ===== FLATTEN (all SPATIAL occurrences across groups, in a stable order) =====
 % Returns one row per occurrence that has a position (windows with no vertex are
 % skipped). gIdx/oIdx index back into T.Groups(gIdx) column oIdx.
+% NaN-padded (unlocalized) occurrences produced by AttachRegion are silently skipped.
 function [pos, color, gIdx, oIdx, labels] = Flatten(T)
     pos = zeros(0,3);  color = zeros(0,3);  gIdx = [];  oIdx = [];  labels = {};
     for g = 1:numel(T.Groups)
@@ -100,6 +101,7 @@ function [pos, color, gIdx, oIdx, labels] = Flatten(T)
         gIdx  = [gIdx;  g*ones(n,1)];            %#ok<AGROW>
         oIdx  = [oIdx;  (1:n)'];                 %#ok<AGROW>
         for o = 1:n
+            if any(~isfinite(G.pos(o,:))), continue; end   % skip unlocalized (NaN) occurrences
             labels{end+1} = sprintf('%.3fs  v%d', G.times(1,o), G.vertices(o)); %#ok<AGROW>
         end
     end
