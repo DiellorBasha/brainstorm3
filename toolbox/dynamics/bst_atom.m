@@ -105,6 +105,58 @@ function loc = Get(G, axis, occ)
 end
 
 
+%% ===== SET: write one axis localization into the group =====
+function G = Set(G, axis, occ, loc)
+    if (nargin < 4), error('bst_atom:Set','Set requires (G, axis, occ, loc).'); end
+    if isempty(occ), occ = 1; end
+    c = loc.center;  w = loc.extent;  if ~isfinite(w), w = 0; end
+    switch axis
+        case 'time'
+            G.times = i_pad_cols(G.times, occ);
+            if (w > 0) && (size(G.times,1) < 2)
+                G.times = [G.times; G.times];          % promote simple->extended (others zero-width)
+            end
+            if (size(G.times,1) >= 2)
+                G.times(1, occ) = c - w;  G.times(2, occ) = c + w;
+            else
+                G.times(1, occ) = c;
+            end
+            G.type = i_type(G.times);
+        case 'freq'
+            G.band = [c - w, c + w];
+            if ~isempty(loc.label), G.bandName = loc.label; end
+        case 'source'
+            G.vertices = i_pad_vec(G.vertices, occ);  G.vertices(occ) = c;
+            G.radius   = i_pad_vec(G.radius,   occ);  G.radius(occ)   = w;
+            if ~isempty(loc.pos)
+                G.pos = i_pad_pos(G.pos, occ);  G.pos(occ, :) = loc.pos(:)';
+            end
+        case 'scale'
+            G.scale = [c - w, c + w];
+            if ~isempty(loc.label), G.scaleName = loc.label; end
+        otherwise
+            error('bst_atom:Set', 'Unknown axis "%s".', axis);
+    end
+end
+
+% group type consistent with the times row count
+function t = i_type(times)
+    if (size(times,1) >= 2), t = 'extended'; else, t = 'simple'; end
+end
+% pad a [r x m] times matrix to >= n columns with NaN
+function M = i_pad_cols(M, n)
+    if isempty(M), M = nan(1, n); elseif (size(M,2) < n), M(:, end+1:n) = NaN; end
+end
+% pad a [1 x m] row vector to >= n with NaN
+function v = i_pad_vec(v, n)
+    if isempty(v), v = nan(1, n); elseif (numel(v) < n), v(end+1:n) = NaN; end
+end
+% pad a [m x 3] position matrix to >= n rows with NaN
+function p = i_pad_pos(p, n)
+    if isempty(p), p = nan(n, 3); elseif (size(p,1) < n), p(end+1:n, :) = NaN; end
+end
+
+
 %% ===== state from extent =====
 function s = i_state(extent)
     if ~isfinite(extent),   s = 'unlocalized';
