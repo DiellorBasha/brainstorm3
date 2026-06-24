@@ -172,6 +172,7 @@ function TreeSel_Callback()
         if strcmp(info.kind, 'window')
             [rows, occMap] = i_window_atoms(st.T, info.g, info.w);
             for k = 1:numel(rows), model.addElement(rows{k}); end
+            i_jump(st.T.Groups(info.g).times(1, info.w));   % selecting a window jumps to its onset
         elseif strcmp(info.kind, 'atom')
             % single atom of a simple band group: list just it (and it is highlightable)
             G = st.T.Groups(info.g);
@@ -179,6 +180,7 @@ function TreeSel_Callback()
                 model.addElement(sprintf(' %.3fs  %-8s  v%d', G.times(1,info.w), i_str(G.phase), G.vertices(info.w)));
                 occMap(end+1,:) = [info.g, info.w, 0]; %#ok<AGROW>
             end
+            i_jump(G.times(1, info.w));                     % and to the atom's time
         end
     else
         st.curGroup = 0;
@@ -205,9 +207,7 @@ function OccurSel_Callback()
     elseif ~isempty(hSel)
         set(hSel, 'Visible', 'off');
     end
-    if (o <= size(G.times,2))
-        try, panel_time('SetCurrentTime', G.times(1,o)); catch, end %#ok<CTCH>
-    end
+    if (o <= size(G.times,2)), i_jump(G.times(1,o)); end
 end
 
 
@@ -326,4 +326,8 @@ function t0 = i_firsttime(times)
 end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
+end
+function i_jump(t)   % drive the global time cursor (like Record's JumpToEvent); no-op if no time context
+    if isempty(t), return; end
+    try, panel_time('SetCurrentTime', t(1)); catch, end %#ok<CTCH>
 end
