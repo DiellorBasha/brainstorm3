@@ -8,8 +8,9 @@ function varargout = view_dynamics( varargin )
 % with no vertex) draw no markers but appear in the tree for navigation.
 %
 % USAGE:
-%   [hFig, T] = view_dynamics(DynamicsFile)        % load a table, open cortex + panel
-%               view_dynamics('Redraw', hFig, T)   % redraw markers from an edited table
+%   [hFig, T] = view_dynamics(DynamicsFile)            % load a table, open cortex + panel
+%   [hFig, T] = view_dynamics('FromResult', ResultsFile) % reuse/create a table for a Dirac result
+%               view_dynamics('Redraw', hFig, T)       % redraw markers from an edited table
 %
 % SEE ALSO: panel_bst_dynamics, bst_dynamics, process_source_atoms
 %
@@ -39,8 +40,14 @@ function varargout = view_dynamics( varargin )
         return;
     end
 
-    % ===== LOAD TABLE =====
-    DynamicsFile = varargin{1};
+    % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
+    if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'FromResult')
+        DynamicsFile = AtomsFromResult(varargin{2});
+        if isempty(DynamicsFile), return; end
+    else
+        % ===== LOAD TABLE =====
+        DynamicsFile = varargin{1};
+    end
     T = bst_dynamics('Load', DynamicsFile);
     if isempty(T.Groups)
         error('view_dynamics: no atom groups in %s', DynamicsFile);
@@ -65,6 +72,33 @@ function varargout = view_dynamics( varargin )
 
     if (nargout >= 1), varargout{1} = hFig; end
     if (nargout >= 2), varargout{2} = T;    end
+end
+
+
+%% ===== GET A DYNAMICS TABLE FOR A DIRAC SOURCE RESULT (reuse newest, else detect) =====
+function DynamicsFile = AtomsFromResult(ResultsFile)
+    DynamicsFile = '';
+    R = in_bst_results(ResultsFile, 0, 'DataFile');
+    if isempty(R.DataFile)
+        bst_error('This result has no associated recording (DataFile).', 'Source atoms', 0);  return;
+    end
+    studyDir = bst_fileparts(file_fullpath(R.DataFile));
+    % Reuse the newest dynamics_*.mat already in the study folder, if any
+    d = dir(fullfile(studyDir, 'dynamics_*.mat'));
+    if isempty(d)
+        % None yet: run the detector (default alpha) to create one
+        bst_progress('start', 'Source atoms', 'Detecting source atoms...');
+        bst_process('CallProcess', 'process_source_atoms', ResultsFile, [], 'freqband','alpha', 'npeaks',3);
+        bst_progress('stop');
+        d = dir(fullfile(studyDir, 'dynamics_*.mat'));
+    end
+    if isempty(d)
+        bst_error(['No source atoms were created. The recording needs band events first -- ' 10 ...
+                   'run "Detect bursts (phase polarity)" on it, then retry.'], 'Source atoms', 0);
+        return;
+    end
+    [~, ix] = max([d.datenum]);
+    DynamicsFile = fullfile(studyDir, d(ix).name);
 end
 
 

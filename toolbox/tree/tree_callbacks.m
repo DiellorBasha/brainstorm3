@@ -1883,6 +1883,9 @@ switch (lower(action))
                     % field (curl/divergence/stream/potential + vortex cores). Opens its own
                     % figure + panel; nComponents==3 is validated in view_helmholtz.
                     gui_component('MenuItem', jMenuActivations, [], 'Helmholtz / vorticity (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_helmholtz, filenameRelative));
+                    % Spatiotemporal atom table (bst_dynamics): opens the cortex + the docked
+                    % Atoms panel. Reuses the study's dynamics_* table, or detects one (alpha).
+                    gui_component('MenuItem', jMenuActivations, [], 'Spatiotemporal atoms (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_dynamics, 'FromResult', filenameRelative));
                 end
 
                 % === MENU: SIMULATE DATA ===
