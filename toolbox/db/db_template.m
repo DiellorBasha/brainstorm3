@@ -347,6 +347,7 @@ switch lower(structureName)
             'pos',         [], ...      % SPACE: [N x 3] positions
             'hemi',        [], ...      % SPACE: [1 x N] 1=L 2=R
             'region',      {{}}, ...    % SPACE: cell {1 x N}, region{i}=[v...] geodesic-disk vertices for occurrence i ({}=point atom)
+            'radius',      [], ...      % SPACE: [1 x N] per-occurrence geodesic radius [m] (source extent); []/NaN = unset
             'strength',    [], ...      % descriptor: [1 x N] extremum value
             'charge',      [], ...      % descriptor: [1 x N] +1/-1 (source/sink sign)
             'chirality',   [], ...      % descriptor: [1 x N] +1/-1 (vortex sense)
