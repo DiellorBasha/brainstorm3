@@ -68,6 +68,15 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuAtoms, [], 'Delete group', IconLoader.ICON_EVT_TYPE_DEL,    [], @(h,e)bst_call(@AtomDeleteGroup));
     gui_component('MenuItem', jMenuAtoms, [], 'Set color',    IconLoader.ICON_COLOR_SELECTION, [], @(h,e)bst_call(@AtomSetColor));
     jMenuAtoms.addSeparator();
+    jMenuPhases = gui_component('Menu', jMenuAtoms, [], 'Show phases', IconLoader.ICON_EVT_TYPE, [], []);
+    phaseNames  = {'peak','trough','rising','falling'};
+    jPhaseItems = javaArray('javax.swing.JCheckBoxMenuItem', 4);
+    for ip = 1:4
+        jit = gui_component('checkboxmenuitem', jMenuPhases, [], phaseNames{ip}, [], [], @(h,e)bst_call(@()OnTogglePhase(ip)));
+        jit.setSelected(true);
+        jPhaseItems(ip) = jit;
+    end
+    jMenuAtoms.addSeparator();
     jMenuSort = gui_component('Menu', jMenuAtoms, [], 'Sort groups', IconLoader.ICON_EVT_TYPE, [], []);
     gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
@@ -143,7 +152,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands, ...
         'jSpaceSmoothOn',jSpaceSmoothOn, 'jSpaceKernel',jSpaceKernel, 'SpaceKernelKeys',{spaceKeys}, ...
-        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks));
+        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
 end
 
 
@@ -398,6 +407,27 @@ function OnCaptureRegion() %#ok<DEFNU>
     bst_progress('text', sprintf('Captured %d-vertex region into "%s"', numel(sScout.Vertices), st.T.Groups(g).label));
 end
 
+%% ===== SHOW-PHASES FILTER (display-only; never deletes atoms) =====
+function OnTogglePhase(ip) %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~isfield(ctrl,'jPhaseItems') || isempty(ctrl.jPhaseItems), return; end
+    sp = i_field(st, 'showPhase', [1 1 1 1]);
+    sp(ip) = ctrl.jPhaseItems(ip).isSelected();
+    st.showPhase = sp;  setappdata(0, 'DynamicsTarget', st);
+    i_apply(st);                                                  % rebuild list + redraw cortex
+end
+
+% Phase name -> filter index (peak=1 trough=2 rising=3 falling=4; 0 = not a phase group -> always shown).
+function k = i_phase_index(ph)
+    switch lower(i_str(ph))
+        case 'peak',    k = 1;
+        case 'trough',  k = 2;
+        case 'rising',  k = 3;
+        case 'falling', k = 4;
+        otherwise,      k = 0;
+    end
+end
+
 function n = i_peaks(ctrl)
     n = 3;
     if isfield(ctrl,'jPeaks') && ~isempty(ctrl.jPeaks)
@@ -457,7 +487,7 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
-        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[]));
+        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1]));
     SetupSpace(hFig);
     BuildTree();
 end
@@ -538,7 +568,7 @@ function TreeSel_Callback()
             [rows, occMap] = i_group_atoms(st.T, info.g);
             for k = 1:numel(rows), model.addElement(rows{k}); end
         elseif strcmp(info.kind, 'window')
-            [rows, occMap] = i_window_atoms(st.T, info.g, info.w);
+            [rows, occMap] = i_window_atoms(st.T, info.g, info.w, i_field(st,'showPhase',[1 1 1 1]));
             for k = 1:numel(rows), model.addElement(rows{k}); end
             i_jump(st.T.Groups(info.g).times(1, info.w));   % selecting a window jumps to its onset
         elseif strcmp(info.kind, 'atom')
@@ -580,7 +610,8 @@ end
 
 
 %% ===== FLAT, TIME-SORTED ATOMS WITHIN ONE WINDOW (across the band's phase children) =====
-function [rows, occMap] = i_window_atoms(T, gBand, w)
+function [rows, occMap] = i_window_atoms(T, gBand, w, showPhase)
+    if (nargin < 4) || isempty(showPhase), showPhase = [1 1 1 1]; end
     rows = {};  occMap = zeros(0,3);
     G = T.Groups(gBand);
     on = G.times(1,w);  off = G.times(2,w);
@@ -588,6 +619,8 @@ function [rows, occMap] = i_window_atoms(T, gBand, w)
     times = [];  phases = {};  verts = [];  cc = [];  oo = [];
     for c = children(:)'
         Gc = T.Groups(c);
+        pk = i_phase_index(Gc.phase);
+        if (pk >= 1) && ~showPhase(pk), continue; end          % phase filtered out
         nO = size(Gc.times, 2);                 % iterate by occurrence (markers may have NO vertices)
         for o = 1:nO
             t = Gc.times(1,o);
@@ -690,7 +723,7 @@ end
 function i_apply(st)
     setappdata(0, 'DynamicsTarget', st);
     if ~isempty(st.hFig) && ishandle(st.hFig)
-        try, view_dynamics('Redraw', st.hFig, st.T); catch, end %#ok<CTCH>
+        try, view_dynamics('Redraw', st.hFig, st.T, i_field(st,'showPhase',[1 1 1 1])); catch, end %#ok<CTCH>
     end
     BuildTree();
 end

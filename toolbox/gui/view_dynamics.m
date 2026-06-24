@@ -125,7 +125,8 @@ end
 
 
 %% ===== REDRAW MARKERS + REGIONS FROM A (possibly edited) TABLE =====
-function Redraw(hFig, T)
+function Redraw(hFig, T, showPhase)
+    if (nargin < 3) || isempty(showPhase), showPhase = [1 1 1 1]; end
     if isempty(hFig) || ~ishandle(hFig), return; end
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
     if isempty(hAxes), return; end
@@ -148,6 +149,11 @@ function Redraw(hFig, T)
     GroupsPosOff = cell(1, numel(T.Groups));
     for g = 1:numel(T.Groups)
         G = T.Groups(g);
+        pk = i_phase_index(G.phase);
+        if (pk >= 1) && ~showPhase(pk)
+            GroupsPosOff{g} = zeros(0,3);   % phase filtered out: no marker, no region
+            continue;
+        end
         if isempty(G.pos)
             GroupsPosOff{g} = zeros(0,3);   % temporal-only group (no localized occurrence)
             continue;
@@ -189,4 +195,17 @@ function Redraw(hFig, T)
     line(NaN, NaN, NaN, 'Parent', hAxes, ...
         'Marker','o', 'MarkerSize',13, 'MarkerEdgeColor',[1 1 0], ...
         'LineWidth',2, 'LineStyle','none', 'Visible','off', 'Tag','AtomSel');
+end
+
+
+% Phase name -> filter index (peak=1 trough=2 rising=3 falling=4; 0 = not a phase group).
+function k = i_phase_index(ph)
+    if isempty(ph), k = 0; return; end
+    switch lower(char(ph))
+        case 'peak',    k = 1;
+        case 'trough',  k = 2;
+        case 'rising',  k = 3;
+        case 'falling', k = 4;
+        otherwise,      k = 0;
+    end
 end

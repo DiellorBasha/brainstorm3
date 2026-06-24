@@ -172,6 +172,36 @@ function test_dynamics_atoms()
     fprintf('T6 capture-render: regionVerts=%d patch=%d marker=%d roundtrip=%d => %s\n', numel(regionVerts), nReg6, nMk6, rt6, PF{ok6+1});
     pass = pass && ok6;
 
+    % T7: Show-phases filter hides peak rows (list) + peak markers/regions (cortex); non-destructive
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    st = getappdata(0,'DynamicsTarget');  Tt = st.T;  parents = {Tt.Groups.parent};
+    gW = find(cellfun(@isempty,parents) & arrayfun(@(k) strcmp(Tt.Groups(k).bandName,'alpha') && size(Tt.Groups(k).times,1)==2, 1:Tt.nGroups), 1);
+    gPeak = find(arrayfun(@(k) strcmpi(i_t7_str(Tt.Groups(k).phase),'peak') && strcmpi(i_t7_str(Tt.Groups(k).bandName),'alpha'), 1:Tt.nGroups), 1);
+    % localize peak occurrence 1 so it actually has a cortex marker + region to hide
+    SurfT = in_tess_bst(Tt.SurfaceFile, 0);  seed = round(size(SurfT.Vertices,1)/2);
+    rvP = tess_scout_area(Tt.SurfaceFile, seed, 0.008);
+    Tt.Groups(gPeak) = bst_dynamics('AttachRegion', Tt.Groups(gPeak), 1, rvP, seed, SurfT.Vertices(seed,:), 1+(SurfT.Vertices(seed,2)<0));
+    st.T = Tt;  setappdata(0,'DynamicsTarget',st);
+    view_dynamics('Redraw', hFig, st.T, st.showPhase);  drawnow;
+    nPeakMkOn  = numel(findobj(hFig, 'Tag', sprintf('AtomMarker%d', gPeak)));
+    nPeakRegOn = numel(findobj(hFig, '-regexp', 'Tag', sprintf('^AtomRegion%d_', gPeak)));
+    nPeakRows  = i_t7_selwin_peakrows(ctrl, gW);       % select window 1, count 'peak' rows
+    % toggle peak OFF
+    ctrl.jPhaseItems(1).setSelected(false);
+    panel_bst_dynamics('OnTogglePhase', 1);  drawnow;
+    nPeakOff   = i_t7_selwin_peakrows(ctrl, gW);
+    nPeakMkOff = numel(findobj(hFig, 'Tag', sprintf('AtomMarker%d', gPeak)));
+    nPeakRegOff= numel(findobj(hFig, '-regexp', 'Tag', sprintf('^AtomRegion%d_', gPeak)));
+    % toggle peak back ON -> restored
+    ctrl.jPhaseItems(1).setSelected(true);
+    panel_bst_dynamics('OnTogglePhase', 1);  drawnow;
+    nPeakBack  = i_t7_selwin_peakrows(ctrl, gW);
+    ok7 = (nPeakRows>0) && (nPeakMkOn==1) && (nPeakRegOn>=1) ...
+       && (nPeakOff==0) && (nPeakMkOff==0) && (nPeakRegOff==0) && (nPeakBack==nPeakRows);
+    fprintf('T7 phase-filter: rowsOn=%d mkOn=%d regOn=%d | rowsOff=%d mkOff=%d | back=%d => %s\n', ...
+        nPeakRows, nPeakMkOn, nPeakRegOn, nPeakOff, nPeakMkOff, nPeakBack, PF{ok7+1});
+    pass = pass && ok7;
+
     % cleanup
     if ishandle(hFig), close(hFig); end
     if exist(dynFile,'file'), delete(dynFile); end
@@ -187,6 +217,22 @@ function i_close_dyn_figs()
         if ~isempty(getappdata(h, 'GroupsPosOff')) || ~isempty(findobj(h, 'Tag', 'AtomMarker'))
             close(h);
         end
+    end
+end
+
+
+%% ===== T7 HELPERS =====
+function s = i_t7_str(x)
+    if isempty(x), s = ''; else, s = char(x); end
+end
+% Select window w=1 of band group gW in the tree, return how many right-list rows contain 'peak'.
+function n = i_t7_selwin_peakrows(ctrl, gW)
+    st = getappdata(0, 'DynamicsTarget');
+    iWinNode = find(arrayfun(@(k) strcmp(st.nodeInfo(k).kind,'window') && st.nodeInfo(k).g==gW && st.nodeInfo(k).w==1, 1:numel(st.nodeInfo)), 1);
+    ctrl.jTree.setSelectionPath(javax.swing.tree.TreePath(st.nodeList{iWinNode}.getPath()));  drawnow;
+    model = ctrl.jListOccur.getModel();  n = 0;
+    for r = 0:(model.getSize()-1)
+        if ~isempty(strfind(char(model.getElementAt(r)), 'peak')), n = n + 1; end
     end
 end
 
