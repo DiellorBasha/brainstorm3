@@ -143,6 +143,24 @@ source-magnitude peak detector, NOT the Helmholtz cores.
 - T3: `view_dynamics` smoke — figure with atom markers + `AtomSel` + panel with
   all 192 rows; selecting a row moves the selection marker.
 
+## panel_bst_dynamics (increment 1 — bookkeeping core)
+
+A Record-style atom panel (`toolbox/gui/panel_bst_dynamics.m`, panel name `Dynamics`),
+superseding the `panel_dynamics` skeleton (retired to `dev/experimental/`):
+- **File** menu: Open / Save / Save as a `dynamics_*` table.
+- **Atoms** menu: Add / Rename / Delete / Set color / Sort (by name / time) group.
+- **Split pane**: group **JTree** (nested, groups-only) on the left; the selected
+  group's **occurrence JList** on the right — the Record dual-pane idiom. Select a
+  group → its occurrences list; select an occurrence → cortex marker highlight +
+  `panel_time('SetCurrentTime', …)`.
+- Edits modify the in-memory table (`getappdata(0,'DynamicsTarget').T`) then
+  `view_dynamics('Redraw', hFig, T)` (factored marker draw, per-group `AtomMarker<g>`
+  tags, cached surface) + rebuild the tree.
+
+The four analysis axes — **Time** = refphase, **Space** = `panel_helmholtz` (the
+compact one), **Frequency** = band, **Scale** = `bst_eigen` — fold into this panel
+in later increments.
+
 ## Out of scope (later phases)
 
 - Phase 2: a DB tree node for `dynamics_*` (bst-java fork) + file_gettype/
