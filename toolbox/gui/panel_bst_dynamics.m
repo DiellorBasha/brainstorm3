@@ -71,6 +71,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jMenuSort = gui_component('Menu', jMenuAtoms, [], 'Sort groups', IconLoader.ICON_EVT_TYPE, [], []);
     gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
+    jMenuAtoms.addSeparator();
+    gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
 
     % --- split: band stack TREE (left) | flat per-window atom list (right) ---
     jTree = java_create('javax.swing.JTree');
@@ -124,13 +126,20 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jSpaceStr = gui_component('toggle', jSpace, '', char(936), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Stream \Psi (curl: vortices)', @(h,e)bst_call(@()OnSpaceComp('Solen')));
     jCtrl.add(jSpace);
 
+    % --- RECORD row: detect the shaped field's extrema at the cursor -> atoms ---
+    jRec = gui_river([2 2], [0 7 2 7], 'Record');
+    gui_component('label', jRec, '', 'Peaks: ', [], [], [], []);
+    jPeaks = gui_component('text', jRec, '', '3', {Dimension(java_scaled('value',28), BH)}, 'Extrema kept per sign', []);
+    gui_component('button', jRec, 'tab hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor time as atoms', @(h,e)bst_call(@OnRecord));
+    jCtrl.add(jRec);
+
     jPanelNew.add(jCtrl, BorderLayout.NORTH);
 
     jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands, ...
         'jSpaceSmoothOn',jSpaceSmoothOn, 'jSpaceKernel',jSpaceKernel, 'SpaceKernelKeys',{spaceKeys}, ...
-        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr));
+        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks));
 end
 
 
@@ -204,6 +213,115 @@ function i_space_enable(ctrl, tf)
 end
 
 
+%% ===== RECORD: shaped field's extrema at the cursor -> atoms =====
+% Reads the linked Helmholtz decomposition at the current time, detects extrema of the
+% scalar selected by the operator, and appends them to the (band, Function) group --
+% tagged with the panel's (time, band, scale, operator) coordinates. Auto-saves.
+function OnRecord() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    St = getappdata(st.hFig, 'HelmholtzState');
+    if isempty(St)
+        java_dialog('warning', 'Record needs the linked Helmholtz source view (open via a Dirac result).', 'Record atoms');
+        return;
+    end
+    view_helmholtz('UpdateFrame', st.hFig);                        % make sure the cursor frame is current
+    St = getappdata(st.hFig, 'HelmholtzState');
+    [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
+    if isempty(St.Cache) || ~isKey(St.Cache, iT)
+        java_dialog('warning', 'No decomposition at the current time.', 'Record atoms');  return;
+    end
+    Ht = St.Cache(iT);  tCur = TimeVec(iT);
+    % scalar field + Function from the current operator
+    op = i_field(st, 'curOp', 'Total');
+    switch op
+        case 'Irrot', Scal = Ht.Phi;  Func = 'potential';  signed = true;
+        case 'Solen', Scal = Ht.Psi;  Func = 'stream';     signed = true;
+        otherwise,    Scal = Ht.Fmag; Func = 'magnitude';  signed = false;
+    end
+    Surf = getappdata(st.hFig, 'DynamicsSurf');
+    if isempty(Surf), Surf = in_tess_bst(st.T.SurfaceFile, 0);  setappdata(st.hFig, 'DynamicsSurf', Surf); end
+    ex = bst_dynamics('Extrema', Scal, Surf.VertConn, i_peaks(ctrl), signed);
+    if isempty(ex.iVertex)
+        java_dialog('msgbox', 'No extrema in the current field.', 'Record atoms');  return;
+    end
+    v    = double(ex.iVertex(:)');
+    pos  = Surf.Vertices(v, :);
+    hemi = 1 + (Surf.Vertices(v,2) < 0);                          % SCS Y>0 = left
+    band = i_field(st, 'curBand', []);  bandName = i_field(st, 'curBandName', '');
+    % find-or-create the (band, Function) group, then append the cursor-time occurrences
+    g = i_find_group(st.T, bandName, Func);
+    if g < 1
+        G = bst_dynamics('NewGroup', strtrim(sprintf('%s %s', i_disp_band(bandName, band), Func)));
+        G.type='simple';  G.band=band;  G.bandName=bandName;  G.Function=Func;  G.scaleName=i_scale_name(st);
+        G.color = i_op_color(op);  G.SurfaceFile = st.T.SurfaceFile;  G.DataFile = st.T.DataFile;  G.ResultsFile = i_first_results(st.T);
+        st.T = bst_dynamics('AddGroup', st.T, G);  g = numel(st.T.Groups);
+    end
+    G = st.T.Groups(g);  nNew = numel(v);
+    G.times    = [G.times,    repmat(tCur,1,nNew)];   G.epochs   = [G.epochs,   ones(1,nNew)];
+    G.vertices = [G.vertices, v];                     G.pos      = [G.pos;      pos];
+    G.hemi     = [G.hemi,     hemi];                  G.strength = [G.strength, ex.value(:)'];
+    G.charge   = [G.charge,   ex.charge(:)'];         G.type     = 'simple';
+    st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
+    i_apply(st);                                                  % redraw markers + rebuild tree (stores st)
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>  % auto-save
+    bst_progress('text', sprintf('Recorded %d %s atom(s) at %.3f s', nNew, Func, tCur));
+end
+
+function n = i_peaks(ctrl)
+    n = 3;
+    if isfield(ctrl,'jPeaks') && ~isempty(ctrl.jPeaks)
+        x = str2double(char(ctrl.jPeaks.getText()));
+        if ~isnan(x) && (x >= 1), n = round(x); end
+    end
+end
+function val = i_field(st, name, default)
+    if isfield(st, name) && ~isempty(st.(name)), val = st.(name); else, val = default; end
+end
+function g = i_find_group(T, bandName, Func)
+    g = 0;
+    for k = 1:numel(T.Groups)
+        G = T.Groups(k);
+        bn = G.bandName;  if isempty(bn), bn = ''; end
+        fn = G.Function;  if isempty(fn), fn = ''; end
+        qb = bandName;    if isempty(qb), qb = ''; end
+        if isempty(G.parent) && strcmp(bn, qb) && strcmp(fn, Func), g = k;  return; end
+    end
+end
+function s = i_disp_band(bandName, band)
+    if ~isempty(bandName),  s = bandName;
+    elseif ~isempty(band),  s = sprintf('%g-%g Hz', band(1), band(2));
+    else,                   s = 'broadband';  end
+end
+function s = i_scale_name(st)
+    sc = i_field(st, 'curScale', []);
+    if isempty(sc) || ~isstruct(sc) || ~isfield(sc,'on') || ~sc.on, s = 'none';  else, s = sc.name;  end
+end
+function c = i_op_color(op)
+    switch op
+        case 'Irrot', c = [0.95 0.55 0.10];   % potential / divergence  -> orange
+        case 'Solen', c = [0.55 0.20 0.85];   % stream / curl           -> purple
+        otherwise,    c = [0.40 0.40 0.40];   % magnitude               -> gray
+    end
+end
+function r = i_first_results(T)
+    r = '';
+    for k = 1:numel(T.Groups), if ~isempty(T.Groups(k).ResultsFile), r = T.Groups(k).ResultsFile;  return; end; end
+end
+function [rows, occMap] = i_group_atoms(T, g)
+    rows = {};  occMap = zeros(0,3);
+    G = T.Groups(g);
+    [~, ord] = sort(G.times(1,:));
+    for k = ord
+        ch = '+';  if (k <= numel(G.charge))   && (G.charge(k) < 0), ch = '-'; end
+        sv = 0;    if (k <= numel(G.strength)),  sv = G.strength(k); end
+        vx = 0;    if (k <= numel(G.vertices)),  vx = G.vertices(k); end
+        rows{end+1} = sprintf(' %8.3fs  %s  %8.3g  v%d', G.times(1,k), ch, sv, vx); %#ok<AGROW>
+        occMap(end+1,:) = [g, k, 0]; %#ok<AGROW>
+    end
+end
+
+
 %% ===== SET TARGET (called by view_dynamics) =====
 function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
@@ -234,8 +352,9 @@ end
 
 
 %% ===== BUILD THE BAND-STACK TREE =====
-% Top-level extended group = a STACK that expands to its time-window leaves.
-% Top-level simple group = a stack that expands to its single-atom leaves.
+% Top-level EXTENDED group = a STACK that expands to its time-window leaves (select a
+% window -> its atoms on the right). Top-level SIMPLE group (e.g. a recorded band-Function
+% group) = a stack with NO leaves; selecting it lists its atoms on the right.
 function BuildTree()
     import javax.swing.tree.*;
     ctrl = bst_get('PanelControls', 'Dynamics');
@@ -247,24 +366,16 @@ function BuildTree()
     nodeList = {};  nodeInfo = struct('kind',{},'g',{},'w',{});
     for g = find(cellfun(@isempty, parents))         % top-level (band) groups
         G = T.Groups(g);
-        nWin = size(G.times, 2);
-        stackNode = DefaultMutableTreeNode(sprintf('%s  (%d)', G.label, nWin));
+        nOcc = max(size(G.times, 2), numel(G.vertices));
+        stackNode = DefaultMutableTreeNode(sprintf('%s  (%d)', G.label, nOcc));
         root.add(stackNode);
         nodeList{end+1} = stackNode;  nodeInfo(end+1) = struct('kind','stack','g',g,'w',0); %#ok<AGROW>
-        isWin = (size(G.times,1) == 2);
-        for w = 1:nWin
-            if isWin
-                lab  = sprintf(' %.3f - %.3f s', G.times(1,w), G.times(2,w));
-                kind = 'window';
-            elseif (w <= numel(G.vertices))
-                lab  = sprintf(' %.3fs  v%d', G.times(1,w), G.vertices(w));
-                kind = 'atom';
-            else
-                lab  = sprintf(' %.3fs', G.times(1,w));  kind = 'atom';
+        if (size(G.times,1) == 2)                    % extended -> one leaf per time window
+            for w = 1:size(G.times,2)
+                leaf = DefaultMutableTreeNode(sprintf(' %.3f - %.3f s', G.times(1,w), G.times(2,w)));
+                stackNode.add(leaf);
+                nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','window','g',g,'w',w); %#ok<AGROW>
             end
-            leaf = DefaultMutableTreeNode(lab);
-            stackNode.add(leaf);
-            nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind',kind,'g',g,'w',w); %#ok<AGROW>
         end
     end
     ctrl.jTree.setModel(DefaultTreeModel(root));
@@ -292,7 +403,11 @@ function TreeSel_Callback()
     hSel = findobj(st.hFig, 'Tag', 'AtomSel');  if ~isempty(hSel), set(hSel, 'Visible', 'off'); end
     if ~isempty(info)
         st.curGroup = info.g;
-        if strcmp(info.kind, 'window')
+        if strcmp(info.kind, 'stack') && (size(st.T.Groups(info.g).times,1) == 1) && ~isempty(st.T.Groups(info.g).vertices)
+            % simple (recorded) group: list ALL its atoms flat on the right
+            [rows, occMap] = i_group_atoms(st.T, info.g);
+            for k = 1:numel(rows), model.addElement(rows{k}); end
+        elseif strcmp(info.kind, 'window')
             [rows, occMap] = i_window_atoms(st.T, info.g, info.w);
             for k = 1:numel(rows), model.addElement(rows{k}); end
             i_jump(st.T.Groups(info.g).times(1, info.w));   % selecting a window jumps to its onset

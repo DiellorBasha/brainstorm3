@@ -106,6 +106,44 @@ function [pos, color, gIdx, oIdx, labels] = Flatten(T)
 end
 
 
+%% ===== EXTREMA (surface-scalar local maxima/minima -> atom seeds) =====
+% Pure detector for the storage step: the top-N local extrema of a per-vertex scalar
+% field on a surface. The fresh extremum finder behind "Record at cursor".
+%   field    [nV x 1] per-vertex scalar (e.g. Helmholtz Phi / Psi / |J|)
+%   VertConn [nV x nV] sparse vertex adjacency (from in_tess_bst)
+%   nPeaks   keep the top-N by value, per sign (default 3)
+%   signed   true  -> maxima (charge +1) AND minima (charge -1)  [Phi sources/sinks, Psi vortices/anti]
+%            false -> maxima only (charge +1)                    [|J| amplitude peaks]
+% Returns ex.iVertex / ex.value / ex.charge : [1 x M] arrays (M <= nPeaks, or <= 2*nPeaks if signed).
+function ex = Extrema(field, VertConn, nPeaks, signed) %#ok<DEFNU>
+    if (nargin < 3) || isempty(nPeaks), nPeaks = 3;     end
+    if (nargin < 4) || isempty(signed), signed = false; end
+    field = double(field(:));
+    vMax = i_local_ext(field, VertConn, nPeaks, +1);
+    iV = vMax(:)';  val = field(vMax)';  chg = ones(1, numel(vMax));
+    if signed
+        vMin = i_local_ext(field, VertConn, nPeaks, -1);
+        iV = [iV, vMin(:)'];  val = [val, field(vMin)'];  chg = [chg, -ones(1, numel(vMin))];
+    end
+    ex = struct('iVertex', iV, 'value', val, 'charge', chg);
+end
+
+% Top-N vertices that are local extrema of sgn*field (sgn=+1 maxima, -1 minima).
+function vPk = i_local_ext(field, VertConn, nPeaks, sgn)
+    f  = sgn * field(:);
+    nV = numel(f);
+    [ii, jj] = find(VertConn);                              % undirected edges (symmetric)
+    if isempty(ii)
+        nbMax = -inf(nV, 1);
+    else
+        nbMax = accumarray(ii, f(jj), [nV 1], @max, -inf);  % per-vertex neighbour maximum
+    end
+    cand = find(f >= nbMax);                                % >= all neighbours
+    [~, ord] = sort(f(cand), 'descend');
+    vPk = cand(ord(1:min(nPeaks, numel(cand))));
+end
+
+
 %% ===== LOAD =====
 function T = Load(DynamicsFile)
     % Phase 1: load by absolute path (the 'dynamics_' type is not yet registered
