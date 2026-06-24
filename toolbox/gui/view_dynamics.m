@@ -41,11 +41,12 @@ function varargout = view_dynamics( varargin )
     end
 
     % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
+    SrcResult = '';
     if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'FromResult')
-        DynamicsFile = AtomsFromResult(varargin{2});
+        SrcResult = varargin{2};
+        DynamicsFile = AtomsFromResult(SrcResult);
         if isempty(DynamicsFile), return; end
     else
-        % ===== LOAD TABLE =====
         DynamicsFile = varargin{1};
     end
     T = bst_dynamics('Load', DynamicsFile);
@@ -58,8 +59,31 @@ function varargout = view_dynamics( varargin )
         error('view_dynamics: table has no SurfaceFile.');
     end
 
-    % ===== OPEN CORTEX + DRAW MARKERS =====
-    hFig = view_surface(SurfaceFile);
+    % ===== PROVENANCE: source result + recording for the linked figures =====
+    if isempty(SrcResult)
+        for g = 1:numel(T.Groups)
+            if ~isempty(T.Groups(g).ResultsFile), SrcResult = T.Groups(g).ResultsFile;  break; end
+        end
+    end
+    DataFile = T.DataFile;
+    if isempty(DataFile)
+        for g = 1:numel(T.Groups)
+            if ~isempty(T.Groups(g).DataFile), DataFile = T.Groups(g).DataFile;  break; end
+        end
+    end
+
+    % ===== OPEN THE LINKED FIGURES =====
+    % Spatial view = the Helmholtz source 3D (atom markers are drawn on THIS cortex); temporal
+    % view = the recording time series. Both follow the global time cursor. Fall back to a bare
+    % surface when the table has no source/recording provenance.
+    if ~isempty(SrcResult)
+        hFig = view_helmholtz(SrcResult);
+        if ~isempty(DataFile)
+            try, view_timeseries(DataFile); catch, end %#ok<CTCH>
+        end
+    else
+        hFig = view_surface(SurfaceFile);
+    end
     setappdata(hFig, 'DynamicsFile', DynamicsFile);
     Redraw(hFig, T);
 

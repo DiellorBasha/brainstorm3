@@ -94,9 +94,55 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jSplit.setPreferredSize(java_scaled('dimension', 360, 420));
     jPanelAtoms.add(jSplit, BorderLayout.CENTER);
 
+    % ===== CONTROL area (above Atoms): the atom-coordinate selectors =====
+    jCtrl = JPanel();  jCtrl.setLayout(BoxLayout(jCtrl, BoxLayout.Y_AXIS));
+    % --- FREQUENCY section: ephys band toggles -> temporal bandpass (Filter-tab DSP) ---
+    BW = java_scaled('value', 34);  BH = java_scaled('value', 22);
+    jFreq = gui_river([2 2], [0 7 2 7], 'Frequency');
+    bandDefs = i_bands();
+    jBands = javaArray('javax.swing.JToggleButton', size(bandDefs,1));
+    for i = 1:size(bandDefs,1)
+        tip = sprintf('%s (%g-%g Hz) band-pass (display filter, full sources)', bandDefs{i,1}, bandDefs{i,2}(1), bandDefs{i,2}(2));
+        jb  = gui_component('toggle', jFreq, '', bandDefs{i,3}, {Insets(0,0,0,0), Dimension(BW,BH)}, tip, @(h,e)bst_call(@()OnBand(i)));
+        jBands(i) = jb;
+    end
+    jCtrl.add(jFreq);
+    jPanelNew.add(jCtrl, BorderLayout.NORTH);
+
     jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, ...
-        struct('jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms));
+        struct('jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands));
+end
+
+
+%% ===== FREQUENCY band toggles -> display bandpass (drives time series + Helmholtz source) =====
+function OnBand(i)
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    if isempty(ctrl) || ~isfield(ctrl, 'jBands'), return; end
+    b  = i_bands();
+    on = ctrl.jBands(i).isSelected();
+    if on
+        for k = 1:numel(ctrl.jBands), if (k ~= i), ctrl.jBands(k).setSelected(false); end; end
+        lo = b{i,2}(1);  hi = b{i,2}(2);
+        panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);   % LP=hi, HP=lo, FullSources=1
+    else
+        panel_filter('SetFilters', 0, [], 0, [], 0, [], 0, 0);   % no band selected -> raw
+    end
+    % remember the band on the atom target (the frequency coordinate)
+    st = getappdata(0, 'DynamicsTarget');
+    if ~isempty(st)
+        if on, st.curBand = b{i,2};  st.curBandName = b{i,1};  else, st.curBand = [];  st.curBandName = ''; end
+        setappdata(0, 'DynamicsTarget', st);
+    end
+end
+
+% Standard EEG/MEG bands (delta/theta/alpha/beta/gamma): {name, [lo hi], greek-label}
+function b = i_bands()
+    b = {'delta',[2 4],  char(948); ...
+         'theta',[4 8],  char(952); ...
+         'alpha',[8 13], char(945); ...
+         'beta', [13 30],char(946); ...
+         'gamma',[30 60],char(947)};
 end
 
 
