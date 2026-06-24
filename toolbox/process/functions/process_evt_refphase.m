@@ -18,16 +18,18 @@ function varargout = process_evt_refphase( varargin )
 % yields a clean, free amplitude trace for thresholding.
 %
 % Reference-phase markers (4 per cycle): a band-limited GFP is sign-blind, so it
-% oscillates at TWICE the target frequency (2f). Its extrema therefore fall on the
-% four phase landmarks of every cycle -- GFP peaks = field-magnitude maxima (alpha
-% extrema), GFP troughs = field minima (alpha zero-crossings) -- which gives robust,
-% multi-channel TIMING. The SIGN of each landmark (which it cannot resolve on its
-% own) is read from the single highest-(band-)power sensor, per marker:
-%   - GFP peak   -> ref at an extremum:  sign(ref)>0 = "_peak",  <0 = "_trough"
-%   - GFP trough -> ref crosses zero:    slope(ref)>0 = "_rising", <0 = "_falling"
-% Per-marker classification is robust to a skipped/extra extremum (unlike strict
-% alternation). The reference sensor's positive peak defines the alpha-peak polarity.
-% Each period's onset/offset snap to its first/last alpha extremum (integer cycles).
+% oscillates at TWICE the target frequency (2f), and its ANALYTIC PHASE is monotonic
+% -- so its landmarks never skip. phi=0 (upward) = a field-magnitude maximum (alpha
+% extremum), phi wrapping +pi->-pi = a field minimum (alpha zero-crossing). The GFP
+% cannot tell peak from trough or rising from falling, so the polarity is resolved
+% ONCE per period: the sign of the highest-(band-)power sensor at its strongest field
+% maximum (where that sensor sits at its own extremum, so the sign is unambiguous)
+% says whether that maximum is an alpha peak or trough; the rest follow by enforced
+% alternation -- maxima alternate peak/trough, the single crossing after a peak is
+% "_falling", after a trough is "_rising". Reading the polarity at one reliable
+% extremum (not the noisy zero-crossing slope, per marker) is what makes the four
+% phases un-skippable. Each period's onset/offset snap to its first/last alpha
+% extremum (integer cycles). PhaseValue() maps each type to its numeric phase [rad].
 %
 % Robustness (ported from the artifact detector process_evt_detect):
 %   - Bad segments are excluded from BOTH the threshold estimate and detection.
@@ -441,51 +443,40 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
         end
     end
 
-    % ===== PHASE-MARKER TIMING FROM THE GFP AT 2f =====
-    % The band GFP is sign-blind, so it oscillates at 2f and its extrema fall on
-    % the 4 phase landmarks of every alpha cycle: GFP peaks = field-magnitude
-    % maxima (alpha extrema), GFP troughs = field minima (alpha zero-crossings).
+    % ===== PHASE-MARKER TIMING FROM THE MONOTONIC GFP PHASE =====
+    % The band GFP at 2f has a monotonic analytic phase, so its landmarks never
+    % skip: phi=0 (upward) = a field-magnitude maximum (an alpha extremum, peak OR
+    % trough); phi wrapping +pi->-pi = a field minimum (an alpha zero-crossing,
+    % rising OR falling). The GFP is sign-blind, so within a burst its maxima
+    % alternate peak/trough and its minima alternate falling/rising -- we resolve
+    % the polarity ONCE per period (at the highest-|ref| maximum, where the
+    % reference channel is at its own alpha extremum and its sign is unambiguous)
+    % and propagate every other label by alternation -- no per-marker sign test.
     fLow2  = 2 * OPTIONS.freqRange(1);
     fHigh2 = min(2 * OPTIONS.freqRange(2), 0.95 * sFreq/2);
     doMarkers = (fLow2 < fHigh2);    % disabled only if 2f reaches Nyquist
     if doMarkers
         gfp2 = process_bandpass('Compute', gfp, sFreq, fLow2, fHigh2, 'bst-hfilter-2019', 0);
-        dg = diff(gfp2);
-        gpk = find(dg(1:end-1) > 0 & dg(2:end) <= 0) + 1;   % GFP maxima = alpha extrema
-        gtr = find(dg(1:end-1) < 0 & dg(2:end) >= 0) + 1;   % GFP minima = alpha zero-crossings
-        gpk = gpk(valid(gpk));
-        gtr = gtr(valid(gtr));
+        phi  = angle(hilbert(gfp2));                                  % monotonic GFP phase, (-pi,pi]
+        gpk  = find(phi(1:end-1) <  0    & phi(2:end) >= 0)    + 1;   % phi=0 upward  -> field extremum
+        gtr  = find(phi(1:end-1) >  pi/2 & phi(2:end) < -pi/2) + 1;   % +pi->-pi wrap -> zero-crossing
+        gpk  = gpk(valid(gpk));
+        gtr  = gtr(valid(gtr));
     else
         gpk = [];  gtr = [];
     end
 
-    % ===== PHASE LABELS FROM THE HIGHEST-POWER SENSOR (sign only) =====
-    % GFP gives precise, robust timing but cannot tell peak from trough or rising
-    % from falling. Resolve each marker's sign against the single highest-(band-)
-    % power sensor (per-marker => robust to a skipped/extra extremum):
-    %   GFP peak   : ref is at an extremum -> sign(ref)>0 = peak,  <0 = trough
-    %   GFP trough : ref crosses zero      -> slope(ref)>0 = rising, <0 = falling
-    % The reference sensor's positive peak defines the alpha-peak polarity.
+    % Reference channel for the one-per-period polarity seed = highest band-power
+    % sensor (at a field maximum it sits at its own alpha extremum, so its sign is
+    % unambiguous -- unlike the noisy zero-crossing slope the old code relied on).
     if size(Fbp, 1) > 1
         [~, iRef] = max(var(Fbp(:, valid), 0, 2));
     else
         iRef = 1;
     end
     ref = Fbp(iRef, :);
-    pkPeak = []; pkTrough = []; trRise = []; trFall = [];
-    if ~isempty(gpk)
-        isPk     = ref(gpk) >= 0;
-        pkPeak   = gpk(isPk);
-        pkTrough = gpk(~isPk);
-    end
-    if ~isempty(gtr)
-        wSlope = max(1, round(sFreq / (8 * fc)));           % ~1/8 of a cycle
-        slope  = ref(min(gtr + wSlope, nSamples)) - ref(max(gtr - wSlope, 1));
-        trRise = gtr(slope >= 0);
-        trFall = gtr(slope < 0);
-    end
 
-    % ===== SNAP PERIODS TO CYCLES + COLLECT 4 PHASE MARKERS =====
+    % ===== SNAP PERIODS TO CYCLES + LABEL 4 PHASES BY ALTERNATION =====
     minDurSamples = round(OPTIONS.minDuration * sFreq);
     keepOn = [];  keepOff = [];
     aPk = []; aTr = []; aRis = []; aFal = [];
@@ -496,7 +487,7 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
             if numel(pkIn) < 2                       % no genuine oscillation: drop
                 continue;
             end
-            on  = pkIn(1);                           % snap onset/offset to first/last alpha extremum
+            on  = pkIn(1);                           % snap onset/offset to first/last field extremum
             off = pkIn(end);
         end
         if (off - on + 1) < minDurSamples            % enforce min duration on final bounds
@@ -504,12 +495,33 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
         end
         keepOn(end+1)  = on;   %#ok<AGROW>
         keepOff(end+1) = off;  %#ok<AGROW>
-        if doMarkers
-            aPk  = [aPk,  pkPeak(pkPeak   >= on & pkPeak   <= off)];   %#ok<AGROW>
-            aTr  = [aTr,  pkTrough(pkTrough >= on & pkTrough <= off)]; %#ok<AGROW>
-            aRis = [aRis, trRise(trRise   >= on & trRise   <= off)];   %#ok<AGROW>
-            aFal = [aFal, trFall(trFall   >= on & trFall   <= off)];   %#ok<AGROW>
+        if ~doMarkers, continue; end
+        % --- polarity seed: the field maximum with the largest |ref| (most reliable sign) ---
+        [~, iSeed] = max(abs(ref(pkIn)));
+        seedIsPeak = (ref(pkIn(iSeed)) >= 0);        % that maximum is an alpha peak (else trough)
+        sameAsSeed = (mod((1:numel(pkIn)) - iSeed, 2) == 0);   % maxima alternate peak/trough
+        if seedIsPeak
+            peakMax   = pkIn(sameAsSeed);   troughMax = pkIn(~sameAsSeed);
+        else
+            troughMax = pkIn(sameAsSeed);   peakMax   = pkIn(~sameAsSeed);
         end
+        isPeakMax = sameAsSeed == seedIsPeak;        % true where maximum k is an alpha peak
+        % --- exactly ONE zero-crossing between each consecutive pair of maxima ---
+        % Structural alternation: max,min,max,min cannot break even if phase noise
+        % adds/drops a wrap. A crossing right after a peak is falling, after a trough rising.
+        risC = [];  falC = [];
+        for k = 1:numel(pkIn)-1
+            a = pkIn(k);  b = pkIn(k+1);
+            seg = gtr(gtr > a & gtr < b);
+            if isempty(seg)
+                [~, rel] = min(gfp2(a:b));  m = a + rel - 1;   % phase-noise gap: use the gfp2 minimum
+            else
+                m = seg(ceil(numel(seg)/2));                   % the wrap (ignore any noise extras)
+            end
+            if isPeakMax(k), falC(end+1) = m; else, risC(end+1) = m; end %#ok<AGROW>
+        end
+        aPk  = [aPk,  peakMax];    aTr  = [aTr,  troughMax]; %#ok<AGROW>
+        aRis = [aRis, risC];       aFal = [aFal, falC];      %#ok<AGROW>
     end
 
     % ===== BUILD OUTPUTS =====
@@ -523,6 +535,22 @@ function [evt, markers, stats] = Compute(F, TimeVector, OPTIONS, validMask)
     if ~isempty(aRis), markers.rising  = TimeVector(sort(aRis)); end
     if ~isempty(aFal), markers.falling = TimeVector(sort(aFal)); end
     stats = i_stats(keepOn, keepOff, nSamples, TimeVector, Thi, Tlo, OPTIONS);
+end
+
+
+%% ===== PHASE VALUE (radians) FOR A PHASE-MARKER TYPE =====
+% The numeric alpha phase each marker type lands on (analytic-phase convention,
+% phi = angle(hilbert(reference alpha))): peak=0, falling=+pi/2, trough=+/-pi,
+% rising=-pi/2. Stored on the atom so the four phases stay distinguishable as a
+% value, not only as a label. Returns NaN for an unknown name.
+function v = PhaseValue(name)
+    switch lower(name)
+        case 'peak',    v =  0;
+        case 'falling', v =  pi/2;
+        case 'trough',  v =  pi;
+        case 'rising',  v = -pi/2;
+        otherwise,      v =  NaN;
+    end
 end
 
 
