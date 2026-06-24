@@ -28,10 +28,11 @@ over that box. This is the target model.
 ### 2.1 Localization — the one primitive
 
 ```
-Localization = (center c, extent w)        a kernel / region on its axis
+Localization = (center c, extent w, weighting g)   a kernel / region on its axis
   point        when w = 0                  a single t / f / vertex / eigenvalue
   window       when w > 0                  interval / band / geodesic disk / eigen-band
   unlocalized  when undefined              the axis is not yet pinned
+  weighting g  hard (default) | soft       sharp cutoff vs a smooth (wavelet) decay — see 2.6
 ```
 
 The **three-state** per axis (unlocalized / point / window) is essential: it is what lets a detector
@@ -48,10 +49,12 @@ axes are localized.
 | **Source** | seed vertex (+ 3-D pos) | geodesic radius | heat-distance disk | `tess_scout_area` |
 | **Scale** | center eigenvalue | eigenvalue bandwidth | eigenfilter | `panel_eigenfilter_design` |
 
-Time↔Frequency is the **wavelet / Heisenberg box**; Source↔Scale is its **graph-Fourier analog**.
-The four axes are therefore two `(center,extent) × (center,extent)` conjugate planes — which is what
-makes joint **wavelet markers** (a time+frequency box) and **spatial-scale markers** (a source+scale
-box) fall out of the same grammar later, with no new abstraction.
+Each kernel above is the **hard** form; every axis also has a **soft / wavelet** form (§2.6) using the
+same `center`+`extent`, differing only by the weighting. Time↔Frequency is the **wavelet / Heisenberg
+box**; Source↔Scale is its **graph-Fourier analog**. The four axes are therefore two
+`(center,extent) × (center,extent)` conjugate planes — which is what makes joint **wavelet markers**
+(a time+frequency box) and **spatial-scale markers** (a source+scale box) fall out of the same grammar
+later, with no new abstraction.
 
 ### 2.3 Three concerns, kept separate
 
@@ -83,6 +86,33 @@ label**. A tensor **atlas** maps regions of any axis to names:
 
 The atlas is a *labelling layer over the numeric tensor* — deferred, but the model reserves the
 optional-label slot so it can be added without a schema change. **Future development.**
+
+### 2.6 Weighted windows — wavelets as soft localizations
+
+The kernels in §2.2 are **hard** windows: sharp cutoffs (a boxcar interval, a geodesic disk truncated
+at an isoline, a rectangular band, an eigenfilter passband). A **wavelet** is the *same* localization
+with a **weighting function** `g` that decays smoothly from the center instead of cutting off — so the
+primitive is `(center, extent, weighting)` where the `extent` sets the kernel scale and `g ∈ {hard
+(default), soft}` sets sharp-vs-smooth. **It is the same engine as center+extent, plus a weighting
+function.**
+
+This is already standard on the time–frequency plane: a Morlet / Gabor wavelet is a center-frequency +
+bandwidth with a Gaussian envelope, smoothly localized in **both** time and frequency at once (this is
+exactly what Brainstorm's time-frequency wavelet analysis does). The same construction extends to the
+source–scale plane:
+
+- **Source** — the geodesic **heat-distance** field is *already* a smooth scalar. Truncating it at an
+  isoline gives the hard disk; **not** truncating it gives a heat-kernel-weighted region — a spatial
+  wavelet centered at the seed (the geodesic-area engine with the weighting kept instead of thresholded).
+- **Scale** — `bst_eigen` / `bst_eigenwavelet` define **spectral wavelets** on the eigenvalue axis: a
+  smooth eigenfilter response (itersine tight frame) rather than a hard eigen-band.
+
+So every axis has a hard form and a soft (wavelet) form from one `center`+`extent`, differing only by
+`g`. **Joint wavelets** then follow with no new abstraction: a single smooth kernel localized
+*simultaneously* on all four axes (time × frequency × source × scale) — the tensor product of the
+per-axis weightings. A joint-wavelet atom is the soft-`g` generalization of the hard-window atom: same
+4-D index, same engines, weighted instead of truncated. **Future development**, but the primitive is
+designed for it now (the `weighting` slot).
 
 ## 3. The panel as a 4-axis navigator
 
@@ -196,6 +226,7 @@ makes every later phase uniform).
 ## 8. Out of scope (here)
 
 - Any code changes — this is analysis only.
-- The atlas/labelling layer (future).
-- Joint wavelet / spatial-scale box markers (future, enabled by the conjugate-plane grammar).
+- The atlas/labelling layer (future, §2.5).
+- Soft/weighted-window **wavelets** and **joint wavelets** (future, §2.6) — the model and the
+  `weighting` slot are designed for them, but implementation is deferred.
 - Scale-axis detector science (eigen-salience) beyond noting where it plugs in.
