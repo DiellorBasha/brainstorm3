@@ -206,6 +206,37 @@ function test_dynamics_atoms()
         nPeakRows, nPeakMkOn, nPeakRegOn, nPeakOff, nPeakMkOff, nPeakBack, PF{ok7+1});
     pass = pass && ok7;
 
+    % T8: OnCaptureRegion reads bst_geodesic_tool('GetState') (Scout-decoupled capture)
+    st = getappdata(0,'DynamicsTarget');  Tt = st.T;
+    SurfT8 = in_tess_bst(Tt.SurfaceFile, 0);  seed8 = round(size(SurfT8.Vertices,1)/4);
+    bst_geodesic_tool('Seed', Tt.SurfaceFile, seed8);          % seed the dynamics tool (no scout)
+    gs8 = bst_geodesic_tool('GetState');
+    % select occurrence 1 of the trough phase child as the active atom
+    iWinNode8 = find(arrayfun(@(k) strcmp(st.nodeInfo(k).kind,'window'), 1:numel(st.nodeInfo)), 1);
+    ctrl = bst_get('PanelControls','Dynamics');
+    ctrl.jTree.setSelectionPath(javax.swing.tree.TreePath(st.nodeList{iWinNode8}.getPath()));  drawnow;
+    % find a list row that is a trough occurrence and select it
+    model = ctrl.jListOccur.getModel();  rowSel = -1;
+    for r = 0:(model.getSize()-1)
+        if ~isempty(strfind(char(model.getElementAt(r)), 'trough')), rowSel = r; break; end
+    end
+    nG8 = 0;
+    if (rowSel >= 0)
+        ctrl.jListOccur.setSelectedIndex(rowSel);  drawnow;
+        st = getappdata(0,'DynamicsTarget');  row = ctrl.jListOccur.getSelectedIndex()+1;
+        g8 = st.occMap(row,1);  o8 = st.occMap(row,2);
+        panel_bst_dynamics('OnCaptureRegion');  drawnow;
+        st = getappdata(0,'DynamicsTarget');
+        nG8 = numel(st.T.Groups(g8).region);  reg8 = st.T.Groups(g8).region{o8};
+        capOK = ~isempty(reg8) && isequal(double(reg8), double(gs8.vertices)) && (st.T.Groups(g8).vertices(o8)==seed8);
+    else
+        capOK = false;
+    end
+    ok8 = ~isempty(gs8) && (rowSel>=0) && capOK;
+    fprintf('T8 capture-via-tool: seeded=%d rowSel=%d regionWritten=%d => %s\n', ~isempty(gs8), (rowSel>=0), capOK, PF{ok8+1});
+    pass = pass && ok8;
+    bst_geodesic_tool('Clear', hFig);
+
     % cleanup
     if ishandle(hFig), close(hFig); end
     if exist(dynFile,'file'), delete(dynFile); end

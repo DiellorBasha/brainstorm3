@@ -143,7 +143,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('label', jRec, '', 'Peaks: ', [], [], [], []);
     jPeaks = gui_component('text', jRec, '', '3', {Dimension(java_scaled('value',28), BH)}, 'Extrema kept per sign', []);
     gui_component('button', jRec, 'tab hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor time as atoms', @(h,e)bst_call(@OnRecord));
-    gui_component('button', jRec, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the selected Scout''s vertices into the selected atom (localizes a time-only marker)', @(h,e)bst_call(@OnCaptureRegion));
+    jRegionTool = gui_component('toggle', jRec, 'br', 'Region tool', [], 'Heat-disk tool: click a cortex vertex to seed a region, scroll to grow/shrink it', @(h,e)bst_call(@()bst_geodesic_tool('Toggle', ctrl_region_state())));
+    gui_component('button', jRec, 'tab hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom (localizes a time-only marker)', @(h,e)bst_call(@OnCaptureRegion));
     jCtrl.add(jRec);
 
     jPanelNew.add(jCtrl, BorderLayout.NORTH);
@@ -152,7 +153,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands, ...
         'jSpaceSmoothOn',jSpaceSmoothOn, 'jSpaceKernel',jSpaceKernel, 'SpaceKernelKeys',{spaceKeys}, ...
-        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
+        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems, 'jRegionTool',jRegionTool));
 end
 
 
@@ -390,24 +391,30 @@ function OnCaptureRegion() %#ok<DEFNU>
     end
     SurfaceFile = st.T.SurfaceFile;
     if isempty(SurfaceFile) && ~isempty(st.T.Groups), SurfaceFile = st.T.Groups(g).SurfaceFile; end
-    % the geodesic region = the currently selected Scout (grown with the Scout "Area" tool)
-    [sScout, ~, sSurf] = panel_scout('GetSelectedScouts');
-    if isempty(sScout) || isempty(sScout(1).Vertices)
-        java_dialog('warning', 'Grow a region with the Scout "Area" tool first.', 'Capture region');  return;
+    % the geodesic region = the dynamics Region tool's current heat-disk (no scout)
+    gs = bst_geodesic_tool('GetState');
+    if isempty(gs) || isempty(gs.vertices)
+        java_dialog('warning', 'Seed a region with the Region tool first.', 'Capture region');  return;
     end
-    sScout = sScout(1);
-    if ~isempty(sSurf) && ~isempty(SurfaceFile) && ~file_compare(sSurf.FileName, SurfaceFile)
-        java_dialog('warning', 'The selected region is on a different surface than the atoms.', 'Capture region');  return;
+    if ~isempty(gs.SurfaceFile) && ~isempty(SurfaceFile) && ~file_compare(gs.SurfaceFile, SurfaceFile)
+        java_dialog('warning', 'The region is on a different surface than the atoms.', 'Capture region');  return;
     end
-    if ~isempty(sScout.Seed), seed = double(sScout.Seed(1)); else, seed = double(sScout.Vertices(1)); end
-    Surf = getappdata(st.hFig, 'DynamicsSurf');
-    if isempty(Surf), Surf = in_tess_bst(SurfaceFile, 0);  setappdata(st.hFig, 'DynamicsSurf', Surf); end
-    pos  = Surf.Vertices(seed, :);
+    seed = double(gs.seed);
+    pos  = gs.pos;
     hemi = 1 + (pos(2) < 0);                                       % SCS Y>0 = left
-    st.T.Groups(g) = bst_dynamics('AttachRegion', st.T.Groups(g), o, sScout.Vertices, seed, pos, hemi);
+    st.T.Groups(g) = bst_dynamics('AttachRegion', st.T.Groups(g), o, gs.vertices, seed, pos, hemi);
     i_apply(st);                                                   % redraw markers/regions + rebuild tree
     if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Captured %d-vertex region into "%s"', numel(sScout.Vertices), st.T.Groups(g).label));
+    bst_progress('text', sprintf('Captured %d-vertex region into "%s"', numel(gs.vertices), st.T.Groups(g).label));
+end
+
+% Region-tool toggle state (1 when pressed) -> bst_geodesic_tool('Toggle', state)
+function s = ctrl_region_state()
+    s = 0;
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    if ~isempty(ctrl) && isfield(ctrl,'jRegionTool') && ~isempty(ctrl.jRegionTool)
+        s = double(ctrl.jRegionTool.isSelected());
+    end
 end
 
 %% ===== SHOW-PHASES FILTER (display-only; never deletes atoms) =====
