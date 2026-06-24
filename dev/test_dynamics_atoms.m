@@ -37,6 +37,26 @@ function test_dynamics_atoms()
         strcmp(T2.Groups(2).parent,'win'), strcmp(T2.Groups(1).type,'extended'), strcmp(T2.Groups(2).type,'simple'), PF{ok1+1});
     pass = pass && ok1;
 
+    % ---------- T1b: region field default + AttachRegion padding/localization ----------
+    hasRegion = isfield(db_template('atomgroup'), 'region');
+    % a time-only marker: 3 occurrences, no space yet
+    M = bst_dynamics('NewGroup', 'mk');
+    M.type='simple';  M.times=[0.10 0.20 0.30];  M.phase='peak';
+    M2 = bst_dynamics('AttachRegion', M, 2, [11 12 13 14], 12, [0.01 0.02 0.03], 1);
+    padOK = isequal(size(M2.pos),[3 3]) && (numel(M2.vertices)==3) && (numel(M2.region)==3) ...
+         && isequal(M2.region{2}, [11 12 13 14]) && (M2.vertices(2)==12) ...
+         && isequal(M2.pos(2,:), [0.01 0.02 0.03]) && (M2.hemi(2)==1) ...
+         && isnan(M2.vertices(1)) && isempty(M2.region{1}) && all(isnan(M2.pos(1,:)));
+    % round-trip preserves the region cell + schema
+    Tr = bst_dynamics('New','rt');  Tr = bst_dynamics('AddGroup', Tr, M2);
+    fr = fullfile(bst_get('BrainstormTmpDir'), 'dyn_region_unit.mat');
+    bst_dynamics('Save', fr, Tr);  Tr2 = bst_dynamics('Load', fr);
+    rtOK = isequal(Tr2.Groups(1).region{2}, [11 12 13 14]) ...
+        && isequal(fieldnames(Tr2.Groups), fieldnames(db_template('atomgroup')));
+    ok1b = hasRegion && padOK && rtOK;
+    fprintf('T1b region/AttachRegion: field=%d pad=%d roundtrip=%d => %s\n', hasRegion, padOK, rtOK, PF{ok1b+1});
+    pass = pass && ok1b;
+
     % ---------- T2 + T3: populate + viewer (need a kernel link) ----------
     [linkFile, relData] = i_find_kernel();
     if isempty(linkFile)

@@ -144,6 +144,50 @@ function vPk = i_local_ext(field, VertConn, nPeaks, sgn)
 end
 
 
+%% ===== ATTACH REGION (localize occurrence o with a geodesic region + seed) =====
+% Pads the per-occurrence arrays to full length N = size(G.times,2), then writes occurrence o's
+% seed (vertices/pos/hemi) and region. A time-only marker (empty vertices/pos) becomes partially
+% localized: occurrence o gains a finite seed + region; the other occurrences stay NaN/[] (time only).
+%   o           occurrence column to localize (1..N)
+%   regionVerts [1 x k] cortex vertex indices of the geodesic disk (snapshot copy)
+%   seed        scalar seed vertex index
+%   pos         [1 x 3] seed position (SCS)
+%   hemi        scalar 1=L 2=R
+function G = AttachRegion(G, o, regionVerts, seed, pos, hemi) %#ok<DEFNU>
+    N = size(G.times, 2);
+    if (o < 1) || (o > N)
+        error('bst_dynamics:AttachRegion', 'Occurrence %d out of range (N=%d).', o, N);
+    end
+    G.vertices = i_pad_row(G.vertices, N);
+    G.hemi     = i_pad_row(G.hemi,     N);
+    G.strength = i_pad_row(G.strength, N);
+    G.charge   = i_pad_row(G.charge,   N);
+    G.pos      = i_pad_pos(G.pos,      N);
+    G.region   = i_pad_cell(G.region,  N);
+    G.vertices(o) = double(seed);
+    G.hemi(o)     = double(hemi);
+    G.pos(o, :)   = double(pos(:)');
+    G.region{o}   = double(regionVerts(:)');
+    G.type = 'simple';
+end
+
+% Pad a [1 x m] numeric row to length N with NaN ([] -> all-NaN).
+function v = i_pad_row(v, N)
+    if isempty(v),          v = nan(1, N);
+    elseif (numel(v) < N),  v(end+1:N) = NaN;  end
+end
+% Pad a [m x 3] position matrix to N rows with NaN ([] -> all-NaN).
+function p = i_pad_pos(p, N)
+    if isempty(p),           p = nan(N, 3);
+    elseif (size(p,1) < N),  p(end+1:N, :) = NaN;  end
+end
+% Pad a {1 x m} cell to length N with [] ({} -> all-empty).
+function c = i_pad_cell(c, N)
+    if isempty(c),          c = cell(1, N);
+    elseif (numel(c) < N),  c(end+1:N) = {[]};  end
+end
+
+
 %% ===== LOAD =====
 function T = Load(DynamicsFile)
     % Phase 1: load by absolute path (the 'dynamics_' type is not yet registered
