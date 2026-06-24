@@ -149,10 +149,14 @@ A Record-style atom panel (`toolbox/gui/panel_bst_dynamics.m`, panel name `Dynam
 superseding the `panel_dynamics` skeleton (retired to `dev/experimental/`):
 - **File** menu: Open / Save / Save as a `dynamics_*` table.
 - **Atoms** menu: Add / Rename / Delete / Set color / Sort (by name / time) group.
-- **Split pane**: group **JTree** (nested, groups-only) on the left; the selected
-  group's **occurrence JList** on the right — the Record dual-pane idiom. Select a
-  group → its occurrences list; select an occurrence → cortex marker highlight +
+- **Reuses the Record Events-section components** (max UI reuse): a colored group
+  **JList** (`BstColorListRenderer` + `BstListItem`/`setColor`; child phase groups
+  *indented* under their window) on the left, the selected group's **occurrence
+  JList** (`BstStringListRenderer`) on the right, in a `JSplitPane`. Select a group
+  → its occurrences; select an occurrence → cortex marker highlight +
   `panel_time('SetCurrentTime', …)`.
+- **Docked** as a tools tab (`gui_show(bstPanel,'BrainstormTab','tools')`), like
+  Record/Helmholtz — not a floating window.
 - Edits modify the in-memory table (`getappdata(0,'DynamicsTarget').T`) then
   `view_dynamics('Redraw', hFig, T)` (factored marker draw, per-group `AtomMarker<g>`
   tags, cached surface) + rebuild the tree.
