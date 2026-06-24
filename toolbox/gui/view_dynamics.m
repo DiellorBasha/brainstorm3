@@ -50,11 +50,9 @@ function varargout = view_dynamics( varargin )
         DynamicsFile = varargin{1};
     end
     T = bst_dynamics('Load', DynamicsFile);
-    if isempty(T.Groups)
-        error('view_dynamics: no atom groups in %s', DynamicsFile);
-    end
+    % An empty table is fine: the panel opens and "Detect" creates the first atoms.
     SurfaceFile = T.SurfaceFile;
-    if isempty(SurfaceFile), SurfaceFile = T.Groups(1).SurfaceFile; end
+    if isempty(SurfaceFile) && ~isempty(T.Groups), SurfaceFile = T.Groups(1).SurfaceFile; end
     if isempty(SurfaceFile)
         error('view_dynamics: table has no SurfaceFile.');
     end
@@ -102,30 +100,27 @@ function varargout = view_dynamics( varargin )
 end
 
 
-%% ===== GET A DYNAMICS TABLE FOR A DIRAC SOURCE RESULT (reuse newest, else detect) =====
+%% ===== GET A DYNAMICS TABLE FOR A DIRAC SOURCE RESULT (reuse newest, else empty) =====
+% Returns the newest dynamics_*.mat in the result's study folder, or creates an EMPTY
+% table carrying provenance (DataFile / SurfaceFile). The panel's "Detect windows" is the
+% first atom-creation step -- no atoms are auto-populated here.
 function DynamicsFile = AtomsFromResult(ResultsFile)
     DynamicsFile = '';
-    R = in_bst_results(ResultsFile, 0, 'DataFile');
+    R = in_bst_results(ResultsFile, 0, 'DataFile', 'SurfaceFile');
     if isempty(R.DataFile)
-        bst_error('This result has no associated recording (DataFile).', 'Source atoms', 0);  return;
+        bst_error('This result has no associated recording (DataFile).', 'Atoms', 0);  return;
     end
     studyDir = bst_fileparts(file_fullpath(R.DataFile));
-    % Reuse the newest dynamics_*.mat already in the study folder, if any
     d = dir(fullfile(studyDir, 'dynamics_*.mat'));
-    if isempty(d)
-        % None yet: run the detector (default alpha) to create one
-        bst_progress('start', 'Source atoms', 'Detecting source atoms...');
-        bst_process('CallProcess', 'process_source_atoms', ResultsFile, [], 'freqband','alpha', 'npeaks',3);
-        bst_progress('stop');
-        d = dir(fullfile(studyDir, 'dynamics_*.mat'));
+    if ~isempty(d)
+        [~, ix] = max([d.datenum]);
+        DynamicsFile = fullfile(studyDir, d(ix).name);  return;
     end
-    if isempty(d)
-        bst_error(['No source atoms were created. The recording needs band events first -- ' 10 ...
-                   'run "Detect bursts (phase polarity)" on it, then retry.'], 'Source atoms', 0);
-        return;
-    end
-    [~, ix] = max([d.datenum]);
-    DynamicsFile = fullfile(studyDir, d(ix).name);
+    % None yet: create an empty table with provenance; Detect creates the first atoms.
+    T = bst_dynamics('New', 'atoms');
+    T.DataFile = R.DataFile;  T.SurfaceFile = R.SurfaceFile;
+    DynamicsFile = bst_process('GetNewFilename', studyDir, 'dynamics');
+    bst_dynamics('Save', DynamicsFile, T);
 end
 
 
