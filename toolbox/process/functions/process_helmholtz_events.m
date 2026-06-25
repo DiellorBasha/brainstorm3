@@ -14,8 +14,8 @@ function varargout = process_helmholtz_events( varargin )
 %
 % Pipeline (mirrors view_helmholtz):
 %   J(t) = ImagingKernel * Fbp(GoodChannel, t),  Fbp = bandpass(sensors, band)
-%   Op   = bst_helmholtz('Prepare', {Dirac,LBO}, Manifold, Surf, 'Domain','vertex')
-%   Ht   = bst_helmholtz('Frame', Op, J(t), false)   % cores off (detection is a later step)
+%   Cov  = tess_operators(SurfaceFile, 'Covariant')
+%   Ht   = process_helmholtz('Compute', J(t), Cov)   % Hodge decomp, no core detection
 %
 % Input  : a kernel-link results file (UNCONSTRAINED, nComponents==3).
 % Output : 4 results files, one frame per event (Time = the event times).
@@ -167,14 +167,10 @@ function OutputFiles = Run(sProcess, sInputs)
         Fgood = F(R.GoodChannel, :);
         Fbp   = process_bandpass('Compute', Fgood, sFreq, FreqRange(1), FreqRange(2), 'bst-hfilter-2019', 0);
 
-        % ===== PREPARE HELMHOLTZ OPERATOR (once) =====
-        bst_progress('text', sprintf('File %d/%d: Preparing Helmholtz operator...', iFile, length(sInputs)));
+        % ===== RESOLVE COVARIANT OPERATOR (once per file) =====
+        bst_progress('text', sprintf('File %d/%d: Loading Covariant operator...', iFile, length(sInputs)));
         Cov = tess_operators(R.SurfaceFile, 'Covariant');
-        LBO   = tess_operators(R.SurfaceFile, 'Laplace-Beltrami');
-        Surf  = in_tess_bst(R.SurfaceFile, 0);
-        Mani  = tess_manifold(R.SurfaceFile);
-        Op    = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain', 'vertex');
-        nV    = Op.nVtot;
+        nV  = max(cellfun(@(c) max(double(c(:))), Cov.GlobalVertices));
 
         % ===== DECOMPOSE AT EACH EVENT =====
         Jvec = zeros(3*nV, nE);
@@ -185,7 +181,7 @@ function OutputFiles = Run(sProcess, sInputs)
             bst_progress('text', sprintf('File %d/%d: Helmholtz frame %d/%d...', iFile, length(sInputs), k, nE));
             bst_progress('set', progressPos + round(100 * k / nE));
             J  = R.ImagingKernel * Fbp(:, iT(k));     % [3nV x 1] unconstrained source vector
-            Ht = bst_helmholtz('Frame', Op, J, false);% cores off (detection is a later step)
+            Ht = process_helmholtz('Compute', J, Cov); % Hodge decomp (no core detection)
             Fmag(:, k)  = Ht.Fmag;
             Phi(:, k)   = Ht.Phi;
             Psi(:, k)   = Ht.Psi;

@@ -84,13 +84,12 @@ function test_bst_operators()
     nFail = nFail + chk('div(rot grad f) ~ 0 (rms ratio < 1e-3)', rms(dvr(msk))/rms(dgf(msk)) < 1e-3);
     nFail = nFail + chk('curl(rot grad f) ~ Laplace-Beltrami (corr > 0.95)', ccm(cvr,lap) > 0.95);
 
-    % ----- helmholtz delegate Curl == bst_helmholtz directly -----
+    % ----- helmholtz delegate Curl == process_helmholtz('Compute') directly -----
     J    = sin((1:3*nV)'*0.31);
     Cop  = run('helmholtz', J);
-    Mani = tess_manifold(SurfaceFile);
-    Dir  = tess_operators(SurfaceFile, 'Dirac');
-    Hd   = bst_helmholtz('Decompose', {Dir, LBO}, Mani, Surf, J);
-    nFail = nFail + chk('helmholtz delegate Curl == bst_helmholtz (bit-identical)', isequal(Cop, Hd.Curl));
+    Cov  = tess_operators(SurfaceFile, 'Covariant');
+    Hd   = process_helmholtz('Compute', J, Cov);
+    nFail = nFail + chk('helmholtz delegate Curl == process_helmholtz Curl (bit-identical)', isequal(Cop, Hd.Curl));
 
     fprintf('\n==== test_bst_operators: %d failed ====\n', nFail);
 end
