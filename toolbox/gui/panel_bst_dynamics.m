@@ -548,6 +548,74 @@ function [ctrl, st] = i_cs()
 end
 
 
+%% ===== BIDIRECTIONAL FOCUS: re-entrancy guard =====
+% True while the panel is DRIVING a figure selection (panel->view), so a redraw-triggered
+% hook cannot echo back (view->panel) and create a feedback loop.
+function tf = i_driving(varargin)
+    persistent FLAG;
+    if isempty(FLAG), FLAG = false; end
+    if (nargin >= 1), FLAG = logical(varargin{1}); end
+    tf = FLAG;
+end
+
+%% ===== NOTIFY SELECTION (view -> panel) =====
+% Called by figure_timeseries (axis='time') / figure_spectrum (axis='freq') on mouse-up
+% when the user edited a native selection box. range=[lo hi] in seconds (time) or Hz (freq).
+% No-op unless a Dynamics session owns the notifying figure and we are not mid-drive.
+function NotifySelection(hFig, axis, range) %#ok<DEFNU>
+    if i_driving(), return; end
+    st = getappdata(0, 'DynamicsTarget');
+    if isempty(st), return; end
+    if isempty(range) || (numel(range) < 2) || any(~isfinite(range)), return; end
+    range = sort(double(range(:)'));
+    switch axis
+        case 'freq'
+            if ~i_owns_spec(st, hFig), return; end
+            i_sync_freq(st, range);
+        case 'time'
+            if ~i_owns_rec(st, hFig), return; end
+            i_sync_time(st, range);
+    end
+end
+
+%% ===== FOCUS OWNERSHIP / FIGURE LOOKUP =====
+% The recording time-series figure for this Dynamics session (matches st.T.DataFile);
+% falls back to any DataTimeSeries figure (the time selection is linked across them anyway).
+function hFig = i_rec_figure(st)
+    global GlobalData; %#ok<TLEV>
+    hFig = [];
+    if isempty(st) || ~isfield(st,'T') || isempty(st.T) || isempty(st.T.DataFile), return; end
+    hAll = bst_figures('GetFiguresByType', {'DataTimeSeries'});
+    for h = hAll(:)'
+        [~,~,iDS] = bst_figures('GetFigure', h);
+        if ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).DataFile) && file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile)
+            hFig = h;  return;
+        end
+    end
+    if ~isempty(hAll), hFig = hAll(1); end
+end
+function tf = i_owns_rec(st, hFig)
+    global GlobalData; %#ok<TLEV>
+    tf = false;
+    if isempty(hFig) || ~ishandle(hFig) || isempty(st.T.DataFile), return; end
+    [~,~,iDS] = bst_figures('GetFigure', hFig);
+    if isempty(iDS) || isempty(GlobalData.DataSet(iDS).DataFile), return; end
+    tf = file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile);
+end
+function tf = i_owns_spec(st, hFig)
+    tf = isfield(st,'hSpec') && ~isempty(st.hSpec) && ishandle(st.hSpec) && isequal(double(st.hSpec), double(hFig));
+end
+
+%% ===== BAND MATCH: a [lo hi] range -> preset name or 'custom' =====
+function nm = i_band_match(lo, hi)
+    nm = 'custom';
+    b = i_bands();
+    for k = 1:size(b,1)
+        if (abs(b{k,2}(1) - lo) < 0.51) && (abs(b{k,2}(2) - hi) < 0.51), nm = b{k,1};  return; end
+    end
+end
+
+
 %% ===== SYNC the Source block fields from the geodesic tool state =====
 function SyncSource() %#ok<DEFNU>
     [ctrl, st] = i_cs();
@@ -880,6 +948,7 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
         'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1], ...
+        'hSpec',[], 'focusTime',[], 'detSel',[], ...
         'nav', bst_dynamics('NewGroup', 'cursor')));
     BuildTree();
 end
