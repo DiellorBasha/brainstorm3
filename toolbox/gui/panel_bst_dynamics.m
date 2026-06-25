@@ -49,13 +49,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     jPanelNew = gui_component('Panel');
 
-    % ===== ATOMS section (own bordered/titled component, like Events in Record) =====
-    jPanelAtoms = gui_component('Panel');
-    jPanelAtoms.setBorder(BorderFactory.createCompoundBorder( ...
-        BorderFactory.createEmptyBorder(0,7,7,7), java_scaled('titledborder', 'Atoms')));
-
-    % --- menu bar: File, Atoms (ICON_MENU + per-item icons, like Record) ---
-    jMenuBar = gui_component('MenuBar', jPanelAtoms, BorderLayout.NORTH);
+    % ===== MENU BAR (NORTH of the whole panel): File + the rich Atoms menu (scout-style) =====
+    jMenuBar = gui_component('MenuBar', jPanelNew, BorderLayout.NORTH);
     jMenuBar.setPreferredSize(java_scaled('dimension', 20, 20));
     jMenuFile = gui_component('Menu', jMenuBar, [], 'File', IconLoader.ICON_MENU, [], [], 11);
     gui_component('MenuItem', jMenuFile, [], 'Open dynamics table...', IconLoader.ICON_FOLDER_OPEN, [], @(h,e)bst_call(@FileOpen));
@@ -105,56 +100,49 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, jScrollTree, jScrollOccur);
     jSplit.setResizeWeight(0.5);  jSplit.setDividerSize(java_scaled('value', 4));  jSplit.setBorder([]);
     jSplit.setPreferredSize(java_scaled('dimension', 360, 420));
-    jPanelAtoms.add(jSplit, BorderLayout.CENTER);
 
-    % ===== CONTROL area: the 4-axis (center,extent) navigator =====
-    jCtrl = JPanel();  jCtrl.setLayout(BoxLayout(jCtrl, BoxLayout.Y_AXIS));
-    BW = java_scaled('value', 30);  BH = java_scaled('value', 22);
+    % ===== MAIN (CENTER): atoms list (CENTER, dominant) + action toolbar (EAST) + navigator (SOUTH) =====
+    BH = java_scaled('value', 22);
+    jPanelMain = gui_component('Panel');
+    jPanelMain.setBorder(BorderFactory.createEmptyBorder(0,7,7,7));
 
-    % TIME block (no preset yet)
-    [jTimeC, jTimeW] = i_axis_block(jCtrl, 'time', 'Time', 'center', char(177), []);
+    % vertical action toolbar (EAST), scout jToolbar2 style: Detect / Save / Show / Clear / Measure
+    jToolbar2 = gui_component('Toolbar', jPanelMain, BorderLayout.EAST);
+    jToolbar2.setOrientation(jToolbar2.VERTICAL);
+    jToolbar2.setPreferredSize(java_scaled('dimension', 28, 20));
+    jToolbar2.setBorder([]);
+    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_EVT_TYPE_ADD, 'Detect windows: run the band-power detector on the selected band (preview events; not saved)', @(h,e)bst_call(@OnDetect));
+    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_SAVE, 'Save: commit the staged detection to atoms, or pin the current source region as an atom', @(h,e)bst_call(@OnSave));
+    jToolbar2.addSeparator();
+    jShow = gui_component('ToolbarToggle', jToolbar2, [], '', IconLoader.ICON_SCOUT_ALL, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
+    jShow.setSelected(true);
+    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_EVT_TYPE_DEL, 'Clear: discard the staged detection preview (no save)', @(h,e)bst_call(@OnClearDetection));
+    jToolbar2.addSeparator();
+    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_PROPERTIES, 'Measure: choose the differential map (None / Divergence / Curl / Potential / Stream)', @(h,e)bst_call(@()OnMeasureMenu(h)));
 
-    % FREQUENCY block + band-atlas preset combobox (right slot)
+    % atoms list = CENTER (primary, dominant)
+    jPanelMain.add(jSplit, BorderLayout.CENTER);
+
+    % navigator strip (SOUTH): Frequency / Source / Scale (Time removed -- the global Brainstorm
+    % cursor already drives it). Collapsible re-design deferred; a compact titled strip for now.
+    jNav = JPanel();  jNav.setLayout(BoxLayout(jNav, BoxLayout.Y_AXIS));
+    jNav.setBorder(java_scaled('titledborder', 'Navigator'));
     bnames = i_bands();  bandItems = [{'none'}; bnames(:,1); {'custom'}];
     jFreqBand = gui_component('combobox', [], [], [], {bandItems}, [], [], []);
     jFreqBand.setSelectedItem('none');                          % panel opens broadband (no filter)
     java_setcb(jFreqBand, 'ActionPerformedCallback', @(h,e)bst_call(@OnFreqPreset));
-    [jFreqC, jFreqW] = i_axis_block(jCtrl, 'freq', 'Frequency', 'center', char(177), jFreqBand);
-
-    % SOURCE block + Region tool (right slot) -- the seed/radius picker
+    [jFreqC, jFreqW] = i_axis_block(jNav, 'freq', 'Frequency', 'center', char(177), jFreqBand);
     jRegionTool = gui_component('toggle', [], '', 'Region', {Insets(0,0,0,0), Dimension(java_scaled('value',54),BH)}, 'Heat-disk tool: ON = click a vertex to seed (center) + scroll to grow the radius (window); OFF = clear the Source selection', @(h,e)bst_call(@OnRegionTool));
-    [jSrcC, jSrcW] = i_axis_block(jCtrl, 'source', 'Source', 'center', 'radius', jRegionTool);
+    [jSrcC, jSrcW] = i_axis_block(jNav, 'source', 'Source', 'center', 'radius', jRegionTool);
+    [jScaleC, jScaleW] = i_axis_block(jNav, 'scale', 'Scale', 'center', char(177), []);
+    jPanelMain.add(jNav, BorderLayout.SOUTH);
 
-    % SCALE block (basic: window -> heat smoothing; center reserved for Phase 5)
-    [jScaleC, jScaleW] = i_axis_block(jCtrl, 'scale', 'Scale', 'center', char(177), []);
-
-    % MEASUREMENT row (differential operator selector; not an axis) + actions
-    jMeas = gui_river([2 2], [0 7 2 7], 'Measurement');
-    jMeasOp = gui_component('combobox', jMeas, '', [], {{'Divergence','Curl','Potential','Stream'}}, ...
-        'Differential operator painted on the cortex (ephemeral; div/curl from process_helmholtz, potential/stream = their Poisson potentials)', ...
-        @(h,e)bst_call(@OnMeasurement));
-    gui_component('label', jMeas, 'tab', '  Peaks:', [], [], [], []);
-    jPeaks = gui_component('text', jMeas, '', '3', {Dimension(java_scaled('value',26), BH)}, 'Extrema kept per sign', []);
-    jCtrl.add(jMeas);
-
-    % ACTIONS row (kept: Detect / Record / Capture)
-    jAct = gui_river([2 2], [0 7 2 7], 'Actions');
-    gui_component('button', jAct, 'hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
-    gui_component('button', jAct, 'br hfill', 'Save detection', [], 'Promote the staged detection events into saved atoms (with numeric frequency)', @(h,e)bst_call(@OnSaveDetection));
-    gui_component('button', jAct, 'br hfill', 'Save cursor', [], 'Commit the current 4-D cursor as one atom', @(h,e)bst_call(@OnSaveCursor));
-    gui_component('button', jAct, 'br hfill', 'Clear preview',  [], 'Discard the staged detection events without saving', @(h,e)bst_call(@OnClearDetection));
-    gui_component('button', jAct, 'br hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor as atoms', @(h,e)bst_call(@OnRecord));
-    gui_component('button', jAct, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom', @(h,e)bst_call(@OnCaptureRegion));
-    jCtrl.add(jAct);
-
-    jPanelNew.add(jCtrl, BorderLayout.NORTH);
-
-    jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
+    jPanelNew.add(jPanelMain, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
-        'jTimeC',jTimeC, 'jTimeW',jTimeW, 'jFreqC',jFreqC, 'jFreqW',jFreqW, 'jFreqBand',jFreqBand, ...
+        'jFreqC',jFreqC, 'jFreqW',jFreqW, 'jFreqBand',jFreqBand, ...
         'jSrcC',jSrcC, 'jSrcW',jSrcW, 'jRegionTool',jRegionTool, 'jScaleC',jScaleC, 'jScaleW',jScaleW, ...
-        'jMeasOp',jMeasOp, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
+        'jShow',jShow, 'jPhaseItems',jPhaseItems));
 end
 
 
@@ -192,21 +180,23 @@ end
 %% ===== READ a block's (center, extent) into a Localization =====
 function loc = i_read_block(ctrl, axis)
     loc = bst_atom('NewLoc', axis);
+    % Time has NO widget -- the global Brainstorm cursor drives it: read the live current time.
+    if strcmp(axis, 'time')
+        global GlobalData; %#ok<TLEV>
+        if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
+            loc.center = GlobalData.UserTimeWindow.CurrentTime;
+        end
+        loc.extent = 0;
+        if isfinite(loc.center), loc.state = 'point'; end
+        return;
+    end
     switch axis
-        case 'time',   jC = ctrl.jTimeC;  jW = ctrl.jTimeW;
         case 'freq',   jC = ctrl.jFreqC;  jW = ctrl.jFreqW;
         case 'source', jC = ctrl.jSrcC;   jW = ctrl.jSrcW;
         case 'scale',  jC = ctrl.jScaleC; jW = ctrl.jScaleW;
         otherwise, return;
     end
     c = str2double(char(jC.getText()));  w = str2double(char(jW.getText()));
-    % Time block tracks the global cursor: an empty center field captures the live current time.
-    if strcmp(axis,'time') && isnan(c)
-        global GlobalData; %#ok<TLEV>
-        if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
-            c = GlobalData.UserTimeWindow.CurrentTime;
-        end
-    end
     if ~isnan(c), loc.center = c; end
     if ~isnan(w), loc.extent = abs(w); else, loc.extent = 0; end
     if strcmp(axis,'source') && isfinite(loc.extent), loc.extent = loc.extent / 1000; end   % jSrcW is mm -> metres
@@ -266,14 +256,71 @@ end
 
 
 %% ===== MEASUREMENT (differential operator descriptor; not an axis) =====
-function OnMeasurement() %#ok<DEFNU>
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
-    name = char(ctrl.jMeasOp.getSelectedItem());          % 'Divergence'|'Curl'|'Potential'|'Stream'
+% Measure toolbar button -> popup menu of the differential maps (None default + Div/Curl/Pot/Stream).
+function OnMeasureMenu(jButton) %#ok<DEFNU>
+    [~, st] = i_cs();
+    curOp = 'none';  if ~isempty(st), curOp = i_field(st, 'curOp', 'none'); end
+    items = {'none','None'; 'Divergence','Divergence'; 'Curl','Curl'; 'Potential','Potential'; 'Stream','Stream'};
+    jPopup = java_create('javax.swing.JPopupMenu');
+    grp    = java_create('javax.swing.ButtonGroup');
+    for i = 1:size(items,1)
+        op = items{i,1};
+        ri = gui_component('RadioMenuItem', jPopup, [], items{i,2}, [], [], @(h,e)bst_call(@()OnMeasurement(op)));
+        grp.add(ri);
+        if strcmpi(curOp, op), ri.setSelected(true); end
+    end
+    jPopup.show(jButton, 0, jButton.getHeight());
+end
+
+% Apply a chosen differential map (or 'none' = native source display).
+function OnMeasurement(name) %#ok<DEFNU>
+    [~, st] = i_cs();
+    if isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
     D = getappdata(st.hFig, 'DynamicsOverlay');
     if ~isempty(D), D.Op = name; setappdata(st.hFig, 'DynamicsOverlay', D); end
-    view_dynamics('RefreshOverlay', st.hFig);             % free re-select from the per-frame cache
     st.curOp = name;  setappdata(0, 'DynamicsTarget', st);
+    if strcmpi(name, 'none')
+        % restore the native source map: reset the cortex colormap back to 'source' (the overlay
+        % left it 'stat2'), re-assert 'source' as the figure's active colorbar (the lazy stat2
+        % registration had taken it over), then repaint the native RMS-norm scalar + raw quivers.
+        TI = getappdata(st.hFig, 'Surface');
+        if ~isempty(D) && ~isempty(TI) && (D.iTess <= numel(TI))
+            TI(D.iTess).ColormapType = 'source';  setappdata(st.hFig, 'Surface', TI);
+        end
+        bst_colormaps('AddColormapToFigure', st.hFig, 'source');
+        panel_surface('UpdateSurfaceData', st.hFig);
+    else
+        view_dynamics('RefreshOverlay', st.hFig);         % free re-select from the per-frame cache
+    end
+end
+
+% Save toolbar button: commit the staged detection to atoms if one is staged, else pin the cursor.
+function OnSave() %#ok<DEFNU>
+    if i_has_staged_detection()
+        OnSaveDetection();
+    else
+        OnSaveCursor();
+    end
+end
+function tf = i_has_staged_detection()
+    tf = false;
+    evs = panel_record('GetEvents', [], 1);
+    if isempty(evs), return; end
+    isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
+    tf = any(isDet);
+end
+
+% Show toolbar toggle: show/hide ALL atom phases at once (syncs the per-phase menu checkboxes).
+function OnShowAll() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st), return; end
+    on = true;
+    if isfield(ctrl,'jShow') && ~isempty(ctrl.jShow), on = ctrl.jShow.isSelected(); end
+    st.showPhase = double([on on on on]);  setappdata(0, 'DynamicsTarget', st);
+    if isfield(ctrl,'jPhaseItems') && ~isempty(ctrl.jPhaseItems)
+        for ip = 1:4, try, ctrl.jPhaseItems(ip).setSelected(on); catch, end; end %#ok<CTCH>
+    end
+    i_apply(st);
 end
 
 
@@ -489,24 +536,26 @@ end
 
 %% ===== SAVE CURSOR: commit the live 4-D cursor (st.nav) as ONE atom =====
 function OnSaveCursor() %#ok<DEFNU>
-    [~, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
+    [ctrl, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
+    st.nav = bst_atom('Set', st.nav, 'time', 1, i_read_block(ctrl, 'time'));   % time from the global cursor (no widget)
     lt = bst_atom('Get', st.nav, 'time');     lf = bst_atom('Get', st.nav, 'freq');
     ls = bst_atom('Get', st.nav, 'source');   lk = bst_atom('Get', st.nav, 'scale'); %#ok<NASGU>
     if ~isfinite(lt.center)
         java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
     end
     band = st.curBand;  bandName = i_field(st, 'curBandName', '');
-    op   = i_field(st, 'curOp', 'Divergence');
+    op   = i_field(st, 'curOp', 'none');
     switch op
         case 'Divergence', Func = 'divergence';
         case 'Curl',       Func = 'curl';
         case 'Potential',  Func = 'potential';
         case 'Stream',     Func = 'stream';
-        otherwise,         Func = 'divergence';
+        otherwise,         Func = 'source';     % 'none' = the raw source map (no differential measured)
     end
-    % measured descriptor at the cursor (operator scalar at the seed, if localized + cached)
+    % measured descriptor at the cursor (operator scalar at the seed, if localized + cached + a
+    % differential is selected). In 'none' the atom records only its location (strength NaN).
     strength = NaN;  charge = NaN;
-    if isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
+    if ~strcmpi(op,'none') && isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
         D = getappdata(st.hFig, 'DynamicsOverlay');
         if ~isempty(D) && isfield(D,'Cache')
             [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
@@ -566,7 +615,7 @@ end
 % Write a Localization's center/window into the axis block's fields (source window in mm).
 function i_fill_block(ctrl, axis, loc)
     switch axis
-        case 'time',   jC=ctrl.jTimeC;  jW=ctrl.jTimeW;   wv=loc.extent;
+        case 'time',   return;   % no widget -- the global cursor drives time; nothing to fill
         case 'freq',   jC=ctrl.jFreqC;  jW=ctrl.jFreqW;   wv=loc.extent;
         case 'source', jC=ctrl.jSrcC;   jW=ctrl.jSrcW;    wv=loc.extent*1000;   % metres -> mm
         case 'scale',  jC=ctrl.jScaleC; jW=ctrl.jScaleW;  wv=loc.extent;
@@ -590,6 +639,10 @@ end
 function OnRecord() %#ok<DEFNU>
     [ctrl, st] = i_cs();
     if isempty(ctrl) || isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    if strcmpi(i_field(st, 'curOp', 'none'), 'none')
+        java_dialog('warning', 'Choose a Measurement (Divergence / Curl / Potential / Stream) before recording extrema.', 'Record atoms');
+        return;
+    end
     D = getappdata(st.hFig, 'DynamicsOverlay');
     if isempty(D)
         java_dialog('warning', 'Record needs the linked dynamics source view (open via a Dirac result).', 'Record atoms');

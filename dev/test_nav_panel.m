@@ -19,9 +19,9 @@ function test_nav_panel()
     ctrl = bst_get('PanelControls', 'Dynamics');
 
     % ---------- T1: controls struct has the new block handles, not the old ones ----------
-    ok1 = all(isfield(ctrl, {'jFreqC','jFreqW','jFreqBand','jTimeC','jTimeW','jSrcC','jSrcW','jScaleC','jScaleW','jMeasOp','jRegionTool'})) ...
-       && ~isfield(ctrl,'jBands') && ~isfield(ctrl,'jSpaceStr') && ~isfield(ctrl,'jMeasStr');
-    fprintf('T1 handles: newBlocks=%d oldGone=%d => %s\n', all(isfield(ctrl,{'jFreqC','jMeasOp'})), ~isfield(ctrl,'jMeasStr'), PF{ok1+1});
+    ok1 = all(isfield(ctrl, {'jFreqC','jFreqW','jFreqBand','jSrcC','jSrcW','jScaleC','jScaleW','jShow','jRegionTool'})) ...
+       && ~isfield(ctrl,'jTimeC') && ~isfield(ctrl,'jMeasOp') && ~isfield(ctrl,'jPeaks');
+    fprintf('T1 handles: newBlocks=%d oldGone=%d => %s\n', all(isfield(ctrl,{'jFreqC','jShow'})), ~isfield(ctrl,'jMeasOp'), PF{ok1+1});
     pass = pass && ok1;
 
     % ---------- T2: freq block -> st.nav freq Localization + display filter ----------
@@ -40,13 +40,15 @@ function test_nav_panel()
     fprintf('T3 band preset: center=%g window=%g => %s\n', c, w, PF{ok3+1});
     pass = pass && ok3;
 
-    % ---------- T4: measurement combobox -> differential overlay Op + curOp ----------
-    ctrl.jMeasOp.setSelectedItem('Curl');
-    panel_bst_dynamics('OnMeasurement');  drawnow;
+    % ---------- T4: measurement (popup-driven) -> differential overlay Op + curOp; None restores native ----------
+    panel_bst_dynamics('OnMeasurement', 'Curl');  drawnow;
     st = getappdata(0,'DynamicsTarget');
     D = getappdata(st.hFig, 'DynamicsOverlay');
     ok4 = strcmp(st.curOp,'Curl') && ~isempty(D) && strcmp(D.Op,'Curl');
-    fprintf('T4 measurement: curOp=%s overlayOp=%s => %s\n', st.curOp, D.Op, PF{ok4+1});
+    panel_bst_dynamics('OnMeasurement', 'none');  drawnow;
+    D = getappdata(st.hFig, 'DynamicsOverlay');  TI = getappdata(st.hFig,'Surface');
+    ok4 = ok4 && strcmp(D.Op,'none') && strcmpi(TI(D.iTess).ColormapType,'source');
+    fprintf('T4 measurement: Curl->overlayOp=%s, None->colormap=%s => %s\n', 'Curl', TI(D.iTess).ColormapType, PF{ok4+1});
     pass = pass && ok4;
 
     % ---------- T5: Source block syncs from the geodesic tool ----------

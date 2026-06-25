@@ -267,20 +267,21 @@ function hFig = i_open_source_figure(SrcResult)
     bst_progress('stop');
     [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResult, [], 'NewFigure');
     if isempty(hFig), return; end
-    % The differential maps are signed -> register the diverging 'stat2' colormap so the
-    % figure's colorbar + CLim track the symmetric scale (the overlay sets TessInfo.ColormapType
-    % to 'stat2', but UpdateSurfaceColormap's CLim branch only fires when the FIGURE colormap
-    % type matches). All four operators are signed, so this is set once at open.
-    bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     iTess = i_find_tess(hFig);
     % full field shown by default (the Data threshold slider drives the overlay magnitude)
     TI = getappdata(hFig,'Surface');
     if iTess <= numel(TI), TI(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI); end
-    D = struct('Cov',Cov, 'Op','Divergence', ...
+    % Default state = 'none': show the native source map (RMS-norm colormap) + the raw source
+    % vector quivers. The differential operators are opt-in via the Measure menu; the 'stat2'
+    % diverging colormap is registered lazily on first differential pick (i_dynamics_overlay).
+    D = struct('Cov',Cov, 'Op','none', ...
                'Cache',containers.Map('KeyType','double','ValueType','any'), ...
                'srcDS',iDSf, 'srcResult',iResult, 'iTess',iTess, 'nV',nV);
     setappdata(hFig, 'DynamicsOverlay', D);
     setappdata(hFig, 'CustomOverlayFcn', @(h) i_dynamics_overlay(h));   % fires per frame
+    % Turn the native source-vector quivers ON once, so they show in the default state. After
+    % this the toggle is the user's (figure_3d) concern -- the overlay never touches it again.
+    try, figure_3d('SetShowSourceVectors', hFig, iTess, 1); catch, end %#ok<CTCH>
     i_dynamics_overlay(hFig);                                          % paint the first frame
 end
 
@@ -289,6 +290,9 @@ end
 function i_dynamics_overlay(hFig)
     if isempty(hFig) || ~ishandle(hFig), return; end
     D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    % 'none' = no differential overlay: leave whatever the native pipeline painted (the RMS-norm
+    % source scalar + 'source' colormap + raw source-vector quivers). Nothing to do.
+    if strcmpi(D.Op, 'none'), return; end
     TessInfo = getappdata(hFig, 'Surface');
     if isempty(TessInfo) || (D.iTess > numel(TessInfo)) || ~ishandle(TessInfo(D.iTess).hPatch), return; end
     [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
@@ -299,10 +303,11 @@ function i_dynamics_overlay(hFig)
         D.Cache(iT) = process_helmholtz('Compute', Jt, D.Cov);        % one call, all fields
         setappdata(hFig, 'DynamicsOverlay', D);
     end
+    bst_colormaps('AddColormapToFigure', hFig, 'stat2');   % lazy: signed differential -> diverging colorbar
     scal = i_pick_scalar(D.Cache(iT), D.Op);
     TessInfo(D.iTess).Data         = scal;
     TessInfo(D.iTess).DataMinMax   = i_minmax(scal);
-    TessInfo(D.iTess).ColormapType = 'stat2';      % all four operators are signed
+    TessInfo(D.iTess).ColormapType = 'stat2';      % the four differential operators are signed
     setappdata(hFig, 'Surface', TessInfo);
     panel_surface('UpdateSurfaceColormap', hFig);
 end

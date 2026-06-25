@@ -132,8 +132,7 @@ function test_dynamics_atoms()
 
     % T4: Record at cursor -> (band, Function) atom group accumulates (signed extrema)
     ctrl.jFreqBand.setSelectedItem('alpha');  panel_bst_dynamics('OnFreqPreset');  drawnow;          % alpha band (preset fills fields + drives)
-    ctrl.jMeasStr.setSelected(true);  panel_bst_dynamics('OnMeasurement','Solen');  drawnow;          % Psi (stream)
-    ctrl.jPeaks.setText('2');  drawnow;
+    panel_bst_dynamics('OnMeasurement','Stream');  drawnow;          % Psi (stream)
     tRec = mean(Tv.Groups(gBand).times(:,bestW));
     panel_time('SetCurrentTime', tRec);  drawnow;
     nG0 = getappdata(0,'DynamicsTarget').T.nGroups;

@@ -53,7 +53,7 @@ function test_detect_save()
 
     % ---------- T4: Save cursor commits ONE atom from st.nav ----------
     ctrl.jFreqC.setText('10');  ctrl.jFreqW.setText('2');  panel_bst_dynamics('OnAxisChange','freq');  drawnow;
-    ctrl.jMeasStr.setSelected(true);  panel_bst_dynamics('OnMeasurement','Solen');  drawnow;       % Function = stream
+    panel_bst_dynamics('OnMeasurement','Stream');  drawnow;       % Function = stream
     st = getappdata(0,'DynamicsTarget');  nOcc0 = 0;
     gC0 = find(arrayfun(@(k) strcmp(st.T.Groups(k).Function,'stream') && strcmp(st.T.Groups(k).bandName,'alpha'), 1:st.T.nGroups), 1);
     if ~isempty(gC0), nOcc0 = numel(st.T.Groups(gC0).times); end
