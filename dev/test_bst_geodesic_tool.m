@@ -44,5 +44,22 @@ function test_bst_geodesic_tool()
     pass = pass && ok3;
     if ishandle(hFig), close(hFig); end
 
+    % ---------- T4: disk renders on the DISPLAYED (morphed) vertices, not the stored ones ----------
+    hFig = view_surface(SurfaceFile);  drawnow;
+    bst_geodesic_tool('Seed', SurfaceFile, vi);
+    TessInfo = getappdata(hFig, 'Surface');
+    iT = find(arrayfun(@(k) ~isempty(TessInfo(k).hPatch) && ishandle(TessInfo(k).hPatch), 1:numel(TessInfo)), 1);
+    Vmorph = get(TessInfo(iT).hPatch, 'Vertices') * 1.1;       % simulate the Smooth slider morphing the surface
+    set(TessInfo(iT).hPatch, 'Vertices', Vmorph);  drawnow;
+    bst_geodesic_tool('Redraw', hFig);  drawnow;              % the smooth-slider hook calls this
+    hDisk = findobj(hFig, 'Tag', 'GeodesicToolDisk');
+    drawn = ~isempty(hDisk);
+    Vdisk = [];  if drawn, Vdisk = get(hDisk(1), 'Vertices'); end
+    match = drawn && isequal(size(Vdisk), size(Vmorph)) && (max(abs(Vdisk(:)-Vmorph(:))) < 1e-9);
+    ok4 = drawn && match;
+    fprintf('T4 disk tracks displayed verts: drawn=%d morphMatch=%d => %s\n', drawn, match, PF{ok4+1});
+    pass = pass && ok4;
+    if ishandle(hFig), close(hFig); end
+
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end

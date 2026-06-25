@@ -80,6 +80,15 @@ function test_nav_panel()
     fprintf('T7 none->broadband: fieldsCleared=%d navUnloc=%d curBandEmpty=%d => %s\n', cleared, strcmp(lf7.state,'unlocalized'), isempty(st.curBand), PF{ok7+1});
     pass = pass && ok7;
 
+    % ---------- T8: Region toggle OFF clears the Source selection ----------
+    bst_geodesic_tool('Seed', surf, vi);  panel_bst_dynamics('SyncSource');  drawnow;     % populate a selection
+    ctrl.jRegionTool.setSelected(false);  panel_bst_dynamics('OnRegionTool');  drawnow;   % toggle OFF -> clear
+    st = getappdata(0,'DynamicsTarget');  lsrc8 = bst_atom('Get', st.nav, 'source');
+    clr = isempty(char(ctrl.jSrcC.getText())) && isempty(char(ctrl.jSrcW.getText()));
+    ok8 = isempty(bst_geodesic_tool('GetState')) && clr && strcmp(lsrc8.state,'unlocalized');
+    fprintf('T8 region clear: stateGone=%d fieldsCleared=%d navUnloc=%d => %s\n', isempty(bst_geodesic_tool('GetState')), clr, strcmp(lsrc8.state,'unlocalized'), PF{ok8+1});
+    pass = pass && ok8;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end
