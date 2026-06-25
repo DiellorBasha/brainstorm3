@@ -253,12 +253,11 @@ function i_drive(axis, loc)
         case 'source'
             % center/window are populated by the Region tool (Task 2 syncs them); nothing to drive here
         case 'scale'
-            if ~isempty(st.hFig) && ishandle(st.hFig) && ~isempty(st.Lambda) && (loc.extent>0)
-                params = struct('t', loc.extent);
-                try, view_helmholtz('SetSmoothing', st.hFig, 1, 'heat', params); catch, end %#ok<CTCH>
-                st.curScale = struct('on',1,'name','heat','params',params);
-            elseif ~isempty(st.hFig) && ishandle(st.hFig)
-                try, view_helmholtz('SetSmoothing', st.hFig, 0, 'heat', struct('t',1)); catch, end %#ok<CTCH>
+            % Smoothing (eigenmode low-pass) is deferred to the eigenvalue-axis work; the Scale
+            % widget is inert for now. Record the request so it round-trips, drive nothing.
+            if loc.extent > 0
+                st.curScale = struct('on',1,'name','heat','params',struct('t',loc.extent));
+            else
                 st.curScale = struct('on',0,'name','heat','params',[]);
             end
     end
@@ -497,23 +496,22 @@ function OnSaveCursor() %#ok<DEFNU>
         java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
     end
     band = st.curBand;  bandName = i_field(st, 'curBandName', '');
-    op   = i_field(st, 'curOp', 'Total');
+    op   = i_field(st, 'curOp', 'Divergence');
     switch op
-        case 'Irrot', Func = 'potential';
-        case 'Solen', Func = 'stream';
-        otherwise,    Func = 'magnitude';
+        case 'Divergence', Func = 'divergence';
+        case 'Curl',       Func = 'curl';
+        case 'Potential',  Func = 'potential';
+        case 'Stream',     Func = 'stream';
+        otherwise,         Func = 'divergence';
     end
-    % measured descriptor at the cursor (operator scalar at the seed, if localized + a field is present)
+    % measured descriptor at the cursor (operator scalar at the seed, if localized + cached)
     strength = NaN;  charge = NaN;
     if isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
-        St = getappdata(st.hFig, 'HelmholtzState');
-        if ~isempty(St) && isfield(St,'Cache')
-            [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex'); %#ok<ASGLU>
-            if ~isempty(St.Cache) && isKey(St.Cache, iT)
-                Ht = St.Cache(iT);
-                switch op
-                    case 'Irrot', sc = Ht.Phi;   case 'Solen', sc = Ht.Psi;   otherwise, sc = Ht.Fmag;
-                end
+        D = getappdata(st.hFig, 'DynamicsOverlay');
+        if ~isempty(D) && isfield(D,'Cache')
+            [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+            if ~isempty(D.Cache) && isKey(D.Cache, iT)
+                sc = view_dynamics('PickScalar', D.Cache(iT), op);
                 if ls.center>=1 && ls.center<=numel(sc), strength = sc(ls.center);  charge = sign(strength); end
             end
         end
@@ -592,25 +590,29 @@ end
 function OnRecord() %#ok<DEFNU>
     [ctrl, st] = i_cs();
     if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
-    St = getappdata(st.hFig, 'HelmholtzState');
-    if isempty(St)
-        java_dialog('warning', 'Record needs the linked Helmholtz source view (open via a Dirac result).', 'Record atoms');
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D)
+        java_dialog('warning', 'Record needs the linked dynamics source view (open via a Dirac result).', 'Record atoms');
         return;
     end
-    view_helmholtz('UpdateFrame', st.hFig);                        % make sure the cursor frame is current
-    St = getappdata(st.hFig, 'HelmholtzState');
-    [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex');
-    if isempty(St.Cache) || ~isKey(St.Cache, iT)
+    view_dynamics('RefreshOverlay', st.hFig);                     % make sure the cursor frame is computed+cached
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    [TimeVec, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+    if isempty(D.Cache) || ~isKey(D.Cache, iT)
         java_dialog('warning', 'No decomposition at the current time.', 'Record atoms');  return;
     end
-    Ht = St.Cache(iT);  tCur = TimeVec(iT);
-    % scalar field + Function from the current operator
-    op = i_field(st, 'curOp', 'Total');
+    Ht = D.Cache(iT);  tCur = TimeVec(iT);
+    % scalar field + Function from the current operator (all signed)
+    op   = i_field(st, 'curOp', 'Divergence');
+    Scal = view_dynamics('PickScalar', Ht, op);
     switch op
-        case 'Irrot', Scal = Ht.Phi;  Func = 'potential';  signed = true;
-        case 'Solen', Scal = Ht.Psi;  Func = 'stream';     signed = true;
-        otherwise,    Scal = Ht.Fmag; Func = 'magnitude';  signed = false;
+        case 'Divergence', Func = 'divergence';
+        case 'Curl',       Func = 'curl';
+        case 'Potential',  Func = 'potential';
+        case 'Stream',     Func = 'stream';
+        otherwise,         Func = 'divergence';
     end
+    signed = true;
     Surf = getappdata(st.hFig, 'DynamicsSurf');
     if isempty(Surf), Surf = in_tess_bst(st.T.SurfaceFile, 0);  setappdata(st.hFig, 'DynamicsSurf', Surf); end
     ex = bst_dynamics('Extrema', Scal, Surf.VertConn, i_peaks(ctrl), signed);
@@ -765,9 +767,11 @@ function s = i_scale_name(st)
 end
 function c = i_op_color(op)
     switch op
-        case 'Irrot', c = [0.95 0.55 0.10];   % potential / divergence  -> orange
-        case 'Solen', c = [0.55 0.20 0.85];   % stream / curl           -> purple
-        otherwise,    c = [0.40 0.40 0.40];   % magnitude               -> gray
+        case 'Divergence', c = [0.95 0.55 0.10];   % sources / sinks  -> orange
+        case 'Curl',       c = [0.55 0.20 0.85];   % vorticity        -> purple
+        case 'Potential',  c = [0.90 0.75 0.10];   % source potential -> amber
+        case 'Stream',     c = [0.30 0.45 0.85];   % stream function  -> blue
+        otherwise,         c = [0.40 0.40 0.40];   % gray
     end
 end
 function r = i_first_results(T)
@@ -795,13 +799,6 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
         'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1], ...
         'nav', bst_dynamics('NewGroup', 'cursor')));
-    % the scale driver needs the source eigenspectrum (Lambda) to build heat-kernel params
-    if ~isempty(hFig) && ishandle(hFig)
-        St = getappdata(hFig, 'HelmholtzState');
-        if ~isempty(St) && isfield(St,'Lambda') && ~isempty(St.Lambda)
-            st = getappdata(0, 'DynamicsTarget');  st.Lambda = St.Lambda;  setappdata(0, 'DynamicsTarget', st);
-        end
-    end
     BuildTree();
 end
 
