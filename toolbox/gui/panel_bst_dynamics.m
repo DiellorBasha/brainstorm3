@@ -618,63 +618,69 @@ end
 
 %% ===== PSD LIFECYCLE: find-or-open-or-compute the spectrum figure for this recording =====
 function hSpec = i_ensure_psd(st)
-  hSpec = [];
-  DataFile = st.T.DataFile;
-  if isempty(DataFile), return; end
-  % 1) already-open Spectrum figure for this recording?
-  hAll = bst_figures('GetFiguresByType', 'Spectrum');
-  for h = hAll(:)'
-    TfInfo = getappdata(h, 'Timefreq');
-    if isempty(TfInfo) || ~isfield(TfInfo,'FileName') || isempty(TfInfo.FileName), continue; end
-    [~,~,~,~,sTf] = bst_get('TimefreqFile', TfInfo.FileName);
-    if ~isempty(sTf) && ~isempty(sTf.DataFile) && file_compare(sTf.DataFile, DataFile)
-      hSpec = h;  i_fix_spec_xlim(hSpec);  return;
+    hSpec = [];
+    DataFile = st.T.DataFile;
+    if isempty(DataFile), return; end
+    % 1) already-open Spectrum figure for this recording?
+    hAll = bst_figures('GetFiguresByType', 'Spectrum');
+    for h = hAll(:)'
+        TfInfo = getappdata(h, 'Timefreq');
+        if isempty(TfInfo) || ~isfield(TfInfo,'FileName') || isempty(TfInfo.FileName), continue; end
+        [sTfStudy, ~, iTf] = bst_get('TimefreqFile', TfInfo.FileName);
+        if isempty(sTfStudy) || isempty(iTf) || (iTf == 0), continue; end
+        sTf = sTfStudy.Timefreq(iTf);
+        if ~isempty(sTf.DataFile) && file_compare(sTf.DataFile, DataFile)
+            hSpec = h;  i_fix_spec_xlim(hSpec);  return;
+        end
     end
-  end
-  % 2) precomputed PSD timefreq file for this recording?
-  TfFile = i_find_psd_file(DataFile);
-  % 3) else compute one
-  if isempty(TfFile), TfFile = i_compute_psd(DataFile); end
-  if isempty(TfFile), return; end
-  hSpec = view_spectrum(TfFile, 'Spectrum');
-  i_fix_spec_xlim(hSpec);
+    % 2) precomputed PSD timefreq file for this recording?
+    TfFile = i_find_psd_file(DataFile);
+    % 3) else compute one
+    if isempty(TfFile), TfFile = i_compute_psd(DataFile); end
+    if isempty(TfFile), return; end
+    try
+        hSpec = view_spectrum(TfFile, 'Spectrum');
+    catch
+        hSpec = [];  return;
+    end
+    i_fix_spec_xlim(hSpec);
 end
 
 % Fix the spectrum X-axis to 0-60 Hz (focus convention).
 function i_fix_spec_xlim(hSpec)
-  if isempty(hSpec) || ~ishandle(hSpec), return; end
-  hAxes = findobj(hSpec, '-depth', 1, 'Tag', 'AxesGraph');
-  if ~isempty(hAxes), try, set(hAxes, 'XLim', [0 60]); catch, end; end %#ok<CTCH>
+    if isempty(hSpec) || ~ishandle(hSpec), return; end
+    hAxes = findobj(hSpec, '-depth', 1, 'Tag', 'AxesGraph');
+    if ~isempty(hAxes), try, set(hAxes, 'XLim', [0 60]); catch, end; end %#ok<CTCH>
 end
 
 % Find an existing PSD timefreq file associated with the recording (Comment contains "PSD").
 function TfFile = i_find_psd_file(DataFile)
-  TfFile = '';
-  sStudy = bst_get('AnyFile', DataFile);
-  if isempty(sStudy) || ~isfield(sStudy,'Timefreq') || isempty(sStudy.Timefreq), return; end
-  for i = 1:numel(sStudy.Timefreq)
-    sT = sStudy.Timefreq(i);
-    if ~isempty(sT.DataFile) && file_compare(sT.DataFile, DataFile) && ~isempty(regexpi(sT.Comment, 'PSD', 'once'))
-      TfFile = sT.FileName;  return;
+    TfFile = '';
+    sStudy = bst_get('AnyFile', DataFile);
+    if isempty(sStudy) || ~isfield(sStudy,'Timefreq') || isempty(sStudy.Timefreq), return; end
+    for i = 1:numel(sStudy.Timefreq)
+        sT = sStudy.Timefreq(i);
+        if ~isempty(sT.DataFile) && file_compare(sT.DataFile, DataFile) && ~isempty(regexpi(sT.Comment, 'PSD', 'once'))
+            TfFile = sT.FileName;  return;
+        end
     end
-  end
 end
 
 % Compute an averaged magnitude PSD over the recording (MEG), return its timefreq file path.
 function TfFile = i_compute_psd(DataFile)
-  TfFile = '';
-  sIn = bst_process('GetInputStruct', DataFile);
-  if isempty(sIn), return; end
-  sOut = bst_process('CallProcess', 'process_psd', sIn, [], ...
-    'timewindow',  [], ...
-    'win_length',  4, ...
-    'win_overlap', 50, ...
-    'units',       'physical', ...
-    'sensortypes', 'MEG', ...
-    'win_std',     0, ...
-    'edit', struct('Comment','PSD: Dynamics focus', 'TimeBands',[], 'Freqs',[], ...
-                   'ClusterFuncTime','none', 'Measure','magnitude', 'Output','all', 'SaveKernel',0));
-  if ~isempty(sOut) && isfield(sOut,'FileName') && ~isempty(sOut(1).FileName), TfFile = sOut(1).FileName; end
+    TfFile = '';
+    sIn = bst_process('GetInputStruct', DataFile);
+    if isempty(sIn), return; end
+    sOut = bst_process('CallProcess', 'process_psd', sIn, [], ...
+        'timewindow',  [], ...
+        'win_length',  4, ...
+        'win_overlap', 50, ...
+        'units',       'physical', ...
+        'sensortypes', 'MEG', ...
+        'win_std',     0, ...
+        'edit', struct('Comment','PSD: Dynamics focus', 'TimeBands',[], 'Freqs',[], ...
+                       'ClusterFuncTime','none', 'Measure','magnitude', 'Output','all', 'SaveKernel',0));
+    if ~isempty(sOut) && isfield(sOut,'FileName') && ~isempty(sOut(1).FileName), TfFile = sOut(1).FileName; end
 end
 
 
