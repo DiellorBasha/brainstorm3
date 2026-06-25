@@ -65,6 +65,10 @@ function test_dynamics_atoms()
         return;
     end
 
+    % T2 setup: ensure the alpha refphase events exist on the recording
+    % (process_source_atoms reads them; refphase replaces same-label events, so this is idempotent)
+    bst_process('CallProcess', 'process_evt_refphase', relData, [], 'freqband','alpha', 'sensortypes','MEG');
+
     % T2: nested populate
     bst_process('CallProcess', 'process_source_atoms', linkFile, [], 'freqband','alpha', 'npeaks',2);
     studyDir = bst_fileparts(file_fullpath(relData));
