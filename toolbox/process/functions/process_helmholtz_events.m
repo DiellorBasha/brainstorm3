@@ -1,7 +1,7 @@
 function varargout = process_helmholtz_events( varargin )
 % PROCESS_HELMHOLTZ_EVENTS: Helmholtz-Hodge maps of the source field at events.
 %
-% Batch version of the view_helmholtz GUI. At each timepoint of a phase-marker
+% Batch version of the dynamics differential overlay. At each timepoint of a phase-marker
 % event group (e.g. "alpha_peak" from process_evt_refphase), it reconstructs the
 % UNCONSTRAINED source vector field from a kernel-link results file and the
 % (band-passed) sensor data, runs the Helmholtz-Hodge decomposition, and stores
@@ -12,7 +12,7 @@ function varargout = process_helmholtz_events( varargin )
 %   <event> | Potential Phi     : irrotational scalar (Ht.Phi) (nComponents=1, signed)
 %   <event> | Stream Psi        : solenoidal scalar  (Ht.Psi)  (nComponents=1, signed)
 %
-% Pipeline (mirrors view_helmholtz):
+% Pipeline (mirrors the dynamics differential overlay):
 %   J(t) = ImagingKernel * Fbp(GoodChannel, t),  Fbp = bandpass(sensors, band)
 %   Cov  = tess_operators(SurfaceFile, 'Covariant')
 %   Ht   = process_helmholtz('Compute', J(t), Cov)   % Hodge decomp, no core detection

@@ -1,6 +1,6 @@
 function varargout = panel_eigenfilter_design(varargin)
 % PANEL_EIGENFILTER_DESIGN: Shared eigenfilter "design" UI section (kernel dropdown +
-% mode-index scale sliders), reused by panel_helmholtz and panel_eigenfilter_options.
+% mode-index scale sliders), reused by panel_eigenfilter_options.
 % Also renders the filter's spectral response h(lambda) (DrawResponse).
 %
 % API (dispatched via macro_method):
