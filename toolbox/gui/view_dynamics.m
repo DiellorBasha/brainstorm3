@@ -108,6 +108,11 @@ function varargout = view_dynamics( varargin )
     try, gui_brainstorm('SetSelectedTab', 'Dynamics', 0); catch, end %#ok<CTCH>
     panel_bst_dynamics('SetTarget', hFig, T);
 
+    % Auto-teardown: closing the linked source figure (directly, or via "Close all figures")
+    % tears the Dynamics session down too -- so the docked panel never orphans. figure_3d uses
+    % CloseRequestFcn for its own cleanup, leaving the figure DeleteFcn free for this hook.
+    set(hFig, 'DeleteFcn', @(h,e)panel_bst_dynamics('OnFigureDeleted', h));
+
     if (nargout >= 1), varargout{1} = hFig; end
     if (nargout >= 2), varargout{2} = T;    end
 end

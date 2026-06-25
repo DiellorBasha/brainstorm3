@@ -79,6 +79,11 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
     gui_component('MenuItem', jMenuAtoms, [], 'Capture region -> active atom', IconLoader.ICON_SCOUT_NEW, [], @(h,e)bst_call(@OnCaptureRegion));
     gui_component('MenuItem', jMenuAtoms, [], 'Load into navigator', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@OnLoadAtom));
+    % EAST close button: a glue pushes it to the right, then an 'x' that ends the whole session
+    % (hide the panel + close the linked source figure), like the main GUI's close-all button.
+    jMenuBar.add(javax.swing.Box.createHorizontalGlue());
+    gui_component('button', jMenuBar, [], '', {IconLoader.ICON_DELETE, java_scaled('dimension', 24, 20)}, ...
+        'Close the Dynamics session (hide this panel + close its source figure)', @(h,e)bst_call(@OnCloseSession));
 
     % --- split: band stack TREE (left) | flat per-window atom list (right) ---
     jTree = java_create('javax.swing.JTree');
@@ -321,6 +326,30 @@ function OnShowAll() %#ok<DEFNU>
         for ip = 1:4, try, ctrl.jPhaseItems(ip).setSelected(on); catch, end; end %#ok<CTCH>
     end
     i_apply(st);
+end
+
+% ===== CLOSE the whole Dynamics session (the 'x' button) =====
+% Closes the linked source figure, which (via its DeleteFcn) tears the panel down. If no live
+% figure remains, tears down directly. Single teardown path lives in OnFigureDeleted.
+function OnCloseSession() %#ok<DEFNU>
+    st = getappdata(0, 'DynamicsTarget');
+    if ~isempty(st) && isfield(st,'hFig') && ~isempty(st.hFig) && ishandle(st.hFig)
+        close(st.hFig);                 % CloseRequestFcn -> bst_figures; DeleteFcn -> OnFigureDeleted
+    else
+        i_close_panel();                % no live figure: hide the panel + clear state directly
+    end
+end
+
+% ===== figure DeleteFcn hook: closing the linked figure ends the session (no orphan panel) =====
+function OnFigureDeleted(hFig) %#ok<DEFNU>
+    st = getappdata(0, 'DynamicsTarget');
+    if isempty(st) || ~isfield(st,'hFig') || ~isequal(st.hFig, hFig), return; end   % not our figure / already gone
+    i_close_panel();
+end
+
+function i_close_panel()
+    setappdata(0, 'DynamicsTarget', []);            % clear the session state
+    try, gui_hide('Dynamics'); catch, end %#ok<CTCH> % remove the docked tab
 end
 
 
