@@ -49,6 +49,20 @@ function test_nav_panel()
     fprintf('T4 measurement: curOp=%s figComp=%s => %s\n', st.curOp, St.Component, PF{ok4+1});
     pass = pass && ok4;
 
+    % ---------- T5: Source block syncs from the geodesic tool ----------
+    st = getappdata(0,'DynamicsTarget');  surf = st.T.SurfaceFile;
+    if isempty(surf), rs = in_bst_results(R,0,'SurfaceFile');  surf = rs.SurfaceFile; end
+    vi = round(size(in_tess_bst(surf,0).Vertices,1)/3);
+    bst_geodesic_tool('Seed', surf, vi);
+    panel_bst_dynamics('SyncSource');  drawnow;
+    st = getappdata(0,'DynamicsTarget');
+    cv = str2double(char(ctrl.jSrcC.getText()));
+    rw = str2double(char(ctrl.jSrcW.getText()));
+    ls = bst_atom('Get', st.nav, 'source');
+    ok5 = (cv==vi) && (rw>0) && (ls.center==vi);
+    fprintf('T5 source sync: center=%g radius=%g navSeed=%g => %s\n', cv, rw, ls.center, PF{ok5+1});
+    pass = pass && ok5;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end

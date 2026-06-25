@@ -379,6 +379,21 @@ function [ctrl, st] = i_cs()
 end
 
 
+%% ===== SYNC the Source block fields from the geodesic tool state =====
+function SyncSource() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~isfield(ctrl,'jSrcC'), return; end
+    gs = bst_geodesic_tool('GetState');
+    if isempty(gs), return; end
+    ctrl.jSrcC.setText(num2str(double(gs.seed)));
+    ctrl.jSrcW.setText(num2str(round(gs.radius*1000)));      % radius in mm
+    loc = bst_atom('NewLoc', 'source');
+    loc.center = double(gs.seed);  loc.extent = gs.radius;  loc.pos = gs.pos;  loc.state = 'window';
+    st.nav = bst_atom('Set', st.nav, 'source', 1, loc);
+    setappdata(0, 'DynamicsTarget', st);
+end
+
+
 %% ===== RECORD: shaped field's extrema at the cursor -> atoms =====
 % Reads the linked Helmholtz decomposition at the current time, detects extrema of the
 % scalar selected by the operator, and appends them to the (band, Function) group --
