@@ -169,11 +169,11 @@ function OutputFiles = Run(sProcess, sInputs)
 
         % ===== PREPARE HELMHOLTZ OPERATOR (once) =====
         bst_progress('text', sprintf('File %d/%d: Preparing Helmholtz operator...', iFile, length(sInputs)));
-        Dirac = bst_get_operator_node(R.SurfaceFile, 'Dirac');
+        Cov = bst_get_operator_node(R.SurfaceFile, 'Covariant');
         LBO   = bst_get_operator_node(R.SurfaceFile, 'Laplace-Beltrami');
         Surf  = in_tess_bst(R.SurfaceFile, 0);
         Mani  = tess_manifold(R.SurfaceFile);
-        Op    = bst_helmholtz('Prepare', {Dirac, LBO}, Mani, Surf, 'Domain', 'vertex');
+        Op    = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain', 'vertex');
         nV    = Op.nVtot;
 
         % ===== DECOMPOSE AT EACH EVENT =====

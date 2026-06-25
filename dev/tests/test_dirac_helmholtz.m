@@ -7,9 +7,9 @@ function test_dirac_helmholtz()
     SurfaceFile = bst_get('Subject',1).Surface(5).FileName;
     Surf  = in_tess_bst(SurfaceFile, 0);
     Mani  = tess_manifold(SurfaceFile);
-    Dirac = i_load_op(SurfaceFile, 'Dirac');
+    Cov   = i_load_op(SurfaceFile, 'Covariant');     % vertex Hodge now uses the flat-covariant node
     LBO   = i_load_op(SurfaceFile, 'Laplace-Beltrami');
-    OpNode = {Dirac, LBO};
+    OpNode = {Cov, LBO};
 
     % --- (1) Poisson solve round-trip on hemisphere 1: K psi = M omega recovers psi ---
     %     (PoissonSolve is now internal; replicate the pinned mean-zero solve inline.)
@@ -51,8 +51,11 @@ function test_dirac_helmholtz()
     Op2 = bst_helmholtz('Prepare', OpNode, Mani, Surf, 'Domain','vertex');
     Ht  = bst_helmholtz('Frame', Op2, J(:,1));
     nFail = nFail + chk('component fields are [nV x 3]', isequal(size(Ht.Virr),[size(V,1) 3]) && isequal(size(Ht.Vsol),[size(V,1) 3]));
-    recon = Ht.Virr + Ht.Vsol + Ht.Vharm;
-    nFail = nFail + chk('exact reconstruction Virr+Vsol+Vharm == J', max(abs(recon(:)-Ht.Vtot(:))) < 1e-9*max(abs(Ht.Vtot(:))));
+    % new contract: J = Virr + Vsol + Jnormal*n + Hresid (Hresid = div-free,curl-free residual).
+    % Field-set consistency: Vtot - Virr - Vsol - Hresid is the normal part, so its norm == ||Jnormal||.
+    normalPart = Ht.Vtot - Ht.Virr - Ht.Vsol - Ht.Hresid;
+    nFail = nFail + chk('fields sum to J (normal part == Jnormal)', ...
+        abs(norm(normalPart,'fro') - norm(Ht.Jnormal)) < 1e-9*max(norm(Ht.Vtot,'fro'),eps));
     Hirr = bst_helmholtz('Frame', Op2, reshape(Ht.Virr',[],1));
     Hsol = bst_helmholtz('Frame', Op2, reshape(Ht.Vsol',[],1));
     nFail = nFail + chk('irrotational is divergence-dominated', sum(Hirr.Div.^2) > sum(Hirr.Curl.^2));

@@ -101,10 +101,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             Variant = 'Dirac-Face';
         case {'hodge-face','hodgeface'}
             Variant = 'Hodge-Face';
+        case {'covariant','flat-covariant','ambient'}
+            Variant = 'Covariant';
         otherwise
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant''.'], OperatorName);
     end
 
     % --- interactive overwrite: a matching operator already exists (GUI only) ---
@@ -206,6 +208,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     FaceMass       = cell(1, 2);   % Dirac: face-area mass W_F [4F x 4F] per hemisphere
     FaceAux        = cell(1, 2);   % Hodge-Face: struct(ScalarMass,GradFace,FaceNormal) for the Hodge lift
     Frame          = cell(1, 2);   % Connection Laplacian: canonical per-vertex tangent frame (e1,e2,normal)
+    Covariant      = cell(1, 2);   % Covariant: flat-covariant Hodge pieces (ScalarGrad/FaceNormal/FaceArea/Frame/Faces/CovLap)
 
     for hh = 1:2
         vH = hemis{hh};
@@ -326,6 +329,50 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     B = kron(spdiags(fArea,0,nFh,nFh), speye(4));                  % W_F [4F x 4F] (for bst_dirac)
                     FaceAux{hh} = struct('ScalarMass', spdiags(fArea,0,nFh,nFh), ...% M_F [F x F]
                                          'GradFace', Gf, 'FaceNormal', Nf);
+
+                case 'Covariant'
+                    % Flat covariant ("Ambient") operator for the Helmholtz-Hodge
+                    % DIFFERENTIATION of a full 3-D current. From nxr: the scalar cotan
+                    % Laplacian (the Poisson operator), the galerkin mass, the ambient
+                    % covariant Laplacian (kron(I3,cotanL) in the realized frame; stored
+                    % for provenance/cross-check), and the realized vertex frames. The
+                    % consistent per-face scalar gradient g=[Gx;Gy;Gz] is assembled so that
+                    % g' W g == nxr cotanL (verified to 4e-16) -- the consistency that makes
+                    % the Hodge round-trip exact. div/curl/reconstruction in bst_helmholtz
+                    % all derive from this single g (and the rotated n x grad), so nothing
+                    % drifts.
+                    A      = nxr_compute('operators', h, 'laplacian', 'cotan');   % cotanL [nVh x nVh] (Poisson)
+                    A      = (A + A')/2;
+                    B      = nxr_compute('operators', h, 'mass', 'galerkin');     % [nVh x nVh]
+                    Lc3    = nxr_compute('gauge', h, 'levi-civita', ...           % [3nVh x 3nVh] = kron(I3,cotanL)
+                                struct('operators',true,'coupling','ambient')).operators.covariantLaplacian;
+                    VF     = nxr_compute('vertexFrames', h);                      % e1,e2,normals (realized frame)
+                    % consistent per-face scalar gradient g : grad f|_face in the face plane
+                    nFh = size(Floc,1);  nVh = numel(vH);
+                    eO1 = Vloc(Floc(:,3),:)-Vloc(Floc(:,2),:);
+                    eO2 = Vloc(Floc(:,1),:)-Vloc(Floc(:,3),:);
+                    eO3 = Vloc(Floc(:,2),:)-Vloc(Floc(:,1),:);
+                    Nf  = cross(Vloc(Floc(:,2),:)-Vloc(Floc(:,1),:), Vloc(Floc(:,3),:)-Vloc(Floc(:,1),:), 2);
+                    twoA= sqrt(sum(Nf.^2,2));  Nf = Nf ./ max(twoA,eps);  fArea = twoA/2;
+                    % Nf follows the mesh winding (globally consistent). Do NOT flip per-face to
+                    % outward -- that desyncs Nf from the winding-based gradient and breaks the
+                    % n x grad rotation (cross-orthogonality). The outward orientation sign is a
+                    % single global factor, deferred to bst_helmholtz's calibrated sign (gate 4).
+                    c1=cross(Nf,eO1,2)./twoA; c2=cross(Nf,eO2,2)./twoA; c3=cross(Nf,eO3,2)./twoA;
+                    rr=[(1:nFh)';(1:nFh)';(1:nFh)']; cc=[Floc(:,1);Floc(:,2);Floc(:,3)];
+                    Gx=sparse(rr,cc,[c1(:,1);c2(:,1);c3(:,1)],nFh,nVh);
+                    Gy=sparse(rr,cc,[c1(:,2);c2(:,2);c3(:,2)],nFh,nVh);
+                    Gz=sparse(rr,cc,[c1(:,3);c2(:,3);c3(:,3)],nFh,nVh);
+                    W  = spdiags(fArea,0,nFh,nFh);
+                    Kg = Gx'*W*Gx + Gy'*W*Gy + Gz'*W*Gz;                          % must equal nxr cotanL
+                    relErr = norm(Kg - A, 'fro') / max(norm(A,'fro'), eps);
+                    if relErr > 1e-8
+                        error('tess_operators:CovariantInconsistent', ...
+                            'g''Wg differs from nxr cotanL (rel %.1e): face-gradient convention inconsistent (gate-1 prerequisite).', relErr);
+                    end
+                    Covariant{hh} = struct('ScalarGrad', [Gx; Gy; Gz], 'CovLap', Lc3, ...
+                                           'Frame', struct('e1', VF.e1, 'e2', VF.e2, 'normal', VF.normals), ...
+                                           'FaceArea', fArea, 'FaceNormal', Nf, 'Faces', Floc, 'VertPos', Vloc);
             end
         catch ME
             nxr_compute('destroy', h);
@@ -368,6 +415,9 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     if strcmpi(Variant, 'Dirac')
         OperatorMat.FirstOrder = struct('Intrinsic', {FirstOrderInt}, 'Extrinsic', {FirstOrderExt});
         OperatorMat.FaceMass   = FaceMass;         % 1x2 cell of W_F [4F x 4F]
+    end
+    if strcmpi(Variant, 'Covariant')
+        OperatorMat.Covariant = Covariant;         % 1x2 struct: ScalarGrad/CovLap/Frame/FaceArea/FaceNormal/Faces
     end
     OperatorMat.Provenance     = prov;
 

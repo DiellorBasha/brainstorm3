@@ -86,96 +86,90 @@ end
 %% ============================================================================
 %% VERTEX DOMAIN
 %% ============================================================================
-function Op = i_prepare_vertex(OperatorNode, ManifoldMat, Surf)
-    DiracOp = OperatorNode{1};  LBO = OperatorNode{2};
-    Fcs   = double(Surf.Faces);
+function Op = i_prepare_vertex(OperatorNode, ManifoldMat, Surf) %#ok<INUSD>
+    % Flat-covariant decomposition: all operators come from the 'Covariant' node
+    % (built in tess_operators from nxr). One consistent gradient g drives div/curl,
+    % the Poisson Laplacian K=g'Wg, and reconstruction -- so nothing drifts.
+    Cov   = OperatorNode{1};                                % the 'Covariant' operator node
     nVtot = size(Surf.Vertices, 1);
-    nH    = numel(DiracOp.FirstOrder.Intrinsic);
+    nH    = numel(Cov.Covariant);
     Op = struct();
     Op.nVtot    = nVtot;
     Op.VertConn = Surf.VertConn;
-    [Op.D, Op.vH, Op.Nf, Op.Wfv, Op.M, Op.cholK, Op.free, Op.totMass, ...
-     Op.Gx, Op.Gy, Op.Gz, Op.NbH, Op.VtxH, Op.VnH] = deal(cell(1,nH));
+    Op.sign     = +1;     % calibrated: the flat-covariant divergence is the true divergence (source>0); no flip
+    [Op.vH, Op.Nf, Op.Af, Op.Wfv, Op.Fvf, Op.M, Op.cholKfree, Op.free, ...
+     Op.Gx, Op.Gy, Op.Gz, Op.Sx, Op.Sy, Op.Sz, Op.NbH, Op.VtxH, Op.VnH] = deal(cell(1,nH));
     for hh = 1:nH
-        D   = DiracOp.FirstOrder.Intrinsic{hh};            % [4F x 4V]
-        E   = ManifoldMat.Embedded(hh);
-        vH  = double(E.GlobalVertices(:));
-        gf  = double(E.GlobalFaces(:));
-        nVh = numel(vH);  nFh = numel(gf);
-        % local face->vertex connectivity (topology from Surf.Faces, reindexed local)
-        mapV  = zeros(nVtot,1);  mapV(vH) = 1:nVh;
-        Floc  = mapV(Fcs(gf, :));                          % [nFh x 3] local indices
-        Vloc  = E.vertex.position;                         % [nVh x 3] canonical positions (manifold)
-        % canonical per-face geometry (manifold): unit normal + TRUE area (no cross/flip, no 2A/Af hazard)
-        Af    = E.face.area;                               % [nFh x 1] true area
-        % orient the (consistently-wound) manifold normals OUTWARD so the divergence sign
-        % (div = imag . n) and source/sink charge follow the physical convention
-        Nf    = i_orient_outward(E.face.normal, E.face.centroid, Af);   % [nFh x 3]
+        C   = Cov.Covariant{hh};
+        vH  = double(Cov.GlobalVertices{hh}(:));
+        Floc = C.Faces;  nFh = size(Floc,1);  nVh = numel(vH);
+        Gx = C.ScalarGrad(1:nFh,:);  Gy = C.ScalarGrad(nFh+1:2*nFh,:);  Gz = C.ScalarGrad(2*nFh+1:3*nFh,:);
+        Nf = C.FaceNormal;  Af = C.FaceArea;
+        % face<->vertex maps: area-weighted face->vertex, and P1 vertex->face (centroid avg)
+        I3 = [Floc(:,1);Floc(:,2);Floc(:,3)];  J3 = [(1:nFh)';(1:nFh)';(1:nFh)'];
+        Wfv = sparse(I3, J3, repmat(Af,3,1), nVh, nFh);
+        Wfv = spdiags(1./max(sum(Wfv,2),eps),0,nVh,nVh) * Wfv;
+        Fvf = sparse(J3, I3, 1/3, nFh, nVh);
+        % rotated gradient S = n x grad (solenoidal reconstruction + weak vorticity)
+        nx=Nf(:,1); ny=Nf(:,2); nz=Nf(:,3);
+        Sx = spdiags(ny,0,nFh,nFh)*Gz - spdiags(nz,0,nFh,nFh)*Gy;
+        Sy = spdiags(nz,0,nFh,nFh)*Gx - spdiags(nx,0,nFh,nFh)*Gz;
+        Sz = spdiags(nx,0,nFh,nFh)*Gy - spdiags(ny,0,nFh,nFh)*Gx;
+        % pinned Cholesky of the cotan stiffness K = Cov.Operator (= nxr cotanL = g'Wg)
+        K = (Cov.Operator{hh} + Cov.Operator{hh}')/2;  free = 2:nVh;
+        Op.cholKfree{hh} = decomposition(K(free,free), 'chol');  Op.free{hh} = free;
         % per-hemisphere 1-ring (LOCAL) for core detection
         eLoc = [Floc(:,[1 2]); Floc(:,[2 3]); Floc(:,[3 1])];
         Aloc = sparse([eLoc(:,1);eLoc(:,2)], [eLoc(:,2);eLoc(:,1)], true, nVh, nVh);
-        nbLoc = cell(nVh,1);
-        for vv = 1:nVh, nbLoc{vv} = find(Aloc(:,vv)); end
-        Op.NbH{hh}  = nbLoc;
-        Op.VtxH{hh} = Vloc;
-        Op.VnH{hh}  = E.vertex.normal;                     % canonical vertex normals (manifold)
-        % face->vertex area-weighted incidence [nVh x nFh] (row-normalized: area scale cancels)
-        I = [Floc(:,1);Floc(:,2);Floc(:,3)];  Jc = [1:nFh,1:nFh,1:nFh]';
-        Wfv = sparse(I, Jc, repmat(Af,3,1), nVh, nFh);
-        Wfv = spdiags(1./max(sum(Wfv,2),eps),0,nVh,nVh) * Wfv;
-        % per-face FEM gradient of a per-vertex scalar: grad f|_face = sum_i f_i (n x e_i^opp)/(2A)
-        eO1 = Vloc(Floc(:,3),:) - Vloc(Floc(:,2),:);
-        eO2 = Vloc(Floc(:,1),:) - Vloc(Floc(:,3),:);
-        eO3 = Vloc(Floc(:,2),:) - Vloc(Floc(:,1),:);
-        twoA = 2*Af;                                        % denominator = 2*Area (manifold true area)
-        c1 = cross(Nf, eO1, 2) ./ twoA;   c2 = cross(Nf, eO2, 2) ./ twoA;   c3 = cross(Nf, eO3, 2) ./ twoA;
-        grows = [(1:nFh)';(1:nFh)';(1:nFh)'];  gcols = [Floc(:,1);Floc(:,2);Floc(:,3)];
-        Gx = sparse(grows, gcols, [c1(:,1);c2(:,1);c3(:,1)], nFh, nVh);
-        Gy = sparse(grows, gcols, [c1(:,2);c2(:,2);c3(:,2)], nFh, nVh);
-        Gz = sparse(grows, gcols, [c1(:,3);c2(:,3);c3(:,3)], nFh, nVh);
-        % LBO pieces + cached Cholesky of the pinned (vertex 1) cotan stiffness via tess_cholesky
-        M = LBO.Mass{hh};
-        Op.D{hh}=D; Op.vH{hh}=vH; Op.Nf{hh}=Nf; Op.Wfv{hh}=Wfv; Op.M{hh}=M;
-        Op.Gx{hh}=Gx; Op.Gy{hh}=Gy; Op.Gz{hh}=Gz;
-        Op.cholK{hh}  = tess_cholesky(LBO, hh, 1);    % pin vertex 1; pure getter (I/O-free)
-        Op.free{hh}   = Op.cholK{hh}.free;
-        Op.totMass{hh}= sum(M(:));
+        nbLoc = cell(nVh,1);  for vv = 1:nVh, nbLoc{vv} = find(Aloc(:,vv)); end
+        Op.vH{hh}=vH; Op.Nf{hh}=Nf; Op.Af{hh}=Af; Op.Wfv{hh}=Wfv; Op.Fvf{hh}=Fvf;
+        Op.M{hh}=Cov.Mass{hh}; Op.Gx{hh}=Gx; Op.Gy{hh}=Gy; Op.Gz{hh}=Gz;
+        Op.Sx{hh}=Sx; Op.Sy{hh}=Sy; Op.Sz{hh}=Sz;
+        Op.NbH{hh}=nbLoc; Op.VtxH{hh}=C.VertPos; Op.VnH{hh}=C.Frame.normal;
     end
 end
 
 function Ht = i_frame_vertex(Op, Jt, withCores)
-    nVtot = Op.nVtot;
+    nVtot = Op.nVtot;  s = Op.sign;
     z1 = zeros(nVtot,1);  z3 = zeros(nVtot,3);
     Ht = struct('Curl',z1,'Div',z1,'Psi',z1,'Phi',z1,'Fmag',z1,'Hmag',z1, ...
-                'Vtot',z3,'Virr',z3,'Vsol',z3,'Vharm',z3);
+                'Vtot',z3,'Virr',z3,'Vsol',z3,'Jnormal',z1,'Hresid',z3);
     harmNum = 0;  harmDen = 0;
-    for hh = 1:numel(Op.D)
+    for hh = 1:numel(Op.vH)
         vH = Op.vH{hh};  nVh = numel(vH);
-        Jx = Jt(3*(vH-1)+1);  Jy = Jt(3*(vH-1)+2);  Jz = Jt(3*(vH-1)+3);
-        psiQ = zeros(4*nVh,1);
-        psiQ(2:4:end) = Jx; psiQ(3:4:end) = Jy; psiQ(4:4:end) = Jz;
-        q = Op.D{hh} * psiQ;                              % [4F x 1]
-        omF   = q(1:4:end);                               % vorticity = w-part (per face)
-        imagF = [q(2:4:end), q(3:4:end), q(4:4:end)];     % imaginary part (per face)
-        divF  = sum(imagF .* Op.Nf{hh}, 2);               % divergence = imag . n_face
-        omV = Op.Wfv{hh} * omF;   dvV = Op.Wfv{hh} * divF;
-        psi = i_poisson(Op.cholK{hh}, Op.M{hh}, omV, Op.free{hh}, Op.totMass{hh});  % stream from vorticity
-        phi = i_poisson(Op.cholK{hh}, Op.M{hh}, dvV, Op.free{hh}, Op.totMass{hh});  % potential from divergence
-        gphi = [Op.Gx{hh}*phi, Op.Gy{hh}*phi, Op.Gz{hh}*phi];   % [nF x 3]
-        gpsi = [Op.Gx{hh}*psi, Op.Gy{hh}*psi, Op.Gz{hh}*psi];
-        skew = cross(Op.Nf{hh}, gpsi, 2);                       % n x grad(psi)
-        Virr = Op.Wfv{hh} * gphi;                               % face->vertex [nVh x 3]
-        Vsol = Op.Wfv{hh} * skew;
-        Jv   = [Jx Jy Jz];
-        Vharm = Jv - Virr - Vsol;                               % exact residual
-        Ht.Curl(vH)=omV;  Ht.Div(vH)=dvV;  Ht.Psi(vH)=psi;  Ht.Phi(vH)=phi;
-        Ht.Fmag(vH)=sqrt(Jx.^2+Jy.^2+Jz.^2);  Ht.Hmag(vH)=sqrt(sum(Vharm.^2,2));
-        Ht.Vtot(vH,:)=Jv;  Ht.Virr(vH,:)=Virr;  Ht.Vsol(vH,:)=Vsol;  Ht.Vharm(vH,:)=Vharm;
-        av = full(sum(Op.M{hh},2));                            % lumped vertex mass
-        harmNum = harmNum + sum(av .* sum(Vharm.^2,2));
+        Gx=Op.Gx{hh}; Gy=Op.Gy{hh}; Gz=Op.Gz{hh}; Nf=Op.Nf{hh}; Af=Op.Af{hh};
+        Sx=Op.Sx{hh}; Sy=Op.Sy{hh}; Sz=Op.Sz{hh}; Wfv=Op.Wfv{hh}; Fvf=Op.Fvf{hh}; nv=Op.VnH{hh};
+        W = spdiags(Af,0,numel(Af),numel(Af));
+        Jx = Jt(3*(vH-1)+1);  Jy = Jt(3*(vH-1)+2);  Jz = Jt(3*(vH-1)+3);  Jv = [Jx Jy Jz];
+        % strong per-face divergence / vorticity (the feature fields) -> per vertex
+        divF  = Gx*Jx + Gy*Jy + Gz*Jz;                                  % surface divergence
+        curlV = [Gy*Jz - Gz*Jy, Gz*Jx - Gx*Jz, Gx*Jy - Gy*Jx];          % curl vector
+        omF   = sum(curlV .* Nf, 2);                                    % vorticity = curl . n
+        Div = s * (Wfv * divF);   Curl = s * (Wfv * omF);
+        % scalar potentials via the consistent weak Hodge (P1 field sampled to faces)
+        Jf = [Fvf*Jx, Fvf*Jy, Fvf*Jz];
+        divw  = s * (Gx'*W*Jf(:,1) + Gy'*W*Jf(:,2) + Gz'*W*Jf(:,3));    % weak divergence
+        vortw = s * (Sx'*W*Jf(:,1) + Sy'*W*Jf(:,2) + Sz'*W*Jf(:,3));    % weak vorticity
+        free = Op.free{hh};
+        phi = zeros(nVh,1);  psi = zeros(nVh,1);
+        phi(free) = Op.cholKfree{hh} \ divw(free);   phi = phi - mean(phi);
+        psi(free) = Op.cholKfree{hh} \ vortw(free);  psi = psi - mean(psi);
+        % reconstruction (face -> vertex); s keeps Virr aligned with J for the natural sign
+        Virr = Wfv * (s * [Gx*phi, Gy*phi, Gz*phi]);
+        Vsol = Wfv * (s * cross(Nf, [Gx*psi, Gy*psi, Gz*psi], 2));
+        Jn   = Jx.*nv(:,1) + Jy.*nv(:,2) + Jz.*nv(:,3);                 % normal/radial amplitude
+        Hres = Jv - Virr - Vsol - Jn.*nv;                              % discrete non-conforming residual (div-free, curl-free)
+        Ht.Curl(vH)=Curl;  Ht.Div(vH)=Div;  Ht.Psi(vH)=psi;  Ht.Phi(vH)=phi;
+        Ht.Fmag(vH)=sqrt(Jx.^2+Jy.^2+Jz.^2);  Ht.Hmag(vH)=sqrt(sum(Hres.^2,2));
+        Ht.Vtot(vH,:)=Jv;  Ht.Virr(vH,:)=Virr;  Ht.Vsol(vH,:)=Vsol;  Ht.Jnormal(vH)=Jn;  Ht.Hresid(vH,:)=Hres;
+        av = full(sum(Op.M{hh},2));                                     % vertex mass
+        harmNum = harmNum + sum(av .* sum(Hres.^2,2));
         harmDen = harmDen + sum(av .* sum(Jv.^2,2));
     end
-    Ht.HarmFrac = harmNum / max(harmDen, eps);
+    % TRUE discrete non-conforming residual fraction. NB: do NOT guard with max(harmDen,eps)
+    % -- source amplitudes are ~1e-11, so harmDen ~1e-22 < eps, and the clamp would corrupt the
+    % ratio (the long-standing HarmFrac ~0 bug). Guard only the genuine all-zero-field case.
+    if harmDen > 0, Ht.HarmFrac = harmNum / harmDen;  else, Ht.HarmFrac = 0;  end
     if withCores
         Ht.Cores    = FindCoresOp(Ht.Psi, Op, Ht.Curl);      % vortex cores (sign = vorticity)
         Ht.Sources  = FindCoresOp(Ht.Phi, Op, Ht.Div);       % sources/sinks (sign = divergence)
@@ -183,14 +177,6 @@ function Ht = i_frame_vertex(Op, Jt, withCores)
         Ht.Cores    = i_empty_cores_vertex();
         Ht.Sources  = i_empty_cores_vertex();
     end
-end
-
-%% ===== Poisson solve (vertex): mean-zero project -> cached pinned solve -> recenter =====
-function psi = i_poisson(dK, M, omega, free, totMass) %#ok<INUSD>
-    n = size(M,1);
-    omega = omega - (sum(M*omega) / totMass) * ones(n,1);   % project to mean-zero
-    x = tess_cholesky('solve', dK, M*omega);                % shared permuted Cholesky solve
-    psi = x - mean(x);                                      % recenter
 end
 
 %% ===== vertex core detection: persistence-ranked extrema, per hemisphere =====
