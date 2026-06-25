@@ -139,27 +139,51 @@ else
                     end
                 end
             end
-            % Nest operator child nodes under this surface
+            % Nest operator child nodes under this surface. With more than one operator,
+            % collapse them under an 'operatorlist' container (a pure display grouping, like
+            % the recordings 'datalist': no file, no DB entry); a single operator stays direct.
             if isfield(sSubject.Surface(iSurface), 'Operator')
-                for iO = 1:numel(sSubject.Surface(iSurface).Operator)
+                nOp = numel(sSubject.Surface(iSurface).Operator);
+                opParent = nodeSurface;  opGroup = [];
+                if nOp > 1
+                    opGroup = org.brainstorm.tree.BstNode('operatorlist', sprintf('Operators (%d)', nOp), '', 0, iSubject);
+                    opParent = opGroup;
+                end
+                nOpAdded = 0;
+                for iO = 1:nOp
                     [chCreated, chNode] = CreateNode('operator', ...
                         char(sSubject.Surface(iSurface).Operator(iO).Comment), ...
                         char(sSubject.Surface(iSurface).Operator(iO).FileName), ...
                         iO, iSubject, iSearch);
                     if chCreated
-                        nodeSurface.add(chNode);
+                        opParent.add(chNode);
+                        nOpAdded = nOpAdded + 1;
                     end
                 end
+                if ~isempty(opGroup) && (nOpAdded > 0)
+                    nodeSurface.add(opGroup);   % attach the container once its children are built
+                end
             end
-            % Nest eigen child nodes under this surface
+            % Nest eigen child nodes under this surface. With more than one eigenbasis,
+            % collapse them under an 'eigenlist' container (same pure-display grouping as the
+            % operators); a single eigenbasis stays direct. Wavelet children still nest under
+            % their own eigen node, wherever that eigen node sits.
             if isfield(sSubject.Surface(iSurface), 'Eigen')
-                for iE = 1:numel(sSubject.Surface(iSurface).Eigen)
+                nEig = numel(sSubject.Surface(iSurface).Eigen);
+                eigParent = nodeSurface;  eigGroup = [];
+                if nEig > 1
+                    eigGroup = org.brainstorm.tree.BstNode('eigenlist', sprintf('Eigenmodes (%d)', nEig), '', 0, iSubject);
+                    eigParent = eigGroup;
+                end
+                nEigAdded = 0;
+                for iE = 1:nEig
                     [chCreated, chNode] = CreateNode('eigen', ...
                         char(sSubject.Surface(iSurface).Eigen(iE).Comment), ...
                         char(sSubject.Surface(iSurface).Eigen(iE).FileName), ...
                         iE, iSubject, iSearch);
                     if chCreated
-                        nodeSurface.add(chNode);
+                        eigParent.add(chNode);
+                        nEigAdded = nEigAdded + 1;
                         % Nest wavelet child nodes under THIS eigen node
                         if isfield(sSubject.Surface(iSurface), 'Wavelet')
                             eigName = char(sSubject.Surface(iSurface).Eigen(iE).FileName);
@@ -176,6 +200,9 @@ else
                             end
                         end
                     end
+                end
+                if ~isempty(eigGroup) && (nEigAdded > 0)
+                    nodeSurface.add(eigGroup);   % attach the container once its children are built
                 end
             end
         end
