@@ -4,15 +4,15 @@ function phi = bst_poisson(OperatorNode, F)
 % Scalar stratum (Laplace-Beltrami): solves  K phi = M f  per hemisphere, where K is the
 % cotan stiffness and M the Galerkin mass. The constant nullspace is handled HERE, once:
 % project f to the mean-zero subspace in the mass metric, pinned solve through the cached
-% tess_cholesky factor, recenter. This is the single home of the nullspace handling that
-% was duplicated in bst_operators (per-column re-factorization) and bst_helmholtz.
+% tess_cholesky factor. This is the single home of the nullspace handling that
+% was duplicated in bst_operators (per-column re-factorization) and the helmholtz decomposition.
 %
 % USAGE:  phi = bst_poisson(OperatorNode, F)
-%   OperatorNode : a 'Laplace-Beltrami' operatormat (Operator{hh}=K, Mass{hh}=M, GlobalVertices{hh})
+%   OperatorNode : a 'Laplace-Beltrami' or 'Covariant' operatormat (Operator{hh}=K cotan stiffness, Mass{hh}=M, GlobalVertices{hh})
 %   F            : per-vertex scalar source [nV x nT]
 %   phi          : per-vertex potential [nV x nT] (mean-zero per hemisphere)
 %
-% SEE ALSO: tess_cholesky, bst_operators, bst_helmholtz
+% SEE ALSO: tess_cholesky, bst_operators, process_helmholtz
 %
 % Authors: Diellor Basha, 2026
 
@@ -36,9 +36,9 @@ function phi = bst_poisson(OperatorNode, F)
 %
 % Authors: Diellor Basha, 2026
 
-    if ~strcmpi(OperatorNode.Variant, 'Laplace-Beltrami')
+    if ~any(strcmpi(OperatorNode.Variant, {'Laplace-Beltrami', 'Covariant'}))
         error('bst_poisson:variant', ...
-            'bst_poisson scalar route needs a Laplace-Beltrami operator (got %s).', OperatorNode.Variant);
+            'bst_poisson scalar route needs a Laplace-Beltrami or Covariant operator (got %s).', OperatorNode.Variant);
     end
     nVtot = max(cellfun(@(c) max(double(c(:))), OperatorNode.GlobalVertices));
     phi = zeros(nVtot, size(F,2));
@@ -50,7 +50,7 @@ function phi = bst_poisson(OperatorNode, F)
         fh = F(vH, :);
         totMass = sum(M(:));
         fh = fh - (sum(M*fh, 1) / totMass);          % project to mean-zero (mass metric)
-        x  = tess_cholesky('solve', dF, M*fh);       % K x = M f  on the free block
-        phi(vH, :) = x - mean(x, 1);                 % recenter
+        x  = tess_cholesky('solve', dF, M*fh);       % K x = M f  on the free block; pinned entry 0
+        phi(vH, :) = x - mean(x, 1);                 % recenter to the mean-zero gauge (canonical; matches the helmholtz potential convention)
     end
 end

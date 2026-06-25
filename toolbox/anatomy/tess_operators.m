@@ -33,9 +33,16 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
 %                        parameter (only used by the 'Dirac' variant)
 %     'NoSave'         : true/false (default false) — compute but do not write
 %                        to disk or register in the DB
-%     'ForceRecompute' : true/false (default false) — currently accepted for
-%                        API symmetry with the other assemblers; tess_operators
-%                        always recomputes (operator nodes are not de-duplicated)
+%     'ForceRecompute' : true/false (default false) — when false, an existing
+%                        Operator child of the surface whose Variant matches (and,
+%                        for the Dirac-type variants, whose Tau matches) is loaded
+%                        and returned instead of rebuilding. Set true to force a
+%                        fresh nxr build.
+%     'Interactive'    : true/false (default false) — GUI only. When true and a
+%                        matching operator already exists, prompt Overwrite/Cancel:
+%                        Cancel reuses the existing node; Overwrite deletes it (and
+%                        cascade-deletes the dependent eigen nodes) and recomputes.
+%                        Programmatic callers leave it false.
 %
 % OUTPUT:
 %     OperatorMat : struct matching db_template('operatormat'), with fields:
@@ -73,13 +80,13 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     % --- parse options ---
     Tau            = 0.5;
     NoSave         = false;
-    ForceRecompute = false;  %#ok<NASGU> % accepted for API symmetry; see help
+    ForceRecompute = false;  % when false, reuse a cached operator node; see help
     Interactive    = false;  % GUI: prompt Overwrite/Cancel (+ dependent-eigen cascade)
     for i = 1:2:numel(varargin)
         switch lower(varargin{i})
             case 'tau',            Tau            = varargin{i+1};
             case 'nosave',         NoSave         = logical(varargin{i+1});
-            case 'forcerecompute', ForceRecompute = logical(varargin{i+1}); %#ok<NASGU>
+            case 'forcerecompute', ForceRecompute = logical(varargin{i+1});
             case 'interactive',    Interactive    = logical(varargin{i+1});
             otherwise
                 error('tess_operators:badOption', 'Unknown option: %s', varargin{i});
@@ -109,17 +116,27 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                  '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant''.'], OperatorName);
     end
 
-    % --- interactive overwrite: a matching operator already exists (GUI only) ---
-    % Non-interactive callers (incl. tess_eigen's find-or-create) keep the historical
-    % always-recompute behaviour. Interactive overwrite cascades to the dependent eigen
-    % nodes, which reference this operator and would be orphaned by the replacement.
-    if Interactive
+    % --- find-or-reuse a cached operator node before the (expensive) nxr build ---
+    %     Symmetric with tess_eigen's find-or-create: an existing Operator child of this
+    %     surface whose Variant matches (and, for the Dirac-type variants, whose Tau matches)
+    %     is loaded and returned instead of rebuilding. ForceRecompute skips the reuse;
+    %     NoSave always recomputes (the caller wants a fresh in-memory result, never the DB).
+    %     bst_get resolves the match from the cache (no file load); we then load the file.
+    if ~ForceRecompute && ~NoSave
         [sOp, ~, iSurfOp, iOp] = bst_get('OperatorFileForSurface', SurfaceFile, Variant, Tau);
         if ~isempty(iOp)
             existFile = sOp.Surface(iSurfOp).Operator(iOp).FileName;
-            iDep      = bst_get('EigenFilesForOperator', SurfaceFile, existFile);
-            depFiles  = {};
-            depMsg    = '';
+            if ~Interactive
+                OperatorMat = in_bst_operator(existFile);
+                return;
+            end
+            % Interactive (GUI): prompt Overwrite / Cancel. Cancel reuses the existing
+            % node; Overwrite cascade-deletes the dependent eigen nodes (which reference
+            % this operator and would be orphaned by the replacement) and the operator,
+            % then falls through to recompute (no duplicate accumulates).
+            iDep     = bst_get('EigenFilesForOperator', SurfaceFile, existFile);
+            depFiles = {};
+            depMsg   = '';
             if ~isempty(iDep)
                 depFiles = arrayfun(@(k) sOp.Surface(iSurfOp).Eigen(k).FileName, iDep, 'UniformOutput', false);
                 depMsg   = sprintf('\n\nThis will ALSO remove %d dependent eigenbasis node(s).', numel(iDep));
@@ -133,7 +150,6 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                 OperatorMat = in_bst_operator(existFile);
                 return;
             end
-            % Overwrite: cascade-delete dependent eigen nodes first, then the operator.
             if ~isempty(depFiles); db_delete_surface_node(depFiles, 1); end
             db_delete_surface_node(existFile, 1);
         end
@@ -338,7 +354,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     % for provenance/cross-check), and the realized vertex frames. The
                     % consistent per-face scalar gradient g=[Gx;Gy;Gz] is assembled so that
                     % g' W g == nxr cotanL (verified to 4e-16) -- the consistency that makes
-                    % the Hodge round-trip exact. div/curl/reconstruction in bst_helmholtz
+                    % the Hodge round-trip exact. div/curl/reconstruction in process_helmholtz/bst_divergence/bst_curl
                     % all derive from this single g (and the rotated n x grad), so nothing
                     % drifts.
                     A      = nxr_compute('operators', h, 'laplacian', 'cotan');   % cotanL [nVh x nVh] (Poisson)
@@ -357,7 +373,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     % Nf follows the mesh winding (globally consistent). Do NOT flip per-face to
                     % outward -- that desyncs Nf from the winding-based gradient and breaks the
                     % n x grad rotation (cross-orthogonality). The outward orientation sign is a
-                    % single global factor, deferred to bst_helmholtz's calibrated sign (gate 4).
+                    % single global factor, deferred to the helmholtz consumer's calibrated sign (gate 4).
                     c1=cross(Nf,eO1,2)./twoA; c2=cross(Nf,eO2,2)./twoA; c3=cross(Nf,eO3,2)./twoA;
                     rr=[(1:nFh)';(1:nFh)';(1:nFh)']; cc=[Floc(:,1);Floc(:,2);Floc(:,3)];
                     Gx=sparse(rr,cc,[c1(:,1);c2(:,1);c3(:,1)],nFh,nVh);

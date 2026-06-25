@@ -17,28 +17,27 @@ function curlField = bst_curl(V, ManifoldMat, varargin)
 %            bst_gradient). Uses -div(N x V) via the stable DEC adjoint.
 %            Call: bst_curl(V, ManifoldMat).
 %   AMBIENT: 3D R^3 per-VERTEX field [3nV x nT] (interleaved x,y,z per vertex; e.g. a Dirac
-%            source vector). Returns the Hodge vorticity (Dirac w-part) from bst_helmholtz.
-%            No mean-curvature coupling for curl (vorticity is purely intrinsic).
-%            Call: bst_curl(V, ManifoldMat, 'Ambient', Surf, Dir, LBO).
+%            source vector). Computes the flat-covariant vorticity (curl.n) directly from the
+%            Covariant node. Vorticity is purely intrinsic (no mean-curvature coupling).
+%            Call: bst_curl(V, ManifoldMat, 'Ambient', Surf, Cov).
 % I/O-free: caller passes the loaded node (and operator nodes for ambient branch).
 %
 % USAGE:
 %   curlField = bst_curl(V, ManifoldMat)
-%   curlField = bst_curl(V, ManifoldMat, 'Ambient', Surf, Dir, LBO)
+%   curlField = bst_curl(V, ManifoldMat, 'Ambient', Surf, Cov)
 %
 % INPUTS:
 %   - V           : [TANGENT] per-FACE ambient [3nF x nT]; [AMBIENT] per-VERTEX [3nV x nT]
 %   - ManifoldMat : a manifold_ node (tess_manifold(Surf)) whose 1x2 DEC group + Embedded facet
 %                   carry the per-hemisphere operators and face normals.
 %   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
-%   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
-%   - Dir         : (ambient only) Dirac operator node (bst_get_operator_node(Surf,'Dirac'))
-%   - LBO         : (ambient only) LBO operator node (bst_get_operator_node(Surf,'Laplace-Beltrami'))
+%   - Surf        : (ambient only) accepted for signature symmetry, unused
+%   - Cov         : (ambient only) Covariant operator node (tess_operators(Surf,'Covariant'))
 %
 % OUTPUTS:
 %   - curlField   : per-VERTEX scalar vorticity field [nV x nT]
 %
-% SEE ALSO: bst_operators, bst_gradient, bst_divergence, bst_helmholtz, tess_manifold (DEC group)
+% SEE ALSO: bst_operators, bst_gradient, bst_divergence, process_helmholtz, tess_manifold (DEC group)
 % (de Rham/Hodge route; the connection Laplacian differs by Gauss curvature K — see bst_operators.)
 
 % @=============================================================================
@@ -61,11 +60,11 @@ function curlField = bst_curl(V, ManifoldMat, varargin)
 %
 % Authors: Diellor Basha, 2026
 
-    % ----- ambient (3nV) branch: Hodge vorticity (Dirac w-part) -----
+    % ----- ambient (3nV) branch: flat-covariant vorticity (Covariant node) -----
     if ~isempty(varargin) && strcmpi(varargin{1}, 'Ambient')
-        Surf = varargin{2};  Dir = varargin{3};  LBO = varargin{4};
-        H = bst_helmholtz('Decompose', {Dir, LBO}, ManifoldMat, Surf, V);
-        curlField = H.Curl;
+        % USAGE: bst_curl(J, ManifoldMat, 'Ambient', Surf, Cov)  (ManifoldMat/Surf unused here)
+        Cov = varargin{end};
+        curlField = i_ambient_curl(V, Cov);
         return;
     end
     % ----- tangent (3nF) branch: existing -div(N x V) (UNCHANGED) -----
@@ -90,4 +89,27 @@ function curlField = bst_curl(V, ManifoldMat, varargin)
         Vrot(3*fH,   :) = nx.*vy - ny.*vx;
     end
     curlField = -bst_divergence(Vrot, ManifoldMat);     % curl V = -div(N x V)
+end
+
+%% ===== ambient vorticity: flat-covariant curl.n (Covariant node) =====
+% Ported from bst_helmholtz i_frame_vertex: per-face curl vector, projected on the face normal,
+% area-weighted to vertices. s=+1. Vorticity is intrinsic (no mean-curvature term).
+function curlField = i_ambient_curl(J, Cov)
+    s = +1;
+    nVtot = max(cellfun(@(c) max(double(c(:))), Cov.GlobalVertices));
+    nT = size(J, 2);
+    curlField = zeros(nVtot, nT);
+    for hh = 1:numel(Cov.Covariant)
+        C = Cov.Covariant{hh};  vH = double(Cov.GlobalVertices{hh}(:));
+        nFh = size(C.Faces, 1);  nVh = numel(vH);  Nf = C.FaceNormal;
+        Gx = C.ScalarGrad(1:nFh,:);  Gy = C.ScalarGrad(nFh+1:2*nFh,:);  Gz = C.ScalarGrad(2*nFh+1:3*nFh,:);
+        Wfv = bst_face2vertex(C.Faces, C.FaceArea);   % shared math helper (Task 3)
+        Jx = J(3*(vH-1)+1, :);  Jy = J(3*(vH-1)+2, :);  Jz = J(3*(vH-1)+3, :);
+        omF = zeros(nFh, nT);
+        for t = 1:nT
+            cv = [Gy*Jz(:,t) - Gz*Jy(:,t), Gz*Jx(:,t) - Gx*Jz(:,t), Gx*Jy(:,t) - Gy*Jx(:,t)];
+            omF(:, t) = sum(cv .* Nf, 2);             % vorticity = curl . n
+        end
+        curlField(vH, :) = s * (Wfv * omF);
+    end
 end

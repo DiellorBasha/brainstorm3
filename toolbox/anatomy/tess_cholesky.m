@@ -14,7 +14,7 @@ function out = tess_cholesky(varargin)
 % The opaque `decomposition` object is NOT serialized; L (sparse lower) + p (permutation) are
 % plain data that reload cleanly and reconstruct the two triangular solves.
 %
-% SEE ALSO: bst_poisson, bst_get_operator_node, tess_operators
+% SEE ALSO: bst_poisson, tess_operators
 
 % @=============================================================================
 % This function is part of the Brainstorm software:

@@ -48,13 +48,9 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     SurfaceFile = R.SurfaceFile;
 
     bst_progress('start', 'Helmholtz view', 'Loading operators...');
-    Cov = bst_get_operator_node(SurfaceFile, 'Covariant');
-    LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    Cov = tess_operators(SurfaceFile, 'Covariant');
     Surf  = in_tess_bst(SurfaceFile, 0);
-    Mani  = tess_manifold(SurfaceFile);
     nV = size(Surf.Vertices,1);
-    bst_progress('text', 'Factorizing the cotan operator...');
-    Op = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain','vertex');
     bst_progress('text', 'Loading Dirac eigenbasis...');
     EigenMat = tess_eigen(SurfaceFile, 'Dirac');
     OpMat    = in_bst_operator(EigenMat.OperatorFile);
@@ -70,11 +66,12 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     if iTess <= numel(TI); TI(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI); end
     try, panel_surface('UpdateSurfaceProperties'); catch, end %#ok<CTCH>
 
-    St = struct('Op',Op, 'srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
+    St = struct('srcDS',iDSf, 'srcResult',iResult, 'Component','Total', ...
                 'iTess',iTess, 'nV',nV, ...
                 'EigenMat',EigenMat, 'Mass',{OpMat.Mass}, 'Lambda',Lambda, ...
                 'Smooth',struct('on',false,'name','heat','params',struct()), ...
                 'Cache',containers.Map('KeyType','double','ValueType','any'));
+    setappdata(hFig, 'HelmholtzCov', Cov);
     setappdata(hFig, 'HelmholtzState', St);
     setappdata(hFig, 'CustomOverlayFcn', @(h) UpdateFrame(h));
     set(hFig, 'CloseRequestFcn', @(h,e) Close(h));
@@ -109,11 +106,12 @@ function UpdateFrame(hFig)
         g  = bst_eigfilter_kernel(St.Smooth.name, St.Smooth.params);
         Jt = real(bst_eigenfilter('Analysis', Jt, St.EigenMat, struct('Mass', {St.Mass}), g, struct()));
     end
-    % Helmholtz-Hodge decomposition of the active frame (cores off)
+    % Helmholtz-Hodge decomposition of the active frame (no core detection)
     if isKey(St.Cache, iT)
         Ht = St.Cache(iT);
     else
-        Ht = bst_helmholtz('Frame', St.Op, Jt, false);  St.Cache(iT) = Ht;
+        Cov = getappdata(hFig, 'HelmholtzCov');
+        Ht = process_helmholtz('Compute', Jt, Cov);  St.Cache(iT) = Ht;
     end
     comp = i_component(Ht, St.Component);
     % --- cortex scalar + colormap ---

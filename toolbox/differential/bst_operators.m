@@ -31,7 +31,7 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 %                 'curl'       : tangent face field  F [3nF x nT] -> per-VERTEX vorticity    [nV  x nT] (manifold DEC: -div(N x V))
 %                 'laplacian'  : scalar field        F [nV  x nT] -> Laplace-Beltrami        [nV  x nT]
 %                 'poisson'    : scalar RHS          F [nV  x nT] -> potential phi            [nV  x nT]  (K phi = M f)
-%                 'helmholtz'  : 3-vector field      F [3nV x nT] -> delegates bst_helmholtz (vorticity Curl primary)
+%                 'helmholtz'  : 3-vector field      F [3nV x nT] -> process_helmholtz Hodge decomp (vorticity Curl primary)
 %     - OPTIONS : struct (call bst_operators() with no args for defaults), fields below.
 %
 % OUTPUTS:
@@ -39,7 +39,7 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 %     - Messages    : error/warning string
 %     - isError     : 1 if an error happened
 %
-% SEE ALSO: bst_eigen, bst_helmholtz, bst_gradient, bst_get_operator_node, tess_manifold
+% SEE ALSO: bst_eigen, process_helmholtz, bst_gradient, tess_operators, tess_manifold
 %
 %     TANGENT STRATUM — two Laplacians, not one. The differential ops (div/curl) use the
 %     de Rham / DEC route (delta d + d delta, the Hodge Laplacian). The SMOOTHING / eigen
@@ -151,20 +151,20 @@ for iData = 1:numel(Data)
             [Field, Mag] = bst_gradient(f, Mani);                    % [3nF x nT] per-face native + per-face magnitude
             Result = struct('Method','gradient', 'Field',Field, 'nComponents',3, 'Domain','face', 'Magnitude',Mag);
         case 'laplacian'
-            LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+            LBO   = tess_operators(SurfaceFile, 'Laplace-Beltrami');
             f     = i_as_vertex_scalar(F, nVtot, 'laplacian');
             Field = i_laplacian(LBO, f, nVtot);                     % [nV x nT]
             Result = struct('Method','laplacian', 'Field',Field, 'nComponents',1);
         case 'poisson'
-            LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+            LBO   = tess_operators(SurfaceFile, 'Laplace-Beltrami');
             f     = i_as_vertex_scalar(F, nVtot, 'poisson');
             Field = bst_poisson(LBO, f);                            % [nV x nT]
             Result = struct('Method','poisson', 'Field',Field, 'nComponents',1);
         case 'divergence'
             Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
             if strcmp(stratum, 'ambient')
-                Dir = bst_get_operator_node(SurfaceFile,'Covariant');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
-                Field = bst_divergence(F, Mani, 'Ambient', Surf, Dir, LBO);
+                Dir = tess_operators(SurfaceFile,'Covariant');
+                Field = bst_divergence(F, Mani, 'Ambient', Surf, Dir);
             else
                 Field = bst_divergence(F, Mani);                   % tangent [3nF]
             end
@@ -172,21 +172,19 @@ for iData = 1:numel(Data)
         case 'curl'
             Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
             if strcmp(stratum, 'ambient')
-                Dir = bst_get_operator_node(SurfaceFile,'Covariant');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
-                Field = bst_curl(F, Mani, 'Ambient', Surf, Dir, LBO);
+                Dir = tess_operators(SurfaceFile,'Covariant');
+                Field = bst_curl(F, Mani, 'Ambient', Surf, Dir);
             else
                 Field = bst_curl(F, Mani);                          % tangent [3nF]
             end
             Result = struct('Method','curl', 'Field',Field, 'nComponents',1);
         case 'helmholtz'
-            Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Dir   = bst_get_operator_node(SurfaceFile, 'Covariant');
-            LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
             if size(F,1) ~= 3*nVtot
                 Messages = sprintf('bst_operators: helmholtz needs a [3nV x nT] vector field (got %d rows, 3nV=%d).', size(F,1), 3*nVtot);
                 isError = 1; break;
             end
-            H = bst_helmholtz('Decompose', {Dir, LBO}, Mani, Surf, F);
+            Cov = tess_operators(SurfaceFile, 'Covariant');
+            H = process_helmholtz('Compute', F, Cov);
             Result = struct('Method','helmholtz', 'Field',H.Curl, 'nComponents',1, 'Helmholtz',H);  % vorticity primary
         otherwise
             Messages = ['bst_operators: unknown Method: ' OPTIONS.Method];  isError = 1;  break;

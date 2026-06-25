@@ -4,7 +4,7 @@ function test_bst_operators()
 %   - gradient(constant)      == 0
 %   - gradient(coordinate k)  ~ +tangential e_k  (true surface gradient, correct sign)
 %   - laplacian(poisson(f))   ~ f - mean          (the two solvers invert, off the pinned vertex)
-%   - helmholtz delegate Curl == bst_helmholtz('Decompose') Curl (bit-identical)
+%   - helmholtz delegate Curl == process_helmholtz('Compute') Curl (bit-identical)
 %
 % Needs a loaded protocol whose Subject 1 has a cortex (+ nxr-compute); SKIPs otherwise.
 % Author: Diellor Basha, 2026
@@ -47,7 +47,7 @@ function test_bst_operators()
     % ----- laplacian(poisson(f)) ~ f - mean (per hemisphere, off the pinned vertex) -----
     f   = sin((1:nV)'*0.7) + cos((1:nV)'*0.13);
     g   = run('laplacian', run('poisson', f));
-    LBO = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    LBO = tess_operators(SurfaceFile, 'Laplace-Beltrami');
     ref = zeros(nV,1);  keepMask = false(nV,1);
     for hh = 1:numel(LBO.GlobalVertices)
         vH = double(LBO.GlobalVertices{hh}(:));
@@ -84,13 +84,12 @@ function test_bst_operators()
     nFail = nFail + chk('div(rot grad f) ~ 0 (rms ratio < 1e-3)', rms(dvr(msk))/rms(dgf(msk)) < 1e-3);
     nFail = nFail + chk('curl(rot grad f) ~ Laplace-Beltrami (corr > 0.95)', ccm(cvr,lap) > 0.95);
 
-    % ----- helmholtz delegate Curl == bst_helmholtz directly -----
+    % ----- helmholtz delegate Curl == process_helmholtz('Compute') directly -----
     J    = sin((1:3*nV)'*0.31);
     Cop  = run('helmholtz', J);
-    Mani = tess_manifold(SurfaceFile);
-    Dir  = bst_get_operator_node(SurfaceFile, 'Dirac');
-    Hd   = bst_helmholtz('Decompose', {Dir, LBO}, Mani, Surf, J);
-    nFail = nFail + chk('helmholtz delegate Curl == bst_helmholtz (bit-identical)', isequal(Cop, Hd.Curl));
+    Cov  = tess_operators(SurfaceFile, 'Covariant');
+    Hd   = process_helmholtz('Compute', J, Cov);
+    nFail = nFail + chk('helmholtz delegate Curl == process_helmholtz Curl (bit-identical)', isequal(Cop, Hd.Curl));
 
     fprintf('\n==== test_bst_operators: %d failed ====\n', nFail);
 end

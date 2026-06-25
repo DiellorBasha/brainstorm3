@@ -21,7 +21,7 @@ function [gradField, gradMag] = bst_gradient(F, ManifoldMat)
 %                 i.e. face k occupies rows 3k-2:3k. Faces outside both hemispheres stay 0.
 %   - gradMag   : (optional) per-face gradient magnitude [nF x nT]
 %
-% SEE ALSO: bst_operators, tess_manifold (DEC group), bst_helmholtz
+% SEE ALSO: bst_operators, tess_manifold (DEC group), process_helmholtz
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
