@@ -139,6 +139,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jAct = gui_river([2 2], [0 7 2 7], 'Actions');
     gui_component('button', jAct, 'hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
     gui_component('button', jAct, 'br hfill', 'Save detection', [], 'Promote the staged detection events into saved atoms (with numeric frequency)', @(h,e)bst_call(@OnSaveDetection));
+    gui_component('button', jAct, 'br hfill', 'Save cursor', [], 'Commit the current 4-D cursor as one atom', @(h,e)bst_call(@OnSaveCursor));
     gui_component('button', jAct, 'br hfill', 'Clear preview',  [], 'Discard the staged detection events without saving', @(h,e)bst_call(@OnClearDetection));
     gui_component('button', jAct, 'br hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor as atoms', @(h,e)bst_call(@OnRecord));
     gui_component('button', jAct, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom', @(h,e)bst_call(@OnCaptureRegion));
@@ -197,6 +198,13 @@ function loc = i_read_block(ctrl, axis)
         otherwise, return;
     end
     c = str2double(char(jC.getText()));  w = str2double(char(jW.getText()));
+    % Time block tracks the global cursor: an empty center field captures the live current time.
+    if strcmp(axis,'time') && isnan(c)
+        global GlobalData; %#ok<TLEV>
+        if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
+            c = GlobalData.UserTimeWindow.CurrentTime;
+        end
+    end
     if ~isnan(c), loc.center = c; end
     if ~isnan(w), loc.extent = abs(w); else, loc.extent = 0; end
     if strcmp(axis,'source') && isfinite(loc.extent), loc.extent = loc.extent / 1000; end   % jSrcW is mm -> metres
@@ -474,6 +482,62 @@ function SyncSource() %#ok<DEFNU>
     loc.center = double(gs.seed);  loc.extent = gs.radius;  loc.pos = gs.pos;  loc.state = 'window';
     st.nav = bst_atom('Set', st.nav, 'source', 1, loc);
     setappdata(0, 'DynamicsTarget', st);
+end
+
+
+%% ===== SAVE CURSOR: commit the live 4-D cursor (st.nav) as ONE atom =====
+function OnSaveCursor() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
+    lt = bst_atom('Get', st.nav, 'time');     lf = bst_atom('Get', st.nav, 'freq');
+    ls = bst_atom('Get', st.nav, 'source');   lk = bst_atom('Get', st.nav, 'scale'); %#ok<NASGU>
+    if ~isfinite(lt.center)
+        java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
+    end
+    band = st.curBand;  bandName = i_field(st, 'curBandName', '');
+    op   = i_field(st, 'curOp', 'Total');
+    switch op
+        case 'Irrot', Func = 'potential';
+        case 'Solen', Func = 'stream';
+        otherwise,    Func = 'magnitude';
+    end
+    % measured descriptor at the cursor (operator scalar at the seed, if localized + a field is present)
+    strength = NaN;  charge = NaN;
+    if isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
+        St = getappdata(st.hFig, 'HelmholtzState');
+        if ~isempty(St) && isfield(St,'Cache')
+            [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex'); %#ok<ASGLU>
+            if ~isempty(St.Cache) && isKey(St.Cache, iT)
+                Ht = St.Cache(iT);
+                switch op
+                    case 'Irrot', sc = Ht.Phi;   case 'Solen', sc = Ht.Psi;   otherwise, sc = Ht.Fmag;
+                end
+                if ls.center>=1 && ls.center<=numel(sc), strength = sc(ls.center);  charge = sign(strength); end
+            end
+        end
+    end
+    % find-or-create the (band, Function) group; append ONE occurrence
+    g = i_find_group(st.T, bandName, Func);
+    if g < 1
+        G = bst_dynamics('NewGroup', strtrim(sprintf('%s %s', i_disp_band(bandName, band), Func)));
+        G.type='simple';  G.band=band;  G.bandName=bandName;  G.Function=Func;
+        G.color=i_op_color(op);  G.SurfaceFile=st.T.SurfaceFile;  G.DataFile=st.T.DataFile;  G.ResultsFile=i_first_results(st.T);
+        st.T = bst_dynamics('AddGroup', st.T, G);  g = numel(st.T.Groups);
+    end
+    G = st.T.Groups(g);
+    G.times(1,end+1) = lt.center;   G.epochs(end+1) = 1;
+    if isfinite(ls.center)
+        v = double(ls.center);  G.vertices(end+1) = v;
+        if ~isempty(ls.pos), G.pos(end+1,:) = ls.pos; else, G.pos(end+1,:) = [NaN NaN NaN]; end
+        G.hemi(end+1) = 1 + (~isempty(ls.pos) && ls.pos(2)<0);
+    else
+        G.vertices(end+1) = NaN;  G.pos(end+1,:) = [NaN NaN NaN];  G.hemi(end+1) = NaN;
+    end
+    G.strength(end+1) = strength;   G.charge(end+1) = charge;   G.type='simple';
+    if ~isempty(band), G = bst_atom('Set', G, 'freq', 1, lf); end   % numeric freq index
+    st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
+    i_apply(st);
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Saved cursor atom (%s) at %.3f s', Func, lt.center));
 end
 
 

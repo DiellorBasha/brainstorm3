@@ -51,6 +51,21 @@ function test_detect_save()
     fprintf('T3 clear detection: detectionEventsGone=%d => %s\n', ~stillDet, PF{ok3+1});
     pass = pass && ok3;
 
+    % ---------- T4: Save cursor commits ONE atom from st.nav ----------
+    ctrl.jFreqC.setText('10');  ctrl.jFreqW.setText('2');  panel_bst_dynamics('OnAxisChange','freq');  drawnow;
+    ctrl.jMeasStr.setSelected(true);  panel_bst_dynamics('OnMeasurement','Solen');  drawnow;       % Function = stream
+    st = getappdata(0,'DynamicsTarget');  nOcc0 = 0;
+    gC0 = find(arrayfun(@(k) strcmp(st.T.Groups(k).Function,'stream') && strcmp(st.T.Groups(k).bandName,'alpha'), 1:st.T.nGroups), 1);
+    if ~isempty(gC0), nOcc0 = numel(st.T.Groups(gC0).times); end
+    panel_time('SetCurrentTime', 22.0);  panel_bst_dynamics('OnAxisChange','time');  drawnow;
+    panel_bst_dynamics('OnSaveCursor');  drawnow;
+    st = getappdata(0,'DynamicsTarget');
+    gC1 = find(arrayfun(@(k) strcmp(st.T.Groups(k).Function,'stream') && strcmp(st.T.Groups(k).bandName,'alpha'), 1:st.T.nGroups), 1);
+    nOcc1 = 0; if ~isempty(gC1), nOcc1 = numel(st.T.Groups(gC1).times); end
+    ok4 = ~isempty(gC1) && (nOcc1 == nOcc0 + 1);
+    fprintf('T4 save cursor: group=%d occ %d->%d => %s\n', ~isempty(gC1), nOcc0, nOcc1, PF{ok4+1});
+    pass = pass && ok4;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end
