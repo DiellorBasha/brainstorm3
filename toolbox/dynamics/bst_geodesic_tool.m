@@ -160,6 +160,10 @@ function Draw(hFig) %#ok<DEFNU>
     if ~any(fIn), return; end
     patch('Faces', c.Faces(fIn,:), 'Vertices', c.Vertices, 'Parent', hAxes, ...
         'FaceColor', [0.2 0.7 1.0], 'FaceAlpha', 0.3, 'EdgeColor', 'none', 'Tag', 'GeodesicToolDisk');
+    % keep the Dynamics Source block fields in sync with the live disk (if the panel is open)
+    if ~isempty(bst_get('PanelControls', 'Dynamics'))
+        try, panel_bst_dynamics('SyncSource'); catch, end %#ok<CTCH>
+    end
 end
 
 
