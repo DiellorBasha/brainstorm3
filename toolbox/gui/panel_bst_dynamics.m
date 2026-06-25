@@ -138,6 +138,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     % ACTIONS row (kept: Detect / Record / Capture)
     jAct = gui_river([2 2], [0 7 2 7], 'Actions');
     gui_component('button', jAct, 'hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
+    gui_component('button', jAct, 'br hfill', 'Save detection', [], 'Promote the staged detection events into saved atoms (with numeric frequency)', @(h,e)bst_call(@OnSaveDetection));
+    gui_component('button', jAct, 'br hfill', 'Clear preview',  [], 'Discard the staged detection events without saving', @(h,e)bst_call(@OnClearDetection));
     gui_component('button', jAct, 'br hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor as atoms', @(h,e)bst_call(@OnRecord));
     gui_component('button', jAct, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom', @(h,e)bst_call(@OnCaptureRegion));
     jCtrl.add(jAct);
@@ -388,6 +390,68 @@ function i_detect_events(bandName, band, evt, markers)
     panel_record('UpdateEventsList');                            % refresh the Record-panel event list
     panel_record('ReplotEvents');                               % re-plot the event markers on the open time series
     if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged events are render-only, don't persist
+end
+
+
+%% ===== SAVE DETECTION: convert the detection event group -> atoms in st.T =====
+function OnSaveDetection() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st), return; end
+    evs = panel_record('GetEvents', [], 1);
+    if isempty(evs), java_dialog('msgbox', 'No detection to save. Run Detect first.', 'Save detection');  return; end
+    % find the band-window event ("<band> (lo-hi Hz)") + its 4 phase events
+    iWin = find(~cellfun(@isempty, regexp({evs.label}, '^.+ \([0-9.]+-[0-9.]+ Hz\)$', 'once')), 1);
+    if isempty(iWin), java_dialog('msgbox', 'No detection window event found.', 'Save detection');  return; end
+    winLabel = evs(iWin).label;
+    tok = regexp(winLabel, '^(.+) \(([0-9.]+)-([0-9.]+) Hz\)$', 'tokens', 'once');
+    bandName = tok{1};  band = [str2double(tok{2}), str2double(tok{3})];
+    DataFile = st.T.DataFile;
+    if isempty(DataFile)
+        for g=1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
+    end
+    % numeric freq Localization from the band the detection was RUN at (from the event label)
+    fLoc = bst_atom('NewLoc', 'freq');  fLoc.center = mean(band);  fLoc.extent = (band(2)-band(1))/2;  fLoc.label = bandName;
+    % rebuild this band's saved groups
+    st.T = i_remove_band(st.T, bandName);
+    W = bst_dynamics('NewGroup', winLabel);
+    W.type='extended';  W.times=evs(iWin).times;  W.epochs=ones(1,size(evs(iWin).times,2));  W.bandName=bandName;
+    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
+    W = bst_atom('Set', W, 'freq', 1, fLoc);                      % numeric freq tensor index
+    st.T = bst_dynamics('AddGroup', st.T, W);
+    phaseColors = struct('peak',[0.90 0.10 0.10],'trough',[0.10 0.25 0.90],'rising',[0.10 0.70 0.20],'falling',[0.95 0.55 0.10]);
+    for ph = {'peak','trough','rising','falling'}
+        lbl = [bandName '_' ph{1}];  ie = find(strcmpi({evs.label}, lbl), 1);
+        if isempty(ie) || isempty(evs(ie).times), continue; end
+        P = bst_dynamics('NewGroup', lbl);
+        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph{1});
+        P.times=evs(ie).times(1,:);  P.epochs=ones(1,size(evs(ie).times,2));  P.bandName=bandName;
+        P.color=phaseColors.(ph{1});  P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
+        P = bst_atom('Set', P, 'freq', 1, fLoc);                  % numeric freq on each child
+        st.T = bst_dynamics('AddGroup', st.T, P);
+    end
+    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;      end
+    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile; end
+    i_apply(st);
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Saved %s detection as atoms', bandName));
+end
+
+%% ===== CLEAR DETECTION: remove the detection event group (discard) =====
+function OnClearDetection() %#ok<DEFNU>
+    global GlobalData;
+    evs = panel_record('GetEvents', [], 1);
+    if isempty(evs), return; end
+    % Clearing mutates events (SetEvents sets isModified=1); preserve the recording's clean/dirty
+    % state so discarding a render-only preview never dirties/persists the recording.
+    iDS = panel_record('GetCurrentDataset');
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
+    keep = evs(~isDet);
+    if isempty(keep), keep = repmat(db_template('event'), 1, 0); end   % empty event array, not []
+    panel_record('SetEvents', keep);                             % replace the whole event set with the non-detection ones
+    panel_record('UpdateEventsList');
+    panel_record('ReplotEvents');                               % re-plot the (now cleared) markers; do NOT ReloadFigures (would reload events from disk)
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % discarding preview must not dirty the recording
+    [~, st] = i_cs();  if ~isempty(st), i_apply(st); end
 end
 
 

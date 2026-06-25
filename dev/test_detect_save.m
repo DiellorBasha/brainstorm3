@@ -32,6 +32,25 @@ function test_detect_save()
     fprintf('T1 detect->events: win=%d peak=%d stT_unchanged=%d => %s\n', haveWin, havePeak, (st1.T.nGroups==nG0), PF{ok1+1});
     pass = pass && ok1;
 
+    % ---------- T2: Save detection promotes events -> atoms (numeric freq) ----------
+    panel_bst_dynamics('OnSaveDetection');  drawnow;
+    st = getappdata(0,'DynamicsTarget');  Td = st.T;  parents = {Td.Groups.parent};
+    gW = find(cellfun(@isempty,parents) & arrayfun(@(k) strcmp(Td.Groups(k).bandName,'alpha') && size(Td.Groups(k).times,1)==2, 1:Td.nGroups), 1);
+    chN = [];  if ~isempty(gW), chN = find(strcmpi(parents, Td.Groups(gW).label)); end
+    lf = bst_atom('Get', Td.Groups(gW), 'freq');                  % numeric freq stamped
+    ok2 = ~isempty(gW) && (numel(chN)==4) && (abs(lf.center-10.5)<1e-6) && (abs(lf.extent-2.5)<1e-6);
+    fprintf('T2 save detection: window=%d children=%d freqC=%g freqW=%g => %s\n', ~isempty(gW), numel(chN), lf.center, lf.extent, PF{ok2+1});
+    pass = pass && ok2;
+
+    % ---------- T3: Clear removes the detection events ----------
+    panel_bst_dynamics('OnDetect');  drawnow;                     % re-stage events
+    panel_bst_dynamics('OnClearDetection');  drawnow;
+    evs2 = panel_record('GetEvents', [], 1);
+    stillDet = ~isempty(evs2) && any(strcmpi({evs2.label}, 'alpha_peak'));
+    ok3 = ~stillDet;
+    fprintf('T3 clear detection: detectionEventsGone=%d => %s\n', ~stillDet, PF{ok3+1});
+    pass = pass && ok3;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end
