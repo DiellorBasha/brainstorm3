@@ -66,6 +66,21 @@ function test_detect_save()
     fprintf('T4 save cursor: group=%d occ %d->%d => %s\n', ~isempty(gC1), nOcc0, nOcc1, PF{ok4+1});
     pass = pass && ok4;
 
+    % ---------- T5: Load atom into navigator round-trips the saved coords ----------
+    st = getappdata(0,'DynamicsTarget');
+    gL = find(arrayfun(@(k) strcmp(st.T.Groups(k).Function,'stream'), 1:st.T.nGroups), 1);   % the saved-cursor group
+    % select occurrence 1 of that group: drive the tree to its stack then the list row
+    st.occMap = [gL 1 0];  setappdata(0,'DynamicsTarget', st);   % emulate a selected occurrence
+    panel_bst_dynamics('OnLoadAtom');  drawnow;
+    st = getappdata(0,'DynamicsTarget');
+    lt = bst_atom('Get', st.nav, 'time');  lf = bst_atom('Get', st.nav, 'freq');
+    gt = bst_atom('Get', st.T.Groups(gL), 'time', 1);  gf = bst_atom('Get', st.T.Groups(gL), 'freq');
+    ftxt = str2double(char(ctrl.jFreqC.getText()));
+    bandOK = ~isempty(st.curBand) && ~isempty(st.T.Groups(gL).band) && isequal(numel(st.curBand),2) && all(abs(st.curBand(:)-st.T.Groups(gL).band(:))<1e-6);   % i_drive's curBand survives the final write
+    ok5b = (abs(lt.center-gt.center)<1e-6) && (abs(lf.center-gf.center)<1e-6) && (abs(ftxt-gf.center)<1e-6) && bandOK;
+    fprintf('T5b load atom: navTime=%g navFreq=%g freqField=%g curBand=%s => %s\n', lt.center, lf.center, ftxt, mat2str(st.curBand), PF{ok5b+1});
+    pass = pass && ok5b;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end

@@ -83,6 +83,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jMenuAtoms.addSeparator();
     gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
     gui_component('MenuItem', jMenuAtoms, [], 'Capture region -> active atom', IconLoader.ICON_SCOUT_NEW, [], @(h,e)bst_call(@OnCaptureRegion));
+    gui_component('MenuItem', jMenuAtoms, [], 'Load into navigator', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@OnLoadAtom));
 
     % --- split: band stack TREE (left) | flat per-window atom list (right) ---
     jTree = java_create('javax.swing.JTree');
@@ -538,6 +539,47 @@ function OnSaveCursor() %#ok<DEFNU>
     i_apply(st);
     if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
     bst_progress('text', sprintf('Saved cursor atom (%s) at %.3f s', Func, lt.center));
+end
+
+
+%% ===== LOAD ATOM: fill the navigator blocks + st.nav from the selected saved atom =====
+function OnLoadAtom() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || isempty(st.occMap), java_dialog('warning','Select a saved atom first.','Load into navigator');  return; end
+    g = st.occMap(1,1);  o = st.occMap(1,2);
+    if (g < 1) || (g > numel(st.T.Groups)), return; end
+    G = st.T.Groups(g);
+    for axis = {'time','freq','source','scale'}
+        ax = axis{1};
+        loc = bst_atom('Get', G, ax, o);
+        st.nav = bst_atom('Set', st.nav, ax, 1, loc);
+        i_fill_block(ctrl, ax, loc);
+        i_drive(ax, loc);                          % drive the viewers to the atom
+    end
+    % final write: keep curBand/curScale that i_drive set during the loop; overlay the loaded cursor
+    st2 = getappdata(0, 'DynamicsTarget');
+    st2.nav = st.nav;
+    setappdata(0, 'DynamicsTarget', st2);
+    bst_progress('text', 'Loaded atom into the navigator');
+end
+
+% Write a Localization's center/window into the axis block's fields (source window in mm).
+function i_fill_block(ctrl, axis, loc)
+    switch axis
+        case 'time',   jC=ctrl.jTimeC;  jW=ctrl.jTimeW;   wv=loc.extent;
+        case 'freq',   jC=ctrl.jFreqC;  jW=ctrl.jFreqW;   wv=loc.extent;
+        case 'source', jC=ctrl.jSrcC;   jW=ctrl.jSrcW;    wv=loc.extent*1000;   % metres -> mm
+        case 'scale',  jC=ctrl.jScaleC; jW=ctrl.jScaleW;  wv=loc.extent;
+        otherwise, return;
+    end
+    % Set the freq band combobox FIRST: its ActionPerformed callback (OnFreqPreset) runs on the
+    % Swing EDT and overwrites the center/window fields with the band midpoint, so drain the EDT
+    % (drawnow) before writing the loaded coords -- otherwise the async preset clobbers them.
+    if strcmp(axis,'freq') && isfield(ctrl,'jFreqBand') && ~isempty(loc.label)
+        try, ctrl.jFreqBand.setSelectedItem(loc.label);  drawnow; catch, end %#ok<CTCH>
+    end
+    if isfinite(loc.center), jC.setText(num2str(loc.center)); else, jC.setText(''); end
+    if isfinite(wv),         jW.setText(num2str(wv));         else, jW.setText(''); end
 end
 
 
