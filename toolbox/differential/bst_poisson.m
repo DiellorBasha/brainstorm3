@@ -10,7 +10,7 @@ function phi = bst_poisson(OperatorNode, F)
 % USAGE:  phi = bst_poisson(OperatorNode, F)
 %   OperatorNode : a 'Laplace-Beltrami' or 'Covariant' operatormat (Operator{hh}=K cotan stiffness, Mass{hh}=M, GlobalVertices{hh})
 %   F            : per-vertex scalar source [nV x nT]
-%   phi          : per-vertex potential [nV x nT] (pinned at vertex 1 per hemisphere; gauge-fixed)
+%   phi          : per-vertex potential [nV x nT] (mean-zero per hemisphere)
 %
 % SEE ALSO: tess_cholesky, bst_operators, bst_helmholtz
 %
@@ -51,6 +51,6 @@ function phi = bst_poisson(OperatorNode, F)
         totMass = sum(M(:));
         fh = fh - (sum(M*fh, 1) / totMass);          % project to mean-zero (mass metric)
         x  = tess_cholesky('solve', dF, M*fh);       % K x = M f  on the free block; pinned entry 0
-        phi(vH, :) = x;                               % gauge-fixed: phi(pin)=0, unique solution
+        phi(vH, :) = x - mean(x, 1);                 % recenter to the mean-zero gauge (canonical; matches the helmholtz potential convention)
     end
 end
