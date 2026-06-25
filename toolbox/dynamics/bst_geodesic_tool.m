@@ -74,6 +74,7 @@ function Toggle(onoff) %#ok<DEFNU>
             set(hFig, 'Pointer', 'arrow');
             Clear(hFig);
         end
+        Cache([]);                                        % Region tool off = no selection (clear disk state)
     end
 end
 
@@ -155,15 +156,43 @@ function Draw(hFig) %#ok<DEFNU>
     hAxes = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');  if isempty(hAxes), return; end
     hAxes = hAxes(1);  set(hAxes, 'NextPlot', 'add');     % low-level: avoid the axes-reset trap
     Clear(hFig);
-    inR = false(size(c.Vertices,1), 1);  inR(c.vertices) = true;
+    V = i_displayed_vertices(hFig, c.SurfaceFile);        % DISPLAYED (smoothed/inflated) vertices -> tracks the surface
+    if isempty(V) || (size(V,1) ~= size(c.Vertices,1)), V = c.Vertices; end   % fallback to stored anatomical
+    inR = false(size(V,1), 1);  inR(c.vertices) = true;
     fIn = all(inR(c.Faces), 2);
     if ~any(fIn), return; end
-    patch('Faces', c.Faces(fIn,:), 'Vertices', c.Vertices, 'Parent', hAxes, ...
+    patch('Faces', c.Faces(fIn,:), 'Vertices', V, 'Parent', hAxes, ...
         'FaceColor', [0.2 0.7 1.0], 'FaceAlpha', 0.3, 'EdgeColor', 'none', 'Tag', 'GeodesicToolDisk');
     % keep the Dynamics Source block fields in sync with the live disk (if the panel is open)
     if ~isempty(bst_get('PanelControls', 'Dynamics'))
         try, panel_bst_dynamics('SyncSource'); catch, end %#ok<CTCH>
     end
+end
+
+
+%% ===== REDRAW the disk on the currently displayed surface (no-op if no disk) =====
+% Called when the cortex morphs (Surface-tab Smooth slider) so the overlay tracks it,
+% mirroring how panel_scout re-plots scouts on the smoothed surface.
+function Redraw(hFig) %#ok<DEFNU>
+    if isempty(Cache()), return; end
+    Draw(hFig);
+end
+
+
+%% ===== displayed (smoothed/inflated) vertices of the cortex patch matching SurfaceFile =====
+function V = i_displayed_vertices(hFig, SurfaceFile)
+    V = [];
+    if isempty(hFig) || ~ishandle(hFig), return; end
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo), return; end
+    iMatch = [];  iAny = [];
+    for i = 1:numel(TessInfo)
+        if isempty(TessInfo(i).hPatch) || ~ishandle(TessInfo(i).hPatch), continue; end
+        if isempty(iAny), iAny = i; end
+        if strcmp(TessInfo(i).SurfaceFile, SurfaceFile), iMatch = i;  break; end
+    end
+    if isempty(iMatch), iMatch = iAny; end                % fall back to any live surface patch
+    if ~isempty(iMatch), V = get(TessInfo(iMatch).hPatch, 'Vertices'); end
 end
 
 

@@ -122,7 +122,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     [jFreqC, jFreqW] = i_axis_block(jCtrl, 'freq', 'Frequency', 'center', char(177), jFreqBand);
 
     % SOURCE block + Region tool (right slot) -- the seed/radius picker
-    jRegionTool = gui_component('toggle', [], '', 'Region', {Insets(0,0,0,0), Dimension(java_scaled('value',54),BH)}, 'Heat-disk tool: click a cortex vertex to seed (center), scroll to grow the radius (window)', @(h,e)bst_call(@()bst_geodesic_tool('Toggle', ctrl_region_state())));
+    jRegionTool = gui_component('toggle', [], '', 'Region', {Insets(0,0,0,0), Dimension(java_scaled('value',54),BH)}, 'Heat-disk tool: ON = click a vertex to seed (center) + scroll to grow the radius (window); OFF = clear the Source selection', @(h,e)bst_call(@OnRegionTool));
     [jSrcC, jSrcW] = i_axis_block(jCtrl, 'source', 'Source', 'center', 'radius', jRegionTool);
 
     % SCALE block (basic: window -> heat smoothing; center reserved for Phase 5)
@@ -684,6 +684,22 @@ function s = ctrl_region_state()
     ctrl = bst_get('PanelControls', 'Dynamics');
     if ~isempty(ctrl) && isfield(ctrl,'jRegionTool') && ~isempty(ctrl.jRegionTool)
         s = double(ctrl.jRegionTool.isSelected());
+    end
+end
+
+%% ===== REGION TOOL toggle: ON = pick a region; OFF = clear the Source selection =====
+function OnRegionTool() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    state = ctrl_region_state();
+    bst_geodesic_tool('Toggle', state);
+    if ~state                                            % turning OFF -> clear the Source selection
+        if ~isempty(ctrl) && isfield(ctrl,'jSrcC')
+            ctrl.jSrcC.setText('');  ctrl.jSrcW.setText('');
+        end
+        if ~isempty(st)
+            st.nav = bst_atom('Set', st.nav, 'source', 1, bst_atom('NewLoc','source'));   % unlocalized
+            setappdata(0, 'DynamicsTarget', st);
+        end
     end
 end
 

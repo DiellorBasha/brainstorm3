@@ -2720,6 +2720,8 @@ function SetSurfaceSmooth(hFig, iSurf, value, isSave)
         figure_callback(hFig, 'UpdateSurfaceAlpha', hFig, iSurf);
         % Update scouts displayed on this surfce
         panel_scout('UpdateScoutsVertices', TessInfo(iSurf).SurfaceFile);
+        % Re-render the dynamics Region-tool disk on the smoothed surface (no-op if no disk)
+        try, bst_geodesic_tool('Redraw', hFig); catch, end %#ok<CTCH>
         % Set the new value as the default value
         if isSave
             DefaultSurfaceDisplay = bst_get('DefaultSurfaceDisplay');
