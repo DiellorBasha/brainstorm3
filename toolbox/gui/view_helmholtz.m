@@ -48,13 +48,13 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     SurfaceFile = R.SurfaceFile;
 
     bst_progress('start', 'Helmholtz view', 'Loading operators...');
-    Dirac = bst_get_operator_node(SurfaceFile, 'Dirac');
+    Cov = bst_get_operator_node(SurfaceFile, 'Covariant');
     LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
     Surf  = in_tess_bst(SurfaceFile, 0);
     Mani  = tess_manifold(SurfaceFile);
     nV = size(Surf.Vertices,1);
     bst_progress('text', 'Factorizing the cotan operator...');
-    Op = bst_helmholtz('Prepare', {Dirac, LBO}, Mani, Surf, 'Domain','vertex');
+    Op = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain','vertex');
     bst_progress('text', 'Loading Dirac eigenbasis...');
     EigenMat = tess_eigen(SurfaceFile, 'Dirac');
     OpMat    = in_bst_operator(EigenMat.OperatorFile);

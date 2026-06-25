@@ -163,7 +163,7 @@ for iData = 1:numel(Data)
         case 'divergence'
             Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
             if strcmp(stratum, 'ambient')
-                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Dir = bst_get_operator_node(SurfaceFile,'Covariant');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
                 Field = bst_divergence(F, Mani, 'Ambient', Surf, Dir, LBO);
             else
                 Field = bst_divergence(F, Mani);                   % tangent [3nF]
@@ -172,7 +172,7 @@ for iData = 1:numel(Data)
         case 'curl'
             Mani = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
             if strcmp(stratum, 'ambient')
-                Dir = bst_get_operator_node(SurfaceFile,'Dirac');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+                Dir = bst_get_operator_node(SurfaceFile,'Covariant');  LBO = bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
                 Field = bst_curl(F, Mani, 'Ambient', Surf, Dir, LBO);
             else
                 Field = bst_curl(F, Mani);                          % tangent [3nF]
@@ -180,7 +180,7 @@ for iData = 1:numel(Data)
             Result = struct('Method','curl', 'Field',Field, 'nComponents',1);
         case 'helmholtz'
             Mani  = tess_manifold(SurfaceFile, 'Gauge', OPTIONS.Gauge);
-            Dir   = bst_get_operator_node(SurfaceFile, 'Dirac');
+            Dir   = bst_get_operator_node(SurfaceFile, 'Covariant');
             LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
             if size(F,1) ~= 3*nVtot
                 Messages = sprintf('bst_operators: helmholtz needs a [3nV x nT] vector field (got %d rows, 3nV=%d).', size(F,1), 3*nVtot);

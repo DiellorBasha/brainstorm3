@@ -85,28 +85,12 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
     end
 end
 
-%% ===== ambient divergence: Hodge div (imag.n) + mean-curvature term -2H(J.N) =====
-function divField = i_ambient_divergence(J, ManifoldMat, Surf, Dir, LBO)
-    H = bst_helmholtz('Decompose', {Dir, LBO}, ManifoldMat, Surf, J);   % H.Div = tangential Hodge divergence
-    nVtot = size(Surf.Vertices, 1);  nT = size(J, 2);
-    meanCurvTerm = zeros(nVtot, nT);
-    % Vertex normals: use VertNormals if present, else compute via tess_normals
-    if isfield(Surf, 'VertNormals') && ~isempty(Surf.VertNormals)
-        NvAll = Surf.VertNormals;                           % [nVtot x 3] outward vertex normals
-    else
-        NvAll = tess_normals(Surf.Vertices, Surf.Faces);
-    end
-    for hh = 1:numel(LBO.Operator)
-        if isempty(LBO.Operator{hh}), continue; end
-        vH = double(LBO.GlobalVertices{hh}(:));
-        K = LBO.Operator{hh};  M = LBO.Mass{hh};
-        X = Surf.Vertices(vH, :);                           % [nVh x 3] positions
-        HN = 0.5 * (M \ (K * X));                           % mean-curvature normal HN = 1/2 M^-1 K X
-        Nv = NvAll(vH, :);                                  % outward vertex normals [nVh x 3]
-        Hsc = sum(HN .* Nv, 2);                             % scalar mean curvature H = HN . N  [nVh x 1]
-        Jx = J(3*(vH-1)+1, :);  Jy = J(3*(vH-1)+2, :);  Jz = J(3*(vH-1)+3, :);
-        JdotN = Jx.*Nv(:,1) + Jy.*Nv(:,2) + Jz.*Nv(:,3); % [nVh x nT]
-        meanCurvTerm(vH, :) = -2 * (Hsc .* JdotN);         % -2 H (J.N)
-    end
-    divField = H.Div + meanCurvTerm;
+%% ===== ambient divergence: the full flat-covariant surface divergence =====
+% The 'Covariant' Hodge engine returns H.Div = the FULL ambient surface divergence of the
+% 3-D current (it already includes the mean-curvature coupling -2H(J.N): a constant ambient
+% field gives Div=0 even on folds). So no separate curvature term is added here -- doing so
+% would double-count. (Op{1} is the 'Covariant' node; arg name kept for signature stability.)
+function divField = i_ambient_divergence(J, ManifoldMat, Surf, Cov, LBO)
+    H = bst_helmholtz('Decompose', {Cov, LBO}, ManifoldMat, Surf, J);
+    divField = H.Div;
 end
