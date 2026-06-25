@@ -589,7 +589,7 @@ end
 % tagged with the panel's (time, band, scale, operator) coordinates. Auto-saves.
 function OnRecord() %#ok<DEFNU>
     [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    if isempty(ctrl) || isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
     D = getappdata(st.hFig, 'DynamicsOverlay');
     if isempty(D)
         java_dialog('warning', 'Record needs the linked dynamics source view (open via a Dirac result).', 'Record atoms');

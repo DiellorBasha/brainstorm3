@@ -83,9 +83,10 @@ function varargout = view_dynamics( varargin )
     end
 
     % ===== OPEN THE LINKED FIGURES =====
-    % Spatial view = the Helmholtz source 3D (atom markers are drawn on THIS cortex); temporal
-    % view = the recording time series. Both follow the global time cursor. Fall back to a bare
-    % surface when the table has no source/recording provenance.
+    % Spatial view = the source 3D cortex (atom markers are drawn on THIS cortex, and the
+    % differential overlay is painted on it); temporal view = the recording time series. Both
+    % follow the global time cursor. Fall back to a bare surface when the table has no
+    % source/recording provenance.
     if ~isempty(SrcResult)
         hFig = i_open_source_figure(SrcResult);
         if isempty(hFig), return; end
@@ -98,11 +99,10 @@ function varargout = view_dynamics( varargin )
     setappdata(hFig, 'DynamicsFile', DynamicsFile);
     Redraw(hFig, T);
 
-    % ===== OPEN THE PANEL (docked tools tab, like Record/Helmholtz) =====
-    % The Dynamics panel's Space section now drives the Helmholtz figure, so hide the
-    % standalone Helmholtz panel (the figure + its state stay live).
+    % ===== OPEN THE PANEL (docked tools tab, like Record) =====
+    % The Dynamics panel owns the differential overlay on the source figure (operator combobox
+    % + per-frame CustomOverlayFcn); reopen it fresh for this figure.
     try, gui_hide('Dynamics'); catch, end %#ok<CTCH>
-    try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     bstPanel = panel_bst_dynamics('CreatePanel');
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Dynamics', 0); catch, end %#ok<CTCH>
@@ -267,6 +267,11 @@ function hFig = i_open_source_figure(SrcResult)
     bst_progress('stop');
     [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResult, [], 'NewFigure');
     if isempty(hFig), return; end
+    % The differential maps are signed -> register the diverging 'stat2' colormap so the
+    % figure's colorbar + CLim track the symmetric scale (the overlay sets TessInfo.ColormapType
+    % to 'stat2', but UpdateSurfaceColormap's CLim branch only fires when the FIGURE colormap
+    % type matches). All four operators are signed, so this is set once at open.
+    bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     iTess = i_find_tess(hFig);
     % full field shown by default (the Data threshold slider drives the overlay magnitude)
     TI = getappdata(hFig,'Surface');
