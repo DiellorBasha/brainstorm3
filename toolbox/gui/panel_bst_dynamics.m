@@ -241,9 +241,11 @@ function i_drive(axis, loc)
                 lo = loc.center - loc.extent;  hi = loc.center + loc.extent;
                 panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);
                 st.curBand = [lo hi];  st.curBandName = i_freq_name(ctrl);
+                st = i_freq_overlay(st, lo, hi);                 % ensure PSD + drive its freq selection
             else
                 panel_filter('SetFilters', 0, [], 0, [], 0, [], 0, 0);
                 st.curBand = [];  st.curBandName = '';
+                st = i_freq_overlay_clear(st);                   % clear the spectrum band strip
             end
         case 'source'
             % center/window are populated by the Region tool (Task 2 syncs them); nothing to drive here
@@ -681,6 +683,28 @@ function TfFile = i_compute_psd(DataFile)
         'edit', struct('Comment','PSD: Dynamics focus', 'TimeBands',[], 'Freqs',[], ...
                        'ClusterFuncTime','none', 'Measure','magnitude', 'Output','all', 'SaveKernel',0));
     if ~isempty(sOut) && isfield(sOut,'FileName') && ~isempty(sOut(1).FileName), TfFile = sOut(1).FileName; end
+end
+
+
+%% ===== FREQ OVERLAY: drive the spectrum band strip (panel -> view) =====
+function st = i_freq_overlay(st, lo, hi)
+    hSpec = i_ensure_psd(st);
+    st.hSpec = hSpec;
+    if isempty(hSpec) || ~ishandle(hSpec), return; end
+    i_driving(true);
+    try, figure_spectrum('SetFreqSelection', hSpec, [lo hi]); catch, end %#ok<CTCH>
+    i_driving(false);
+end
+function st = i_freq_overlay_clear(st)
+    if isfield(st,'hSpec') && ~isempty(st.hSpec) && ishandle(st.hSpec)
+        i_driving(true);
+        try
+            setappdata(st.hSpec, 'GraphSelection', []);          % [] clears WITHOUT prompting (SetFreqSelection([]) would prompt)
+            figure_spectrum('DrawSelection', st.hSpec);
+        catch
+        end
+        i_driving(false);
+    end
 end
 
 
