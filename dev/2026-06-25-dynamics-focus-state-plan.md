@@ -180,8 +180,10 @@ function hSpec = i_ensure_psd(st)
     for h = hAll(:)'
         TfInfo = getappdata(h, 'Timefreq');
         if isempty(TfInfo) || ~isfield(TfInfo,'FileName') || isempty(TfInfo.FileName), continue; end
-        [~,~,~,~,sTf] = bst_get('TimefreqFile', TfInfo.FileName);
-        if ~isempty(sTf) && ~isempty(sTf.DataFile) && file_compare(sTf.DataFile, DataFile)
+        [sTfStudy, ~, iTf] = bst_get('TimefreqFile', TfInfo.FileName);   % NOTE: 3 outputs, not 5
+        if isempty(sTfStudy) || isempty(iTf) || (iTf == 0), continue; end
+        sTf = sTfStudy.Timefreq(iTf);
+        if ~isempty(sTf.DataFile) && file_compare(sTf.DataFile, DataFile)
             hSpec = h;  i_fix_spec_xlim(hSpec);  return;
         end
     end
@@ -190,7 +192,11 @@ function hSpec = i_ensure_psd(st)
     % 3) else compute one
     if isempty(TfFile), TfFile = i_compute_psd(DataFile); end
     if isempty(TfFile), return; end
-    hSpec = view_spectrum(TfFile, 'Spectrum');
+    try
+        hSpec = view_spectrum(TfFile, 'Spectrum');
+    catch
+        hSpec = [];  return;
+    end
     i_fix_spec_xlim(hSpec);
 end
 
