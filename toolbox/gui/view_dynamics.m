@@ -40,6 +40,12 @@ function varargout = view_dynamics( varargin )
         return;
     end
 
+    % --- PickScalar verb (pure, for tests): view_dynamics('PickScalar', Ht, Op) ---
+    if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'PickScalar')
+        varargout{1} = i_pick_scalar(varargin{2}, varargin{3});
+        return;
+    end
+
     % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
     SrcResult = '';
     if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'FromResult')
@@ -217,4 +223,16 @@ function t = i_phase_type(G)
     if isempty(G.label), return; end
     tok = regexp(G.label, '_(peak|trough|rising|falling)$', 'tokens', 'once');
     if ~isempty(tok), t = tok{1}; end
+end
+
+
+%% ===== operator name -> per-vertex scalar field (one of the Compute outputs) =====
+function scal = i_pick_scalar(Ht, Op)
+    switch Op
+        case 'Divergence', scal = Ht.Div;
+        case 'Curl',       scal = Ht.Curl;
+        case 'Potential',  scal = Ht.Phi;
+        case 'Stream',     scal = Ht.Psi;
+        otherwise, error('view_dynamics:badOp', 'Unknown differential operator: %s', Op);
+    end
 end
