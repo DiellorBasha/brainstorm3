@@ -708,6 +708,25 @@ function st = i_freq_overlay_clear(st)
 end
 
 
+%% ===== FREQ SYNC-BACK: a user edit on the spectrum updates the panel (view -> panel) =====
+function i_sync_freq(st, range)
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl), return; end
+    lo = range(1);  hi = range(2);
+    if (hi - lo) < 1e-6, return; end
+    % reflect the dragged band in the panel fields
+    ctrl.jFreqC.setText(num2str((lo+hi)/2));
+    ctrl.jFreqW.setText(num2str((hi-lo)/2));
+    % apply the matching time-series bandpass directly (combo cascade may not fire if value is unchanged)
+    panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);
+    nm = i_band_match(lo, hi);
+    st.curBand = [lo hi];
+    if strcmpi(nm,'custom'), st.curBandName = ''; else, st.curBandName = nm; end
+    setappdata(0, 'DynamicsTarget', st);
+    % reflect the band name in the combobox (display); any cascade is idempotent and overlay-guarded
+    try, ctrl.jFreqBand.setSelectedItem(nm); catch, end %#ok<CTCH>
+end
+
+
 %% ===== SYNC the Source block fields from the geodesic tool state =====
 function SyncSource() %#ok<DEFNU>
     [ctrl, st] = i_cs();
