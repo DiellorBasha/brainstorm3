@@ -5,14 +5,14 @@ function phi = bst_poisson(OperatorNode, F)
 % cotan stiffness and M the Galerkin mass. The constant nullspace is handled HERE, once:
 % project f to the mean-zero subspace in the mass metric, pinned solve through the cached
 % tess_cholesky factor. This is the single home of the nullspace handling that
-% was duplicated in bst_operators (per-column re-factorization) and bst_helmholtz.
+% was duplicated in bst_operators (per-column re-factorization) and the helmholtz decomposition.
 %
 % USAGE:  phi = bst_poisson(OperatorNode, F)
 %   OperatorNode : a 'Laplace-Beltrami' or 'Covariant' operatormat (Operator{hh}=K cotan stiffness, Mass{hh}=M, GlobalVertices{hh})
 %   F            : per-vertex scalar source [nV x nT]
 %   phi          : per-vertex potential [nV x nT] (mean-zero per hemisphere)
 %
-% SEE ALSO: tess_cholesky, bst_operators, bst_helmholtz
+% SEE ALSO: tess_cholesky, bst_operators, process_helmholtz
 %
 % Authors: Diellor Basha, 2026
 

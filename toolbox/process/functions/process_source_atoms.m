@@ -14,7 +14,7 @@ function varargout = process_source_atoms( varargin )
 % Each child phase group carries, per phase-marker event time, the strongest
 % local maxima of the unconstrained source magnitude |J| as occurrences (vertex,
 % pos, hemi, strength). The principled source/sink and vortex detection
-% (bst_helmholtz cores) replaces this peak populate in a later phase.
+% (the rebuilt vortex detector) replaces this peak populate in a later phase.
 %
 % Input  : an unconstrained source kernel link (results, nComponents==3).
 % Output : a dynamics_*.mat table (bst_dynamics), loadable with view_dynamics.

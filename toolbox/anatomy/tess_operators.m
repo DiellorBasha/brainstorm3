@@ -354,7 +354,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     % for provenance/cross-check), and the realized vertex frames. The
                     % consistent per-face scalar gradient g=[Gx;Gy;Gz] is assembled so that
                     % g' W g == nxr cotanL (verified to 4e-16) -- the consistency that makes
-                    % the Hodge round-trip exact. div/curl/reconstruction in bst_helmholtz
+                    % the Hodge round-trip exact. div/curl/reconstruction in process_helmholtz/bst_divergence/bst_curl
                     % all derive from this single g (and the rotated n x grad), so nothing
                     % drifts.
                     A      = nxr_compute('operators', h, 'laplacian', 'cotan');   % cotanL [nVh x nVh] (Poisson)
@@ -373,7 +373,7 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
                     % Nf follows the mesh winding (globally consistent). Do NOT flip per-face to
                     % outward -- that desyncs Nf from the winding-based gradient and breaks the
                     % n x grad rotation (cross-orthogonality). The outward orientation sign is a
-                    % single global factor, deferred to bst_helmholtz's calibrated sign (gate 4).
+                    % single global factor, deferred to the helmholtz consumer's calibrated sign (gate 4).
                     c1=cross(Nf,eO1,2)./twoA; c2=cross(Nf,eO2,2)./twoA; c3=cross(Nf,eO3,2)./twoA;
                     rr=[(1:nFh)';(1:nFh)';(1:nFh)']; cc=[Floc(:,1);Floc(:,2);Floc(:,3)];
                     Gx=sparse(rr,cc,[c1(:,1);c2(:,1);c3(:,1)],nFh,nVh);

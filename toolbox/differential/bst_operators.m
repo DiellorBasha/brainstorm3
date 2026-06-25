@@ -39,7 +39,7 @@ function [OutputFiles, Messages, isError] = bst_operators(Data, OPTIONS)
 %     - Messages    : error/warning string
 %     - isError     : 1 if an error happened
 %
-% SEE ALSO: bst_eigen, bst_helmholtz, bst_gradient, tess_operators, tess_manifold
+% SEE ALSO: bst_eigen, process_helmholtz, bst_gradient, tess_operators, tess_manifold
 %
 %     TANGENT STRATUM — two Laplacians, not one. The differential ops (div/curl) use the
 %     de Rham / DEC route (delta d + d delta, the Hodge Laplacian). The SMOOTHING / eigen
