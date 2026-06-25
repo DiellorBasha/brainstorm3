@@ -32,8 +32,8 @@ function curlField = bst_curl(V, ManifoldMat, varargin)
 %                   carry the per-hemisphere operators and face normals.
 %   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
 %   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
-%   - Dir         : (ambient only) Dirac operator node (bst_get_operator_node(Surf,'Dirac'))
-%   - LBO         : (ambient only) LBO operator node (bst_get_operator_node(Surf,'Laplace-Beltrami'))
+%   - Dir         : (ambient only) Covariant operator node (tess_operators(Surf,'Covariant'))
+%   - LBO         : (ambient only) LBO operator node (tess_operators(Surf,'Laplace-Beltrami'))
 %
 % OUTPUTS:
 %   - curlField   : per-VERTEX scalar vorticity field [nV x nT]

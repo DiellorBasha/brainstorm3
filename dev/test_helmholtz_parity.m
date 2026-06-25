@@ -4,7 +4,7 @@ function test_helmholtz_parity
     S = load('dev/scratch/helmholtz_baseline.mat');   % H0, J, Surf
     Surfm = in_tess_bst(S.Surf,0);
     Mani  = tess_manifold(S.Surf,'Gauge','trivial');
-    Dir   = bst_get_operator_node(S.Surf,'Dirac');  LBO = bst_get_operator_node(S.Surf,'Laplace-Beltrami');
+    Dir   = tess_operators(S.Surf,'Dirac');  LBO = tess_operators(S.Surf,'Laplace-Beltrami');
     H1 = bst_helmholtz('Decompose', {Dir, LBO}, Mani, Surfm, S.J);
     flds = {'Curl','Div','Psi','Phi','Fmag'};
     for i=1:numel(flds)

@@ -169,8 +169,8 @@ function OutputFiles = Run(sProcess, sInputs)
 
         % ===== PREPARE HELMHOLTZ OPERATOR (once) =====
         bst_progress('text', sprintf('File %d/%d: Preparing Helmholtz operator...', iFile, length(sInputs)));
-        Cov = bst_get_operator_node(R.SurfaceFile, 'Covariant');
-        LBO   = bst_get_operator_node(R.SurfaceFile, 'Laplace-Beltrami');
+        Cov = tess_operators(R.SurfaceFile, 'Covariant');
+        LBO   = tess_operators(R.SurfaceFile, 'Laplace-Beltrami');
         Surf  = in_tess_bst(R.SurfaceFile, 0);
         Mani  = tess_manifold(R.SurfaceFile);
         Op    = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain', 'vertex');

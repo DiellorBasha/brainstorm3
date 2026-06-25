@@ -9,8 +9,8 @@ function test_ambient_divcurl
     Surfm = in_tess_bst(Surf, 0);
     nV = size(Surfm.Vertices, 1);
     Mani  = tess_manifold(Surf, 'Gauge', 'trivial');
-    Dir   = bst_get_operator_node(Surf, 'Dirac');
-    LBO   = bst_get_operator_node(Surf, 'Laplace-Beltrami');
+    Dir   = tess_operators(Surf, 'Dirac');
+    LBO   = tess_operators(Surf, 'Laplace-Beltrami');
     rng(11);  J = randn(3*nV, 3);
 
     dv = bst_divergence(J, Mani, 'Ambient', Surfm, Dir, LBO);

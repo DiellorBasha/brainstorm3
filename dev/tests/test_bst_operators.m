@@ -47,7 +47,7 @@ function test_bst_operators()
     % ----- laplacian(poisson(f)) ~ f - mean (per hemisphere, off the pinned vertex) -----
     f   = sin((1:nV)'*0.7) + cos((1:nV)'*0.13);
     g   = run('laplacian', run('poisson', f));
-    LBO = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    LBO = tess_operators(SurfaceFile, 'Laplace-Beltrami');
     ref = zeros(nV,1);  keepMask = false(nV,1);
     for hh = 1:numel(LBO.GlobalVertices)
         vH = double(LBO.GlobalVertices{hh}(:));
@@ -88,7 +88,7 @@ function test_bst_operators()
     J    = sin((1:3*nV)'*0.31);
     Cop  = run('helmholtz', J);
     Mani = tess_manifold(SurfaceFile);
-    Dir  = bst_get_operator_node(SurfaceFile, 'Dirac');
+    Dir  = tess_operators(SurfaceFile, 'Dirac');
     Hd   = bst_helmholtz('Decompose', {Dir, LBO}, Mani, Surf, J);
     nFail = nFail + chk('helmholtz delegate Curl == bst_helmholtz (bit-identical)', isequal(Cop, Hd.Curl));
 

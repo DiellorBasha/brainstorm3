@@ -30,8 +30,8 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
 %                   per-hemisphere flat/d0/h0/h1 + GlobalVertices/GlobalFaces.
 %   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
 %   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
-%   - Dir         : (ambient only) Dirac operator node (bst_get_operator_node(Surf,'Dirac'))
-%   - LBO         : (ambient only) LBO operator node (bst_get_operator_node(Surf,'Laplace-Beltrami'))
+%   - Dir         : (ambient only) Covariant operator node (tess_operators(Surf,'Covariant'))
+%   - LBO         : (ambient only) LBO operator node (tess_operators(Surf,'Laplace-Beltrami'))
 %
 % OUTPUTS:
 %   - divField    : per-VERTEX scalar field [nV x nT]

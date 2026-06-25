@@ -70,7 +70,7 @@ function OutputFiles = Run(sProcess, sInput) %#ok<DEFNU>
     SurfaceFile = sRes.SurfaceFile;
     Surf = in_tess_bst(SurfaceFile, 0);
     Mani = tess_manifold(SurfaceFile);
-    Cov = bst_get_operator_node(SurfaceFile, 'Covariant');  LBO = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    Cov = tess_operators(SurfaceFile, 'Covariant');  LBO = tess_operators(SurfaceFile, 'Laplace-Beltrami');
     Op = bst_helmholtz('Prepare', {Cov, LBO}, Mani, Surf, 'Domain','vertex');
     nT = numel(tW);
     coresV = cell(1,nT); coresS = cell(1,nT);

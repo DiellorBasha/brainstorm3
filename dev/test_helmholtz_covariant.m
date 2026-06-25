@@ -16,7 +16,7 @@ function test_helmholtz_covariant()
     if isempty(R), fprintf('SKIPPED (no unconstrained kernel)\n'); fprintf('\n==== SUITE: %s ====\n',PF{pass+1}); return; end
     [iDS,iRes]=bst_memory('LoadResultsFileFull',['link|' R '|' relData]);
     SurfaceFile=GlobalData.DataSet(iDS).Results(iRes).SurfaceFile;
-    Cov=bst_get_operator_node(SurfaceFile,'Covariant'); LBO=bst_get_operator_node(SurfaceFile,'Laplace-Beltrami');
+    Cov=tess_operators(SurfaceFile,'Covariant'); LBO=tess_operators(SurfaceFile,'Laplace-Beltrami');
     Surf=in_tess_bst(SurfaceFile,0); Mani=tess_manifold(SurfaceFile);
     Op=bst_helmholtz('Prepare',{Cov,LBO},Mani,Surf,'Domain','vertex');
     [tv,~]=bst_memory('GetTimeVector',iDS,iRes,[]); [~,it]=min(abs(tv-202));

@@ -48,8 +48,8 @@ function hFig = view_helmholtz(SrcResultsFile, varargin)
     SurfaceFile = R.SurfaceFile;
 
     bst_progress('start', 'Helmholtz view', 'Loading operators...');
-    Cov = bst_get_operator_node(SurfaceFile, 'Covariant');
-    LBO   = bst_get_operator_node(SurfaceFile, 'Laplace-Beltrami');
+    Cov = tess_operators(SurfaceFile, 'Covariant');
+    LBO   = tess_operators(SurfaceFile, 'Laplace-Beltrami');
     Surf  = in_tess_bst(SurfaceFile, 0);
     Mani  = tess_manifold(SurfaceFile);
     nV = size(Surf.Vertices,1);
