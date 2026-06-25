@@ -65,6 +65,10 @@ function test_dynamics_atoms()
         return;
     end
 
+    % T2 setup: ensure the alpha refphase events exist on the recording
+    % (process_source_atoms reads them; refphase replaces same-label events, so this is idempotent)
+    bst_process('CallProcess', 'process_evt_refphase', relData, [], 'freqband','alpha', 'sensortypes','MEG');
+
     % T2: nested populate
     bst_process('CallProcess', 'process_source_atoms', linkFile, [], 'freqband','alpha', 'npeaks',2);
     studyDir = bst_fileparts(file_fullpath(relData));
@@ -92,8 +96,16 @@ function test_dynamics_atoms()
     nMark = numel(findobj(hFig, '-regexp', 'Tag', '^AtomMarker'));   % one line per spatial group (4)
     ctrl  = bst_get('PanelControls', 'Dynamics');
     root  = ctrl.jTree.getModel().getRoot();
-    nStacks  = root.getChildCount();                                 % 1 band stack (alpha)
-    nWindows = root.getChildAt(0).getChildCount();                   % 8 time windows under it
+    % count only the band (atom-group) stacks; the recording may also carry a Task-1
+    % "Detection (events) [unsaved]" mirror node when refphase events sit on disk.
+    nStacks = 0;  iBandStack = -1;
+    for c = 0:root.getChildCount()-1
+        lbl = char(root.getChildAt(c).getUserObject());
+        if isempty(regexp(lbl, '^Detection \(events\)', 'once'))
+            nStacks = nStacks + 1;  if iBandStack < 0, iBandStack = c; end
+        end
+    end
+    nWindows = root.getChildAt(iBandStack).getChildCount();          % 8 time windows under the band stack
     % band = top-level extended group; pick the window with the most phase atoms
     parents  = {Tv.Groups.parent};
     gBand    = find(cellfun(@isempty,parents) & arrayfun(@(g) size(Tv.Groups(g).times,1)==2, 1:Tv.nGroups), 1);
@@ -140,20 +152,35 @@ function test_dynamics_atoms()
     pass = pass && ok4;
     try, panel_filter('SetFilters',0,[],0,[],0,[],0,0); catch, end %#ok<CTCH>
 
-    % T5: Detect (refphase) writes the temporal window skeleton for the selected band
+    % T5: Detect stages events (no st.T write); Save detection promotes them (numeric freq)
     st0 = getappdata(0,'DynamicsTarget');  haveBand = ~isempty(st0.curBand);   % alpha, from T4
+    % start from a clean alpha band-window in st.T (T2/T3 loaded a saved alpha table into the
+    % navigator); drop any alpha band-window + phase children so the "Detect writes nothing to
+    % st.T" invariant (bandEmptyMid) is testable; the T4 stream/alpha group survives.
+    keepW = true(1, st0.T.nGroups);  dropLbls = {};
+    for k = 1:st0.T.nGroups
+        Gk = st0.T.Groups(k);  bn = Gk.bandName;  if isempty(bn), bn = ''; end
+        if isempty(Gk.parent) && strcmp(bn,'alpha') && (size(Gk.times,1)==2)
+            dropLbls{end+1} = Gk.label;  keepW(k) = false; %#ok<AGROW>
+        end
+    end
+    for k = 1:st0.T.nGroups, if any(strcmp(st0.T.Groups(k).parent, dropLbls)), keepW(k) = false; end; end
+    st0.T.Groups = st0.T.Groups(keepW);  st0.T.nGroups = numel(st0.T.Groups);
+    setappdata(0,'DynamicsTarget', st0);
     panel_bst_dynamics('OnDetect');  drawnow;
+    evsd = panel_record('GetEvents', [], 1);
+    stagedOK = ~isempty(evsd) && any(strcmpi({evsd.label},'alpha_peak'));
+    stMid = getappdata(0,'DynamicsTarget');
+    bandEmptyMid = isempty(find(cellfun(@isempty,{stMid.T.Groups.parent}) & arrayfun(@(k) strcmp(stMid.T.Groups(k).bandName,'alpha') && size(stMid.T.Groups(k).times,1)==2, 1:stMid.T.nGroups), 1));
+    panel_bst_dynamics('OnSaveDetection');  drawnow;
     st = getappdata(0,'DynamicsTarget');  Td = st.T;  parents = {Td.Groups.parent};
     gW = find(cellfun(@isempty,parents) & arrayfun(@(k) strcmp(Td.Groups(k).bandName,'alpha') && size(Td.Groups(k).times,1)==2, 1:Td.nGroups), 1);
     chN = [];  if ~isempty(gW), chN = find(strcmpi(parents, Td.Groups(gW).label)); end
-    temporal   = ~isempty(gW) && ~isempty(chN) && all(arrayfun(@(c) isempty(Td.Groups(c).vertices) && ~isempty(Td.Groups(c).times), chN));
-    streamKept = any(arrayfun(@(k) strcmp(Td.Groups(k).Function,'stream'), 1:Td.nGroups));   % T4 record group survives Detect
-    % phase children carry the NUMERIC phase value (peak=0); readable type is the label suffix
-    gPeak5 = chN(arrayfun(@(c) ~isempty(regexp(Td.Groups(c).label,'_peak$','once')), chN));
-    phaseNumOK = ~isempty(gPeak5) && isnumeric(Td.Groups(gPeak5(1)).phase) && (Td.Groups(gPeak5(1)).phase==0) ...
-        && all(arrayfun(@(c) isnumeric(Td.Groups(c).phase) && isscalar(Td.Groups(c).phase), chN));
-    ok5 = haveBand && ~isempty(gW) && (numel(chN)==4) && temporal && streamKept && phaseNumOK;
-    fprintf('T5 detect: band-window=%d nWin=%d phaseChildren=%d temporal=%d recordKept=%d phaseNum=%d => %s\n', ~isempty(gW), size(Td.Groups(gW).times,2), numel(chN), temporal, streamKept, phaseNumOK, PF{ok5+1});
+    lf5 = []; if ~isempty(gW), lf5 = bst_atom('Get', Td.Groups(gW), 'freq'); end
+    freqNum = ~isempty(lf5) && isfinite(lf5.center) && isfinite(lf5.extent);
+    streamKept = any(arrayfun(@(k) strcmp(Td.Groups(k).Function,'stream'), 1:Td.nGroups));   % T4 record group survives
+    ok5 = haveBand && stagedOK && bandEmptyMid && ~isempty(gW) && (numel(chN)==4) && freqNum && streamKept;
+    fprintf('T5 detect/save: staged=%d midEmpty=%d window=%d children=%d freqNum=%d recordKept=%d => %s\n', stagedOK, bandEmptyMid, ~isempty(gW), numel(chN), freqNum, streamKept, PF{ok5+1});
     pass = pass && ok5;
 
     % T6: AttachRegion + Redraw -> region patch + seed marker on the cortex (capture render path)

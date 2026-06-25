@@ -83,6 +83,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jMenuAtoms.addSeparator();
     gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
     gui_component('MenuItem', jMenuAtoms, [], 'Capture region -> active atom', IconLoader.ICON_SCOUT_NEW, [], @(h,e)bst_call(@OnCaptureRegion));
+    gui_component('MenuItem', jMenuAtoms, [], 'Load into navigator', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@OnLoadAtom));
 
     % --- split: band stack TREE (left) | flat per-window atom list (right) ---
     jTree = java_create('javax.swing.JTree');
@@ -138,6 +139,9 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     % ACTIONS row (kept: Detect / Record / Capture)
     jAct = gui_river([2 2], [0 7 2 7], 'Actions');
     gui_component('button', jAct, 'hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
+    gui_component('button', jAct, 'br hfill', 'Save detection', [], 'Promote the staged detection events into saved atoms (with numeric frequency)', @(h,e)bst_call(@OnSaveDetection));
+    gui_component('button', jAct, 'br hfill', 'Save cursor', [], 'Commit the current 4-D cursor as one atom', @(h,e)bst_call(@OnSaveCursor));
+    gui_component('button', jAct, 'br hfill', 'Clear preview',  [], 'Discard the staged detection events without saving', @(h,e)bst_call(@OnClearDetection));
     gui_component('button', jAct, 'br hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor as atoms', @(h,e)bst_call(@OnRecord));
     gui_component('button', jAct, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom', @(h,e)bst_call(@OnCaptureRegion));
     jCtrl.add(jAct);
@@ -195,6 +199,13 @@ function loc = i_read_block(ctrl, axis)
         otherwise, return;
     end
     c = str2double(char(jC.getText()));  w = str2double(char(jW.getText()));
+    % Time block tracks the global cursor: an empty center field captures the live current time.
+    if strcmp(axis,'time') && isnan(c)
+        global GlobalData; %#ok<TLEV>
+        if ~isempty(GlobalData) && ~isempty(GlobalData.UserTimeWindow) && ~isempty(GlobalData.UserTimeWindow.CurrentTime)
+            c = GlobalData.UserTimeWindow.CurrentTime;
+        end
+    end
     if ~isnan(c), loc.center = c; end
     if ~isnan(w), loc.extent = abs(w); else, loc.extent = 0; end
     if strcmp(axis,'source') && isfinite(loc.extent), loc.extent = loc.extent / 1000; end   % jSrcW is mm -> metres
@@ -316,30 +327,11 @@ function OnDetect() %#ok<DEFNU>
     if isempty(evt)
         java_dialog('msgbox', sprintf('No %s windows detected (try a different band or threshold).', bandName), 'Detect windows');  return;
     end
-    % rebuild the band's groups (replace any previous detection for this band)
-    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
-    st.T = i_remove_band(st.T, bandName);
-    W = bst_dynamics('NewGroup', winLabel);
-    W.type='extended';  W.times=evt;  W.epochs=ones(1,size(evt,2));  W.band=band;  W.bandName=bandName;
-    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
-    st.T = bst_dynamics('AddGroup', st.T, W);
-    phaseDefs = {'peak',[0.90 0.10 0.10]; 'trough',[0.10 0.25 0.90]; 'rising',[0.10 0.70 0.20]; 'falling',[0.95 0.55 0.10]};
-    for ip = 1:size(phaseDefs,1)
-        ph = phaseDefs{ip,1};  tt = markers.(ph);
-        if isempty(tt), continue; end
-        P = bst_dynamics('NewGroup', sprintf('%s_%s', bandName, ph));
-        % phase = NUMERIC alpha phase (rad): peak=0 falling=+pi/2 trough=+/-pi rising=-pi/2;
-        % the readable type lives in the label suffix ('<band>_peak' etc.).
-        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph);  P.times=tt(:)';  P.epochs=ones(1,numel(tt));
-        P.band=band;  P.bandName=bandName;  P.color=phaseDefs{ip,2};
-        P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
-        st.T = bst_dynamics('AddGroup', st.T, P);
-    end
-    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;          end
-    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile;     end
-    i_apply(st);                                                        % refresh tree (no cortex markers: temporal)
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Detected %d %s windows', size(evt,2), bandName));
+    % Stage the detection as a Brainstorm EVENT group on the recording (NOT atoms).
+    % The events auto-render on the time series + mirror in the tree; Save converts them to atoms.
+    i_detect_events(bandName, band, evt, markers);
+    i_apply(st);                                                  % refresh tree (mirrors the detection events)
+    bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
 end
 
 % Load MEG sensor data (matrix [nMEG x nT] + time) for a data block or raw file.
@@ -373,6 +365,105 @@ function T = i_remove_band(T, bandName)
 end
 
 
+% Install the refphase detection as a Brainstorm event group on the loaded recording
+% (extended band-window + 4 phase-marker simple events). Replaces prior same-label events.
+function i_detect_events(bandName, band, evt, markers)
+    global GlobalData;
+    % Detection events are render-only preview, not a permanent edit to the recording file.
+    % SetEvents sets Measures.isModified=1, and recording unload auto-saves under nogui --
+    % so capture the dataset's clean/dirty state and restore CLEAN afterwards (preserving any
+    % genuine prior user event edits).
+    iDS = panel_record('GetCurrentDataset');                 % the loaded recording's dataset
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
+    defs = { winLabel,                    evt,             [0.5 0.5 0.5]; ...
+             [bandName '_peak'],          markers.peak,    [0.90 0.10 0.10]; ...
+             [bandName '_trough'],        markers.trough,  [0.10 0.25 0.90]; ...
+             [bandName '_rising'],        markers.rising,  [0.10 0.70 0.20]; ...
+             [bandName '_falling'],       markers.falling, [0.95 0.55 0.10] };
+    for k = 1:size(defs,1)
+        label = defs{k,1};  times = defs{k,2};  color = defs{k,3};
+        if isempty(times), continue; end
+        sEvent = db_template('event');
+        sEvent.label  = label;
+        sEvent.color  = color;
+        sEvent.times  = times;
+        sEvent.epochs = ones(1, size(times,2));
+        % find-or-replace by label (replace prior detection for this band on re-detect)
+        all = panel_record('GetEvents', [], 1);
+        iEvt = [];
+        if ~isempty(all), iEvt = find(strcmpi({all.label}, label), 1); end
+        if isempty(iEvt), iEvt = numel(all) + 1; end
+        panel_record('SetEvents', sEvent, iEvt);
+    end
+    panel_record('UpdateEventsList');                            % refresh the Record-panel event list
+    panel_record('ReplotEvents');                               % re-plot the event markers on the open time series
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged events are render-only, don't persist
+end
+
+
+%% ===== SAVE DETECTION: convert the detection event group -> atoms in st.T =====
+function OnSaveDetection() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st), return; end
+    evs = panel_record('GetEvents', [], 1);
+    if isempty(evs), java_dialog('msgbox', 'No detection to save. Run Detect first.', 'Save detection');  return; end
+    % find the band-window event ("<band> (lo-hi Hz)") + its 4 phase events
+    iWin = find(~cellfun(@isempty, regexp({evs.label}, '^.+ \([0-9.]+-[0-9.]+ Hz\)$', 'once')), 1);
+    if isempty(iWin), java_dialog('msgbox', 'No detection window event found.', 'Save detection');  return; end
+    winLabel = evs(iWin).label;
+    tok = regexp(winLabel, '^(.+) \(([0-9.]+)-([0-9.]+) Hz\)$', 'tokens', 'once');
+    bandName = tok{1};  band = [str2double(tok{2}), str2double(tok{3})];
+    DataFile = st.T.DataFile;
+    if isempty(DataFile)
+        for g=1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
+    end
+    % numeric freq Localization from the band the detection was RUN at (from the event label)
+    fLoc = bst_atom('NewLoc', 'freq');  fLoc.center = mean(band);  fLoc.extent = (band(2)-band(1))/2;  fLoc.label = bandName;
+    % rebuild this band's saved groups
+    st.T = i_remove_band(st.T, bandName);
+    W = bst_dynamics('NewGroup', winLabel);
+    W.type='extended';  W.times=evs(iWin).times;  W.epochs=ones(1,size(evs(iWin).times,2));  W.bandName=bandName;
+    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
+    W = bst_atom('Set', W, 'freq', 1, fLoc);                      % numeric freq tensor index
+    st.T = bst_dynamics('AddGroup', st.T, W);
+    phaseColors = struct('peak',[0.90 0.10 0.10],'trough',[0.10 0.25 0.90],'rising',[0.10 0.70 0.20],'falling',[0.95 0.55 0.10]);
+    for ph = {'peak','trough','rising','falling'}
+        lbl = [bandName '_' ph{1}];  ie = find(strcmpi({evs.label}, lbl), 1);
+        if isempty(ie) || isempty(evs(ie).times), continue; end
+        P = bst_dynamics('NewGroup', lbl);
+        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph{1});
+        P.times=evs(ie).times(1,:);  P.epochs=ones(1,size(evs(ie).times,2));  P.bandName=bandName;
+        P.color=phaseColors.(ph{1});  P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
+        P = bst_atom('Set', P, 'freq', 1, fLoc);                  % numeric freq on each child
+        st.T = bst_dynamics('AddGroup', st.T, P);
+    end
+    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;      end
+    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile; end
+    i_apply(st);
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Saved %s detection as atoms', bandName));
+end
+
+%% ===== CLEAR DETECTION: remove the detection event group (discard) =====
+function OnClearDetection() %#ok<DEFNU>
+    global GlobalData;
+    evs = panel_record('GetEvents', [], 1);
+    if isempty(evs), return; end
+    % Clearing mutates events (SetEvents sets isModified=1); preserve the recording's clean/dirty
+    % state so discarding a render-only preview never dirties/persists the recording.
+    iDS = panel_record('GetCurrentDataset');
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
+    keep = evs(~isDet);
+    if isempty(keep), keep = repmat(db_template('event'), 1, 0); end   % empty event array, not []
+    panel_record('SetEvents', keep);                             % replace the whole event set with the non-detection ones
+    panel_record('UpdateEventsList');
+    panel_record('ReplotEvents');                               % re-plot the (now cleared) markers; do NOT ReloadFigures (would reload events from disk)
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % discarding preview must not dirty the recording
+    [~, st] = i_cs();  if ~isempty(st), i_apply(st); end
+end
+
+
 %% ===== shared panel/target accessor =====
 function [ctrl, st] = i_cs()
     ctrl = bst_get('PanelControls', 'Dynamics');
@@ -392,6 +483,103 @@ function SyncSource() %#ok<DEFNU>
     loc.center = double(gs.seed);  loc.extent = gs.radius;  loc.pos = gs.pos;  loc.state = 'window';
     st.nav = bst_atom('Set', st.nav, 'source', 1, loc);
     setappdata(0, 'DynamicsTarget', st);
+end
+
+
+%% ===== SAVE CURSOR: commit the live 4-D cursor (st.nav) as ONE atom =====
+function OnSaveCursor() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
+    lt = bst_atom('Get', st.nav, 'time');     lf = bst_atom('Get', st.nav, 'freq');
+    ls = bst_atom('Get', st.nav, 'source');   lk = bst_atom('Get', st.nav, 'scale'); %#ok<NASGU>
+    if ~isfinite(lt.center)
+        java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
+    end
+    band = st.curBand;  bandName = i_field(st, 'curBandName', '');
+    op   = i_field(st, 'curOp', 'Total');
+    switch op
+        case 'Irrot', Func = 'potential';
+        case 'Solen', Func = 'stream';
+        otherwise,    Func = 'magnitude';
+    end
+    % measured descriptor at the cursor (operator scalar at the seed, if localized + a field is present)
+    strength = NaN;  charge = NaN;
+    if isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
+        St = getappdata(st.hFig, 'HelmholtzState');
+        if ~isempty(St) && isfield(St,'Cache')
+            [TimeVec, iT] = bst_memory('GetTimeVector', St.srcDS, St.srcResult, 'CurrentTimeIndex'); %#ok<ASGLU>
+            if ~isempty(St.Cache) && isKey(St.Cache, iT)
+                Ht = St.Cache(iT);
+                switch op
+                    case 'Irrot', sc = Ht.Phi;   case 'Solen', sc = Ht.Psi;   otherwise, sc = Ht.Fmag;
+                end
+                if ls.center>=1 && ls.center<=numel(sc), strength = sc(ls.center);  charge = sign(strength); end
+            end
+        end
+    end
+    % find-or-create the (band, Function) group; append ONE occurrence
+    g = i_find_group(st.T, bandName, Func);
+    if g < 1
+        G = bst_dynamics('NewGroup', strtrim(sprintf('%s %s', i_disp_band(bandName, band), Func)));
+        G.type='simple';  G.band=band;  G.bandName=bandName;  G.Function=Func;
+        G.color=i_op_color(op);  G.SurfaceFile=st.T.SurfaceFile;  G.DataFile=st.T.DataFile;  G.ResultsFile=i_first_results(st.T);
+        st.T = bst_dynamics('AddGroup', st.T, G);  g = numel(st.T.Groups);
+    end
+    G = st.T.Groups(g);
+    G.times(1,end+1) = lt.center;   G.epochs(end+1) = 1;
+    if isfinite(ls.center)
+        v = double(ls.center);  G.vertices(end+1) = v;
+        if ~isempty(ls.pos), G.pos(end+1,:) = ls.pos; else, G.pos(end+1,:) = [NaN NaN NaN]; end
+        G.hemi(end+1) = 1 + (~isempty(ls.pos) && ls.pos(2)<0);
+    else
+        G.vertices(end+1) = NaN;  G.pos(end+1,:) = [NaN NaN NaN];  G.hemi(end+1) = NaN;
+    end
+    G.strength(end+1) = strength;   G.charge(end+1) = charge;   G.type='simple';
+    if ~isempty(band), G = bst_atom('Set', G, 'freq', 1, lf); end   % numeric freq index
+    st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
+    i_apply(st);
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    bst_progress('text', sprintf('Saved cursor atom (%s) at %.3f s', Func, lt.center));
+end
+
+
+%% ===== LOAD ATOM: fill the navigator blocks + st.nav from the selected saved atom =====
+function OnLoadAtom() %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || isempty(st.occMap), java_dialog('warning','Select a saved atom first.','Load into navigator');  return; end
+    g = st.occMap(1,1);  o = st.occMap(1,2);
+    if (g < 1) || (g > numel(st.T.Groups)), return; end
+    G = st.T.Groups(g);
+    for axis = {'time','freq','source','scale'}
+        ax = axis{1};
+        loc = bst_atom('Get', G, ax, o);
+        st.nav = bst_atom('Set', st.nav, ax, 1, loc);
+        i_fill_block(ctrl, ax, loc);
+        i_drive(ax, loc);                          % drive the viewers to the atom
+    end
+    % final write: keep curBand/curScale that i_drive set during the loop; overlay the loaded cursor
+    st2 = getappdata(0, 'DynamicsTarget');
+    st2.nav = st.nav;
+    setappdata(0, 'DynamicsTarget', st2);
+    bst_progress('text', 'Loaded atom into the navigator');
+end
+
+% Write a Localization's center/window into the axis block's fields (source window in mm).
+function i_fill_block(ctrl, axis, loc)
+    switch axis
+        case 'time',   jC=ctrl.jTimeC;  jW=ctrl.jTimeW;   wv=loc.extent;
+        case 'freq',   jC=ctrl.jFreqC;  jW=ctrl.jFreqW;   wv=loc.extent;
+        case 'source', jC=ctrl.jSrcC;   jW=ctrl.jSrcW;    wv=loc.extent*1000;   % metres -> mm
+        case 'scale',  jC=ctrl.jScaleC; jW=ctrl.jScaleW;  wv=loc.extent;
+        otherwise, return;
+    end
+    % Set the freq band combobox FIRST: its ActionPerformed callback (OnFreqPreset) runs on the
+    % Swing EDT and overwrites the center/window fields with the band midpoint, so drain the EDT
+    % (drawnow) before writing the loaded coords -- otherwise the async preset clobbers them.
+    if strcmp(axis,'freq') && isfield(ctrl,'jFreqBand') && ~isempty(loc.label)
+        try, ctrl.jFreqBand.setSelectedItem(loc.label);  drawnow; catch, end %#ok<CTCH>
+    end
+    if isfinite(loc.center), jC.setText(num2str(loc.center)); else, jC.setText(''); end
+    if isfinite(wv),         jW.setText(num2str(wv));         else, jW.setText(''); end
 end
 
 
@@ -627,6 +815,22 @@ function BuildTree()
             end
         end
     end
+    % mirror the detection event group (the unsaved time skeleton) as a distinct node
+    evs = panel_record('GetEvents', [], 1);
+    if ~isempty(evs)
+        isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
+        if any(isDet)
+            detNode = DefaultMutableTreeNode('Detection (events)  [unsaved]');
+            root.add(detNode);
+            nodeList{end+1} = detNode;  nodeInfo(end+1) = struct('kind','detroot','g',0,'w',0); %#ok<AGROW>
+            for ie = find(isDet)
+                e = evs(ie);
+                leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                detNode.add(leaf);
+                nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+            end
+        end
+    end
     ctrl.jTree.setModel(DefaultTreeModel(root));
     for r = 0:(root.getChildCount()-1), ctrl.jTree.expandRow(r); end
     st.nodeList = nodeList;  st.nodeInfo = nodeInfo;  st.occMap = [];
@@ -668,6 +872,11 @@ function TreeSel_Callback()
                 occMap(end+1,:) = [info.g, info.w, 0]; %#ok<AGROW>
             end
             i_jump(G.times(1, info.w));                     % and to the atom's time
+        elseif strcmp(info.kind, 'detevt')
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
+                i_jump(evs(info.g).times(1,1));
+            end
         end
     else
         st.curGroup = 0;
