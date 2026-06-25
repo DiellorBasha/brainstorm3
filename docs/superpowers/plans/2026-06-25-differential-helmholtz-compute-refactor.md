@@ -41,7 +41,7 @@
 | `toolbox/differential/bst_poisson.m` | Modify | Accept the `'Covariant'` node (its `Operator` is the cotan stiffness) |
 | `toolbox/differential/bst_divergence.m` | Modify | Ambient branch computes divergence directly from the Covariant node; drop `LBO` |
 | `toolbox/differential/bst_curl.m` | Modify | Ambient branch computes vorticity directly from the Covariant node; drop `LBO` |
-| `toolbox/process/functions/process_helmholtz.m` | Create | `Compute` = flat-covariant recipe; `Run` = save; standard skeleton |
+| `toolbox/process/functions/process_helmholtz.m` | Create | `Compute` = flat-covariant recipe ONLY (no `GetDescription`/`Run` — a scanner-tolerated shared engine, like `process_eigenmodes_freq`; the save path stays `process_helmholtz_events` repointed) |
 | `toolbox/differential/bst_operators.m` | Modify | `'helmholtz'`/`'divergence'`/`'curl'` Methods route to the new engines; drop `LBO` |
 | `toolbox/process/functions/process_helmholtz_events.m` | Modify | Use `process_helmholtz('Compute')` instead of `bst_helmholtz` |
 | `toolbox/gui/view_helmholtz.m` | Modify | Per-frame compute → `process_helmholtz('Compute')`; resolve `Cov` once. NOT deleted. |
@@ -467,7 +467,7 @@ function Ht = Compute(J, Cov)
         Sx = spdiags(ny,0,nFh,nFh)*Gz - spdiags(nz,0,nFh,nFh)*Gy;
         Sy = spdiags(nz,0,nFh,nFh)*Gx - spdiags(nx,0,nFh,nFh)*Gz;
         Sz = spdiags(nx,0,nFh,nFh)*Gy - spdiags(ny,0,nFh,nFh)*Gx;
-        dF = tess_cholesky(Cov, hh, 2);                 % cached pinned factor (pin vertex 1, free=2:nVh)
+        dF = tess_cholesky(Cov, hh, 1);                 % cached pinned factor (pin vertex 1 => free=2:nVh; matches bst_poisson)
         for t = 1:nT
             Jx = J(3*(vH-1)+1, t);  Jy = J(3*(vH-1)+2, t);  Jz = J(3*(vH-1)+3, t);  Jv = [Jx Jy Jz];
             Jf = [Fvf*Jx, Fvf*Jy, Fvf*Jz];
@@ -493,8 +493,9 @@ function Ht = Compute(J, Cov)
 end
 ```
 
-> NB: `tess_cholesky(Cov, hh, 2)` pins vertex 1 (free block `2:nVh`), matching the old
-> `i_prepare_vertex` `free = 2:nVh`. The cached factor makes per-frame `Compute` cheap.
+> NB: `tess_cholesky`'s 3rd arg is the PINNED index. `tess_cholesky(Cov, hh, 1)` pins vertex 1
+> (free block `2:nVh`), matching the old `i_prepare_vertex` `free = 2:nVh` and `bst_poisson`'s
+> `tess_cholesky(..., 1)`. The cached factor makes per-frame `Compute` cheap.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -510,10 +511,20 @@ git commit -m "feat(differential): process_helmholtz('Compute') flat-covariant H
 
 ---
 
-### Task 6: `process_helmholtz` Run / GetDescription / FormatComment (save state)
+### Task 6: ~~`process_helmholtz` Run / GetDescription~~ — ELIMINATED
 
-Add the on-file "Save" path. Reuse the existing event-maps behavior (kernel-link →
-band-passed sensors → source frames → maps), now driven by `Compute`.
+**Skipped (decision during execution, 2026-06-25).** Discovery: Brainstorm's process scanner
+(`panel_process_select.m:3010-3017`) *silently tolerates* a `process_*.m` that defines no
+`GetDescription` — it is treated as a shared engine function (e.g. `process_eigenmodes_freq`).
+So `process_helmholtz.m` is legitimately a **Compute-only shared engine**, and a user-facing
+`Run`/`GetDescription` is not needed for Spec 1: the on-file "Save" path remains the existing
+`process_helmholtz_events` process, whose engine is repointed to `process_helmholtz('Compute')`
+in Task 7 (it has the event/band options and the 4-map save already). This removes the
+redundant second Helmholtz process and the fixture-dependent Run smoke test. A general
+`Run`/`GetDescription` on `process_helmholtz`, if ever wanted, is deferred to the
+`panel_bst_dynamics` work (Spec 2).
+
+_Original Task 6 content (porting a Run into process_helmholtz) is intentionally not executed._
 
 **Files:**
 - Modify: `toolbox/process/functions/process_helmholtz.m` (add `GetDescription`, `Run`,

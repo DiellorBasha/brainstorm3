@@ -137,10 +137,11 @@ stiffness `g'Wg = cotanL`), keeping one Poisson home. *(Decision D2 — confirm 
   **`Div`, `Curl`** (primary) and `Phi, Psi, Virr, Vsol, Vharm, HarmFrac, Fmag, Jnormal`
   (full vertex Hodge decomposition). **No cores.** Preserves the small-amplitude `HarmFrac`
   guard (`harmDen > 0`, *not* `max(harmDen,eps)` — the ~1e-22 denominator note).
-- **`Run(sProcess, sInputs)`** — the **Save** state. Resolve `Surf`/`Cov` via `bst_operators`;
-  loop `Compute` over time (or event times); write `results_` file(s) (Curl primary;
-  Div/Phi/Psi optional per OPTIONS). Folds in the `process_helmholtz_events` behavior as a
-  Run option.
+- **`Run(sProcess, sInputs)`** — the **Save** state. _(Execution note 2026-06-25: not added to
+  `process_helmholtz` in Spec 1. Brainstorm's process scanner tolerates a `GetDescription`-less
+  `process_*.m` as a shared engine, so `process_helmholtz` is Compute-only; the Save path stays
+  the existing `process_helmholtz_events` process with its engine repointed to
+  `process_helmholtz('Compute')`. A general `Run` is deferred to Spec 2 if needed.)_
 - **`GetDescription`** (category Differential; options: FieldType, Gauge, output selection,
   event-time vs whole-series) and **`FormatComment`**.
 
