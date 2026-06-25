@@ -146,13 +146,19 @@ else
                 nOp = numel(sSubject.Surface(iSurface).Operator);
                 opParent = nodeSurface;  opGroup = [];
                 if nOp > 1
-                    opGroup = org.brainstorm.tree.BstNode('operatorlist', sprintf('Operators (%d)', nOp), '', 0, iSubject);
+                    opGroup = org.brainstorm.tree.BstNode('operatorlist', 'Operators', '', 0, iSubject);
                     opParent = opGroup;
                 end
                 nOpAdded = 0;
                 for iO = 1:nOp
-                    [chCreated, chNode] = CreateNode('operator', ...
-                        char(sSubject.Surface(iSurface).Operator(iO).Comment), ...
+                    % Child label = the operator Variant ('Dirac', 'Laplace-Beltrami', ...): the
+                    % 'Operators' container conveys the kind, so the bare variant avoids the
+                    % redundant "... operator" suffix. Fall back to the Comment if Variant is empty.
+                    opLabel = char(sSubject.Surface(iSurface).Operator(iO).Variant);
+                    if isempty(opLabel)
+                        opLabel = char(sSubject.Surface(iSurface).Operator(iO).Comment);
+                    end
+                    [chCreated, chNode] = CreateNode('operator', opLabel, ...
                         char(sSubject.Surface(iSurface).Operator(iO).FileName), ...
                         iO, iSubject, iSearch);
                     if chCreated
@@ -172,13 +178,19 @@ else
                 nEig = numel(sSubject.Surface(iSurface).Eigen);
                 eigParent = nodeSurface;  eigGroup = [];
                 if nEig > 1
-                    eigGroup = org.brainstorm.tree.BstNode('eigenlist', sprintf('Eigenmodes (%d)', nEig), '', 0, iSubject);
+                    eigGroup = org.brainstorm.tree.BstNode('eigenlist', 'Eigen', '', 0, iSubject);
                     eigParent = eigGroup;
                 end
                 nEigAdded = 0;
                 for iE = 1:nEig
-                    [chCreated, chNode] = CreateNode('eigen', ...
-                        char(sSubject.Surface(iSurface).Eigen(iE).Comment), ...
+                    % Child label = the eigenbasis Variant ('Dirac', 'Laplace-Beltrami', ...): the
+                    % 'Eigen' container conveys the kind, so the bare variant avoids the redundant
+                    % "... eigenmodes (K=...)" suffix. Fall back to the Comment if Variant is empty.
+                    eigLabel = char(sSubject.Surface(iSurface).Eigen(iE).Variant);
+                    if isempty(eigLabel)
+                        eigLabel = char(sSubject.Surface(iSurface).Eigen(iE).Comment);
+                    end
+                    [chCreated, chNode] = CreateNode('eigen', eigLabel, ...
                         char(sSubject.Surface(iSurface).Eigen(iE).FileName), ...
                         iE, iSubject, iSearch);
                     if chCreated
