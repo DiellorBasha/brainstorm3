@@ -1879,13 +1879,10 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue image', IconLoader.ICON_IMAGE, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'image'));
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenvalue time series', IconLoader.ICON_TS_DISPLAY, [], @(h,ev)view_eigen_timeseries(filenameRelative, [], 'trace'));
                     gui_component('MenuItem', jMenuActivations, [], 'Eigenspectrum (single time)', IconLoader.ICON_TIMEFREQ, [], @(h,ev)view_eigenmode_spectrum(filenameRelative));
-                    % Helmholtz/vorticity decomposition of the (unconstrained) Dirac source
-                    % field (curl/divergence/stream/potential + vortex cores). Opens its own
-                    % figure + panel; nComponents==3 is validated in view_helmholtz.
-                    gui_component('MenuItem', jMenuActivations, [], 'Helmholtz / vorticity (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_helmholtz, filenameRelative));
-                    % Spatiotemporal atom table (bst_dynamics): opens the cortex + the docked
-                    % Atoms panel. Reuses the study's dynamics_* table, or detects one (alpha).
-                    gui_component('MenuItem', jMenuActivations, [], 'Spatiotemporal atoms (Dirac)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_dynamics, 'FromResult', filenameRelative));
+                    % Dynamics: opens the cortex + the docked Atoms panel, with the ephemeral
+                    % differential overlay (divergence/curl/potential/stream) on the unconstrained
+                    % source field. Reuses the study's dynamics_* table, or detects one (alpha).
+                    gui_component('MenuItem', jMenuActivations, [], 'Dynamics (atoms + differential maps)', IconLoader.ICON_RESULTS, [], @(h,ev)bst_call(@view_dynamics, 'FromResult', filenameRelative));
                 end
 
                 % === MENU: SIMULATE DATA ===

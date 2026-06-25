@@ -40,6 +40,18 @@ function varargout = view_dynamics( varargin )
         return;
     end
 
+    % --- PickScalar verb (pure, for tests): view_dynamics('PickScalar', Ht, Op) ---
+    if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'PickScalar')
+        varargout{1} = i_pick_scalar(varargin{2}, varargin{3});
+        return;
+    end
+
+    % --- per-frame overlay verbs: view_dynamics('Overlay'|'RefreshOverlay', hFig) ---
+    if (nargin >= 2) && ischar(varargin{1}) && any(strcmp(varargin{1}, {'Overlay','RefreshOverlay'}))
+        i_dynamics_overlay(varargin{2});
+        return;
+    end
+
     % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
     SrcResult = '';
     if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'FromResult')
@@ -71,11 +83,13 @@ function varargout = view_dynamics( varargin )
     end
 
     % ===== OPEN THE LINKED FIGURES =====
-    % Spatial view = the Helmholtz source 3D (atom markers are drawn on THIS cortex); temporal
-    % view = the recording time series. Both follow the global time cursor. Fall back to a bare
-    % surface when the table has no source/recording provenance.
+    % Spatial view = the source 3D cortex (atom markers are drawn on THIS cortex, and the
+    % differential overlay is painted on it); temporal view = the recording time series. Both
+    % follow the global time cursor. Fall back to a bare surface when the table has no
+    % source/recording provenance.
     if ~isempty(SrcResult)
-        hFig = view_helmholtz(SrcResult);
+        hFig = i_open_source_figure(SrcResult);
+        if isempty(hFig), return; end
         if ~isempty(DataFile)
             try, view_timeseries(DataFile); catch, end %#ok<CTCH>
         end
@@ -85,11 +99,10 @@ function varargout = view_dynamics( varargin )
     setappdata(hFig, 'DynamicsFile', DynamicsFile);
     Redraw(hFig, T);
 
-    % ===== OPEN THE PANEL (docked tools tab, like Record/Helmholtz) =====
-    % The Dynamics panel's Space section now drives the Helmholtz figure, so hide the
-    % standalone Helmholtz panel (the figure + its state stay live).
+    % ===== OPEN THE PANEL (docked tools tab, like Record) =====
+    % The Dynamics panel owns the differential overlay on the source figure (operator combobox
+    % + per-frame CustomOverlayFcn); reopen it fresh for this figure.
     try, gui_hide('Dynamics'); catch, end %#ok<CTCH>
-    try, gui_hide('Helmholtz'); catch, end %#ok<CTCH>
     bstPanel = panel_bst_dynamics('CreatePanel');
     gui_show(bstPanel, 'BrainstormTab', 'tools');
     try, gui_brainstorm('SetSelectedTab', 'Dynamics', 0); catch, end %#ok<CTCH>
@@ -217,4 +230,94 @@ function t = i_phase_type(G)
     if isempty(G.label), return; end
     tok = regexp(G.label, '_(peak|trough|rising|falling)$', 'tokens', 'once');
     if ~isempty(tok), t = tok{1}; end
+end
+
+
+%% ===== operator name -> per-vertex scalar field (one of the Compute outputs) =====
+function scal = i_pick_scalar(Ht, Op)
+    switch Op
+        case 'Divergence', scal = Ht.Div;
+        case 'Curl',       scal = Ht.Curl;
+        case 'Potential',  scal = Ht.Phi;
+        case 'Stream',     scal = Ht.Psi;
+        otherwise, error('view_dynamics:badOp', 'Unknown differential operator: %s', Op);
+    end
+end
+
+
+%% ===== open a figure_3d SOURCE figure on an unconstrained result + install the overlay =====
+function hFig = i_open_source_figure(SrcResult)
+    global GlobalData;
+    hFig = [];
+    [iDS, iResult] = bst_memory('GetDataSetResult', SrcResult);
+    if isempty(iResult)
+        try, [iDS, iResult] = bst_memory('LoadResultsFileFull', SrcResult); catch, iResult = []; end %#ok<CTCH>
+    end
+    if isempty(iResult)
+        bst_error('Could not load this source map.', 'Dynamics source view', 0);  return;
+    end
+    R = GlobalData.DataSet(iDS).Results(iResult);
+    if isempty(R.nComponents) || (R.nComponents ~= 3)
+        bst_error('The dynamics differential view requires an unconstrained (3-component) source.', 'Dynamics source view', 0);  return;
+    end
+    SurfaceFile = R.SurfaceFile;
+    bst_progress('start', 'Dynamics source view', 'Loading the covariant operator...');
+    Cov  = tess_operators(SurfaceFile, 'Covariant');           % find-or-create
+    Surf = in_tess_bst(SurfaceFile, 0);  nV = size(Surf.Vertices, 1);
+    bst_progress('stop');
+    [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResult, [], 'NewFigure');
+    if isempty(hFig), return; end
+    % The differential maps are signed -> register the diverging 'stat2' colormap so the
+    % figure's colorbar + CLim track the symmetric scale (the overlay sets TessInfo.ColormapType
+    % to 'stat2', but UpdateSurfaceColormap's CLim branch only fires when the FIGURE colormap
+    % type matches). All four operators are signed, so this is set once at open.
+    bst_colormaps('AddColormapToFigure', hFig, 'stat2');
+    iTess = i_find_tess(hFig);
+    % full field shown by default (the Data threshold slider drives the overlay magnitude)
+    TI = getappdata(hFig,'Surface');
+    if iTess <= numel(TI), TI(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI); end
+    D = struct('Cov',Cov, 'Op','Divergence', ...
+               'Cache',containers.Map('KeyType','double','ValueType','any'), ...
+               'srcDS',iDSf, 'srcResult',iResult, 'iTess',iTess, 'nV',nV);
+    setappdata(hFig, 'DynamicsOverlay', D);
+    setappdata(hFig, 'CustomOverlayFcn', @(h) i_dynamics_overlay(h));   % fires per frame
+    i_dynamics_overlay(hFig);                                          % paint the first frame
+end
+
+
+%% ===== the CustomOverlayFcn: ephemeral per-frame differential scalar =====
+function i_dynamics_overlay(hFig)
+    if isempty(hFig) || ~ishandle(hFig), return; end
+    D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    TessInfo = getappdata(hFig, 'Surface');
+    if isempty(TessInfo) || (D.iTess > numel(TessInfo)) || ~ishandle(TessInfo(D.iTess).hPatch), return; end
+    [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+    if isempty(iT) || iT < 1, iT = 1; end
+    if ~isKey(D.Cache, iT)
+        Jt = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iT, 0));   % raw 3-vector
+        if size(Jt,1) ~= 3*D.nV, return; end
+        D.Cache(iT) = process_helmholtz('Compute', Jt, D.Cov);        % one call, all fields
+        setappdata(hFig, 'DynamicsOverlay', D);
+    end
+    scal = i_pick_scalar(D.Cache(iT), D.Op);
+    TessInfo(D.iTess).Data         = scal;
+    TessInfo(D.iTess).DataMinMax   = i_minmax(scal);
+    TessInfo(D.iTess).ColormapType = 'stat2';      % all four operators are signed
+    setappdata(hFig, 'Surface', TessInfo);
+    panel_surface('UpdateSurfaceColormap', hFig);
+end
+
+
+%% ===== find the Source tess slot painted by view_surface_data =====
+function iTess = i_find_tess(hFig)
+    iTess = 1;  TessInfo = getappdata(hFig, 'Surface');
+    for i = 1:numel(TessInfo)
+        if ~isempty(TessInfo(i).DataSource) && strcmpi(TessInfo(i).DataSource.Type, 'Source'), iTess = i; return; end
+    end
+end
+
+
+%% ===== symmetric color limits for a signed field (stat2) =====
+function mm = i_minmax(s)
+    m = max(abs(s(:)));  if isempty(m) || m <= 0, m = eps; end;  mm = [-m m];
 end

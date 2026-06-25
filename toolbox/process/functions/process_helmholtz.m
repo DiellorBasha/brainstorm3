@@ -6,7 +6,7 @@ function varargout = process_helmholtz( varargin )
 % scalar potentials phi/psi via the weak Hodge solve (bst_poisson, factor cached by
 % tess_cholesky), plus the irrotational/solenoidal/harmonic reconstruction. Run loops Compute
 % over a source series and saves results maps. Same algorithm for the GUI ephemeral feedback
-% (view_helmholtz / panel_bst_dynamics) and the on-file save.
+% (panel_bst_dynamics) and the on-file save.
 %
 % USAGE:  Ht = process_helmholtz('Compute', J, Cov)   % J [3nV x nT], Cov = 'Covariant' node
 %         OutputFiles = process_helmholtz('Run', sProcess, sInputs)

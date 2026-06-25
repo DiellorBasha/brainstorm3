@@ -392,7 +392,7 @@ function SetMaxCustom(ColormapType, DisplayUnits, newMin, newMax)
                                     DataType = 'sLORETA';
                                 elseif ~isempty(srcFile)
                                     % Detect sLORETA (for scaling units). A DERIVED/synthetic source
-                                    % overlay -- e.g. a view_helmholtz scalar painted on the cortex --
+                                    % overlay -- e.g. a dynamics differential scalar painted on the cortex --
                                     % may carry a DataSource.FileName that is NOT a registered results
                                     % file; in that case skip the check (treat as regular Source) rather
                                     % than letting bst_memory('LoadResultsFile') error and break the
