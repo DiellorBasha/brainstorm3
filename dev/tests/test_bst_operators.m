@@ -4,7 +4,7 @@ function test_bst_operators()
 %   - gradient(constant)      == 0
 %   - gradient(coordinate k)  ~ +tangential e_k  (true surface gradient, correct sign)
 %   - laplacian(poisson(f))   ~ f - mean          (the two solvers invert, off the pinned vertex)
-%   - helmholtz delegate Curl == bst_helmholtz('Decompose') Curl (bit-identical)
+%   - helmholtz delegate Curl == process_helmholtz('Compute') Curl (bit-identical)
 %
 % Needs a loaded protocol whose Subject 1 has a cortex (+ nxr-compute); SKIPs otherwise.
 % Author: Diellor Basha, 2026

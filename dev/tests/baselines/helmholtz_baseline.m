@@ -1,6 +1,9 @@
 function helmholtz_baseline
 % Capture old bst_helmholtz('Frame') outputs as the refactor parity oracle.
 % Run ONCE on the unmodified tree, BEFORE editing any differential/ file.
+% HISTORICAL: bst_helmholtz was deleted at the end of the refactor, so this
+% capture script no longer runs. The oracle it produced (helmholtz_baseline.mat)
+% is committed and is what the parity tests load. Kept for provenance only.
     SurfaceFile = 'Subject01/tess_cortex_pial_low.mat';   % cortex w/ manifold_ + Covariant ready
     Surf = in_tess_bst(SurfaceFile, 0);
     nV   = size(Surf.Vertices, 1);
