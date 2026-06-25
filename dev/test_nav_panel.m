@@ -63,6 +63,14 @@ function test_nav_panel()
     fprintf('T5 source sync: center=%g radius=%g navSeed=%g => %s\n', cv, rw, ls.center, PF{ok5+1});
     pass = pass && ok5;
 
+    % ---------- T6: typed Source window (mm) stores metres in st.nav ----------
+    ctrl.jSrcC.setText('5000');  ctrl.jSrcW.setText('6');     % 6 mm
+    panel_bst_dynamics('OnAxisChange','source');  drawnow;
+    st = getappdata(0,'DynamicsTarget');  lsrc = bst_atom('Get', st.nav, 'source');
+    ok6 = (lsrc.center==5000) && (abs(lsrc.extent-0.006)<1e-9);
+    fprintf('T6 source units: center=%g extent_m=%g => %s\n', lsrc.center, lsrc.extent, PF{ok6+1});
+    pass = pass && ok6;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end

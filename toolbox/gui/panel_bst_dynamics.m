@@ -197,6 +197,7 @@ function loc = i_read_block(ctrl, axis)
     c = str2double(char(jC.getText()));  w = str2double(char(jW.getText()));
     if ~isnan(c), loc.center = c; end
     if ~isnan(w), loc.extent = abs(w); else, loc.extent = 0; end
+    if strcmp(axis,'source') && isfinite(loc.extent), loc.extent = loc.extent / 1000; end   % jSrcW is mm -> metres
     if isfinite(loc.center), if loc.extent>0, loc.state='window'; else, loc.state='point'; end; end
 end
 
