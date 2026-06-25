@@ -71,6 +71,15 @@ function test_nav_panel()
     fprintf('T6 source units: center=%g extent_m=%g => %s\n', lsrc.center, lsrc.extent, PF{ok6+1});
     pass = pass && ok6;
 
+    % ---------- T7: 'none' restores broadband (clears fields, no filter, curBand empty) ----------
+    ctrl.jFreqBand.setSelectedItem('alpha');  panel_bst_dynamics('OnFreqPreset');  drawnow;   % filter on
+    ctrl.jFreqBand.setSelectedItem('none');   panel_bst_dynamics('OnFreqPreset');  drawnow;   % broadband
+    st = getappdata(0,'DynamicsTarget');  lf7 = bst_atom('Get', st.nav, 'freq');
+    cleared = isempty(char(ctrl.jFreqC.getText())) && isempty(char(ctrl.jFreqW.getText()));
+    ok7 = cleared && strcmp(lf7.state,'unlocalized') && isempty(st.curBand);
+    fprintf('T7 none->broadband: fieldsCleared=%d navUnloc=%d curBandEmpty=%d => %s\n', cleared, strcmp(lf7.state,'unlocalized'), isempty(st.curBand), PF{ok7+1});
+    pass = pass && ok7;
+
     if ishandle(hFig), close(hFig); end
     fprintf('\n==== SUITE: %s ====\n', PF{pass+1});
 end

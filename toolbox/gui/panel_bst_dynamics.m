@@ -115,9 +115,9 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     [jTimeC, jTimeW] = i_axis_block(jCtrl, 'time', 'Time', 'center', char(177), []);
 
     % FREQUENCY block + band-atlas preset combobox (right slot)
-    bnames = i_bands();  bandItems = [bnames(:,1); {'custom'}];
+    bnames = i_bands();  bandItems = [{'none'}; bnames(:,1); {'custom'}];
     jFreqBand = gui_component('combobox', [], [], [], {bandItems}, [], [], []);
-    jFreqBand.setSelectedItem('custom');
+    jFreqBand.setSelectedItem('none');                          % panel opens broadband (no filter)
     java_setcb(jFreqBand, 'ActionPerformedCallback', @(h,e)bst_call(@OnFreqPreset));
     [jFreqC, jFreqW] = i_axis_block(jCtrl, 'freq', 'Frequency', 'center', char(177), jFreqBand);
 
@@ -283,6 +283,9 @@ end
 function i_freq_preset(ctrl)
     if ~isfield(ctrl,'jFreqBand') || isempty(ctrl.jFreqBand), return; end
     sel = char(ctrl.jFreqBand.getSelectedItem());
+    if strcmpi(sel, 'none')                                     % broadband: clear fields -> no filter (i_drive off-path)
+        ctrl.jFreqC.setText('');  ctrl.jFreqW.setText('');  return;
+    end
     b = i_bands();  k = find(strcmpi(b(:,1), sel), 1);
     if isempty(k), return; end                                 % 'custom' -> leave fields as typed
     lo = b{k,2}(1);  hi = b{k,2}(2);
@@ -291,7 +294,7 @@ end
 function nm = i_freq_name(ctrl)
     nm = '';
     if isfield(ctrl,'jFreqBand') && ~isempty(ctrl.jFreqBand), nm = char(ctrl.jFreqBand.getSelectedItem()); end
-    if strcmpi(nm,'custom'), nm = ''; end
+    if any(strcmpi(nm,{'custom','none'})), nm = ''; end
 end
 
 
