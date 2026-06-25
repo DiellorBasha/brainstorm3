@@ -410,6 +410,8 @@ function OnDetect() %#ok<DEFNU>
     % The events auto-render on the time series + mirror in the tree; Save converts them to atoms.
     i_detect_events(bandName, band, evt, markers);
     i_apply(st);                                                  % refresh tree (mirrors the detection events)
+    [~, st] = i_cs();                                            % i_apply rewrote the target
+    i_focus_time(st, [evt(1,1), evt(2,1)]);                      % focus the FIRST detected window
     bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
 end
 
@@ -724,6 +726,17 @@ function i_sync_freq(st, range)
     setappdata(0, 'DynamicsTarget', st);
     % reflect the band name in the combobox (display); any cascade is idempotent and overlay-guarded
     try, ctrl.jFreqBand.setSelectedItem(nm); catch, end %#ok<CTCH>
+end
+
+
+%% ===== TIME FOCUS: drive the recording's Time Selection box (panel -> view) =====
+function i_focus_time(st, win)
+    if isempty(win) || (numel(win) < 2) || any(~isfinite(win(1:2))), return; end
+    hRec = i_rec_figure(st);
+    if isempty(hRec) || ~ishandle(hRec), return; end
+    i_driving(true);
+    try, figure_timeseries('SetTimeSelectionManual', hRec, [win(1) win(2)]); catch, end %#ok<CTCH>
+    i_driving(false);
 end
 
 
@@ -1141,6 +1154,8 @@ function TreeSel_Callback()
             [rows, occMap] = i_window_atoms(st.T, info.g, info.w, i_field(st,'showPhase',[1 1 1 1]));
             for k = 1:numel(rows), model.addElement(rows{k}); end
             i_jump(st.T.Groups(info.g).times(1, info.w));   % selecting a window jumps to its onset
+            i_focus_time(st, st.T.Groups(info.g).times(:, info.w)');   % and focuses the [onset offset] box
+            st.detSel = [];                                  % saved window -> no staged-edit target
         elseif strcmp(info.kind, 'atom')
             % single atom of a simple band group: list just it (and it is highlightable)
             G = st.T.Groups(info.g);
