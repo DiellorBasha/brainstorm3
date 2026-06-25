@@ -316,30 +316,11 @@ function OnDetect() %#ok<DEFNU>
     if isempty(evt)
         java_dialog('msgbox', sprintf('No %s windows detected (try a different band or threshold).', bandName), 'Detect windows');  return;
     end
-    % rebuild the band's groups (replace any previous detection for this band)
-    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
-    st.T = i_remove_band(st.T, bandName);
-    W = bst_dynamics('NewGroup', winLabel);
-    W.type='extended';  W.times=evt;  W.epochs=ones(1,size(evt,2));  W.band=band;  W.bandName=bandName;
-    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
-    st.T = bst_dynamics('AddGroup', st.T, W);
-    phaseDefs = {'peak',[0.90 0.10 0.10]; 'trough',[0.10 0.25 0.90]; 'rising',[0.10 0.70 0.20]; 'falling',[0.95 0.55 0.10]};
-    for ip = 1:size(phaseDefs,1)
-        ph = phaseDefs{ip,1};  tt = markers.(ph);
-        if isempty(tt), continue; end
-        P = bst_dynamics('NewGroup', sprintf('%s_%s', bandName, ph));
-        % phase = NUMERIC alpha phase (rad): peak=0 falling=+pi/2 trough=+/-pi rising=-pi/2;
-        % the readable type lives in the label suffix ('<band>_peak' etc.).
-        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph);  P.times=tt(:)';  P.epochs=ones(1,numel(tt));
-        P.band=band;  P.bandName=bandName;  P.color=phaseDefs{ip,2};
-        P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
-        st.T = bst_dynamics('AddGroup', st.T, P);
-    end
-    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;          end
-    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile;     end
-    i_apply(st);                                                        % refresh tree (no cortex markers: temporal)
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Detected %d %s windows', size(evt,2), bandName));
+    % Stage the detection as a Brainstorm EVENT group on the recording (NOT atoms).
+    % The events auto-render on the time series + mirror in the tree; Save converts them to atoms.
+    i_detect_events(bandName, band, evt, markers);
+    i_apply(st);                                                  % refresh tree (mirrors the detection events)
+    bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
 end
 
 % Load MEG sensor data (matrix [nMEG x nT] + time) for a data block or raw file.
@@ -370,6 +351,43 @@ function T = i_remove_band(T, bandName)
         if any(strcmp(T.Groups(g).parent, winLabels)), keep(g) = false; end
     end
     T.Groups = T.Groups(keep);  T.nGroups = numel(T.Groups);
+end
+
+
+% Install the refphase detection as a Brainstorm event group on the loaded recording
+% (extended band-window + 4 phase-marker simple events). Replaces prior same-label events.
+function i_detect_events(bandName, band, evt, markers)
+    global GlobalData;
+    % Detection events are render-only preview, not a permanent edit to the recording file.
+    % SetEvents sets Measures.isModified=1, and recording unload auto-saves under nogui --
+    % so capture the dataset's clean/dirty state and restore CLEAN afterwards (preserving any
+    % genuine prior user event edits).
+    iDS = panel_record('GetCurrentDataset');                 % the loaded recording's dataset
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
+    defs = { winLabel,                    evt,             [0.5 0.5 0.5]; ...
+             [bandName '_peak'],          markers.peak,    [0.90 0.10 0.10]; ...
+             [bandName '_trough'],        markers.trough,  [0.10 0.25 0.90]; ...
+             [bandName '_rising'],        markers.rising,  [0.10 0.70 0.20]; ...
+             [bandName '_falling'],       markers.falling, [0.95 0.55 0.10] };
+    for k = 1:size(defs,1)
+        label = defs{k,1};  times = defs{k,2};  color = defs{k,3};
+        if isempty(times), continue; end
+        sEvent = db_template('event');
+        sEvent.label  = label;
+        sEvent.color  = color;
+        sEvent.times  = times;
+        sEvent.epochs = ones(1, size(times,2));
+        % find-or-replace by label (replace prior detection for this band on re-detect)
+        all = panel_record('GetEvents', [], 1);
+        iEvt = [];
+        if ~isempty(all), iEvt = find(strcmpi({all.label}, label), 1); end
+        if isempty(iEvt), iEvt = numel(all) + 1; end
+        panel_record('SetEvents', sEvent, iEvt);
+    end
+    panel_record('UpdateEventsList');                            % refresh the Record-panel event list
+    panel_record('ReplotEvents');                               % re-plot the event markers on the open time series
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged events are render-only, don't persist
 end
 
 
@@ -627,6 +645,22 @@ function BuildTree()
             end
         end
     end
+    % mirror the detection event group (the unsaved time skeleton) as a distinct node
+    evs = panel_record('GetEvents', [], 1);
+    if ~isempty(evs)
+        isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
+        if any(isDet)
+            detNode = DefaultMutableTreeNode('Detection (events)  [unsaved]');
+            root.add(detNode);
+            nodeList{end+1} = detNode;  nodeInfo(end+1) = struct('kind','detroot','g',0,'w',0); %#ok<AGROW>
+            for ie = find(isDet)
+                e = evs(ie);
+                leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                detNode.add(leaf);
+                nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+            end
+        end
+    end
     ctrl.jTree.setModel(DefaultTreeModel(root));
     for r = 0:(root.getChildCount()-1), ctrl.jTree.expandRow(r); end
     st.nodeList = nodeList;  st.nodeInfo = nodeInfo;  st.occMap = [];
@@ -668,6 +702,11 @@ function TreeSel_Callback()
                 occMap(end+1,:) = [info.g, info.w, 0]; %#ok<AGROW>
             end
             i_jump(G.times(1, info.w));                     % and to the atom's time
+        elseif strcmp(info.kind, 'detevt')
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
+                i_jump(evs(info.g).times(1,1));
+            end
         end
     else
         st.curGroup = 0;
