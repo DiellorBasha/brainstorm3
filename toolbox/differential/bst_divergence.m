@@ -13,25 +13,25 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
 %   TANGENT: v1 per-FACE field [3nF x nT] (interleaved x,y,z per face; e.g. output of
 %            bst_gradient). Uses stable DEC adjoint. Call: bst_divergence(V, ManifoldMat).
 %   AMBIENT: 3D R^3 per-VERTEX field [3nV x nT] (interleaved x,y,z per vertex; e.g. a Dirac
-%            source vector). Wraps the Dirac Hodge engine (bst_helmholtz) and adds the
-%            mean-curvature coupling term: div_Sigma(J) = div_Sigma(J_tan) - 2*H*(J.N),
-%            where H is the scalar mean curvature and N is the outward vertex normal.
-%            Call: bst_divergence(V, ManifoldMat, 'Ambient', Surf, Dir, LBO).
+%            source vector). Uses the flat-covariant strong divergence from the Covariant node
+%            (Gx*Jx+Gy*Jy+Gz*Jz, area-weighted to vertices). Already includes the
+%            mean-curvature coupling -2H(J.N): a constant ambient field gives Div=0 on folds.
+%            Call: bst_divergence(V, ManifoldMat, 'Ambient', Surf, Cov).
 % I/O-free: the caller resolves and passes the loaded manifold node (and operator nodes for
 % the ambient branch).
 %
 % USAGE:
 %   divField = bst_divergence(V, ManifoldMat)
-%   divField = bst_divergence(V, ManifoldMat, 'Ambient', Surf, Dir, LBO)
+%   divField = bst_divergence(V, ManifoldMat, 'Ambient', Surf, Cov)
 %
 % INPUTS:
 %   - V           : [TANGENT] per-FACE ambient [3nF x nT]; [AMBIENT] per-VERTEX [3nV x nT]
 %   - ManifoldMat : a manifold_ node (tess_manifold(Surf)) whose 1x2 DEC group carries the
 %                   per-hemisphere flat/d0/h0/h1 + GlobalVertices/GlobalFaces.
 %   - 'Ambient'   : (optional) flag to dispatch to the ambient branch
-%   - Surf        : (ambient only) loaded tessellation struct (in_tess_bst output)
-%   - Dir         : (ambient only) Covariant operator node (tess_operators(Surf,'Covariant'))
-%   - LBO         : (ambient only) LBO operator node (tess_operators(Surf,'Laplace-Beltrami'))
+%   - Surf        : (ambient only) loaded tessellation struct (accepted for signature symmetry,
+%                   unused: nVtot derived from Cov.GlobalVertices)
+%   - Cov         : (ambient only) Covariant operator node (tess_operators(Surf,'Covariant'))
 %
 % OUTPUTS:
 %   - divField    : per-VERTEX scalar field [nV x nT]
@@ -59,10 +59,13 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
 %
 % Authors: Diellor Basha, 2026
 
-    % ----- ambient (3nV) branch: Hodge divergence + mean-curvature coupling -----
+    % ----- ambient (3nV) branch: flat-covariant surface divergence (Covariant node) -----
     if ~isempty(varargin) && strcmpi(varargin{1}, 'Ambient')
-        Surf = varargin{2};  Dir = varargin{3};  LBO = varargin{4};
-        divField = i_ambient_divergence(V, ManifoldMat, Surf, Dir, LBO);
+        % USAGE: bst_divergence(J, ManifoldMat, 'Ambient', Surf, Cov)
+        % ManifoldMat/Surf are accepted for signature symmetry with the tangent branch
+        % but are unused here: the flat-covariant divergence needs only the Covariant node.
+        Cov = varargin{end};
+        divField = i_ambient_divergence(V, Cov);
         return;
     end
     % ----- tangent (3nF) branch: existing stable DEC adjoint (UNCHANGED) -----
@@ -85,12 +88,23 @@ function divField = bst_divergence(V, ManifoldMat, varargin)
     end
 end
 
-%% ===== ambient divergence: the full flat-covariant surface divergence =====
-% The 'Covariant' Hodge engine returns H.Div = the FULL ambient surface divergence of the
-% 3-D current (it already includes the mean-curvature coupling -2H(J.N): a constant ambient
-% field gives Div=0 even on folds). So no separate curvature term is added here -- doing so
-% would double-count. (Op{1} is the 'Covariant' node; arg name kept for signature stability.)
-function divField = i_ambient_divergence(J, ManifoldMat, Surf, Cov, LBO)
-    H = bst_helmholtz('Decompose', {Cov, LBO}, ManifoldMat, Surf, J);
-    divField = H.Div;
+%% ===== ambient divergence: flat-covariant surface divergence (incl. -2H(J.N) coupling) =====
+% Ported from bst_helmholtz i_prepare_vertex/i_frame_vertex. Per hemisphere, from the
+% Covariant node: strong per-face divergence Gx*Jx+Gy*Jy+Gz*Jz, area-weighted to vertices by
+% Wfv. s=+1 (calibrated: this IS the true surface divergence, already includes the
+% mean-curvature coupling -2H(J.N); a constant ambient field gives 0 even on folds).
+function divField = i_ambient_divergence(J, Cov)
+    s = +1;
+    nVtot = max(cellfun(@(c) max(double(c(:))), Cov.GlobalVertices));
+    nT = size(J, 2);
+    divField = zeros(nVtot, nT);
+    for hh = 1:numel(Cov.Covariant)
+        C = Cov.Covariant{hh};  vH = double(Cov.GlobalVertices{hh}(:));
+        nFh = size(C.Faces, 1);  nVh = numel(vH);
+        Gx = C.ScalarGrad(1:nFh,:);  Gy = C.ScalarGrad(nFh+1:2*nFh,:);  Gz = C.ScalarGrad(2*nFh+1:3*nFh,:);
+        Wfv = bst_face2vertex(C.Faces, C.FaceArea);   % shared math helper
+        Jx = J(3*(vH-1)+1, :);  Jy = J(3*(vH-1)+2, :);  Jz = J(3*(vH-1)+3, :);
+        divF = Gx*Jx + Gy*Jy + Gz*Jz;                 % [nFh x nT] per-face surface divergence
+        divField(vH, :) = s * (Wfv * divF);
+    end
 end
