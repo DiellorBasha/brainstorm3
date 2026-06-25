@@ -128,10 +128,12 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     % SCALE block (basic: window -> heat smoothing; center reserved for Phase 5)
     [jScaleC, jScaleW] = i_axis_block(jCtrl, 'scale', 'Scale', 'center', char(177), []);
 
-    % MEASUREMENT row (descriptor, not an axis) + actions
+    % MEASUREMENT row (differential operator selector; not an axis) + actions
     jMeas = gui_river([2 2], [0 7 2 7], 'Measurement');
-    jMeasPot = gui_component('toggle', jMeas, '', char(934), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Potential \Phi (divergence: sources / sinks)', @(h,e)bst_call(@()OnMeasurement('Irrot')));
-    jMeasStr = gui_component('toggle', jMeas, '', char(936), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Stream \Psi (curl: vortices)', @(h,e)bst_call(@()OnMeasurement('Solen')));
+    jMeasOp = gui_component('combobox', jMeas, '', [], {Insets(0,0,0,0)}, ...
+        {{'Divergence','Curl','Potential','Stream'}}, ...
+        'Differential operator painted on the cortex (ephemeral; div/curl from process_helmholtz, potential/stream = their Poisson potentials)', ...
+        @(h,e)bst_call(@OnMeasurement));
     gui_component('label', jMeas, 'tab', '  Peaks:', [], [], [], []);
     jPeaks = gui_component('text', jMeas, '', '3', {Dimension(java_scaled('value',26), BH)}, 'Extrema kept per sign', []);
     jCtrl.add(jMeas);
@@ -153,7 +155,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
         'jTimeC',jTimeC, 'jTimeW',jTimeW, 'jFreqC',jFreqC, 'jFreqW',jFreqW, 'jFreqBand',jFreqBand, ...
         'jSrcC',jSrcC, 'jSrcW',jSrcW, 'jRegionTool',jRegionTool, 'jScaleC',jScaleC, 'jScaleW',jScaleW, ...
-        'jMeasPot',jMeasPot, 'jMeasStr',jMeasStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
+        'jMeasOp',jMeasOp, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
 end
 
 
@@ -265,16 +267,14 @@ function i_drive(axis, loc)
 end
 
 
-%% ===== MEASUREMENT (operator descriptor; not an axis) =====
-function OnMeasurement(which) %#ok<DEFNU>
+%% ===== MEASUREMENT (differential operator descriptor; not an axis) =====
+function OnMeasurement() %#ok<DEFNU>
     [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
-    if strcmp(which, 'Irrot')
-        if ctrl.jMeasPot.isSelected(), ctrl.jMeasStr.setSelected(false); name = 'Irrot'; else, name = 'Total'; end
-    else
-        if ctrl.jMeasStr.isSelected(), ctrl.jMeasPot.setSelected(false); name = 'Solen'; else, name = 'Total'; end
-    end
-    view_helmholtz('SetComponent', st.hFig, name);
+    if isempty(ctrl) || isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    name = char(ctrl.jMeasOp.getSelectedItem());          % 'Divergence'|'Curl'|'Potential'|'Stream'
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if ~isempty(D), D.Op = name; setappdata(st.hFig, 'DynamicsOverlay', D); end
+    view_dynamics('RefreshOverlay', st.hFig);             % free re-select from the per-frame cache
     st.curOp = name;  setappdata(0, 'DynamicsTarget', st);
 end
 
