@@ -106,77 +106,52 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jSplit.setPreferredSize(java_scaled('dimension', 360, 420));
     jPanelAtoms.add(jSplit, BorderLayout.CENTER);
 
-    % ===== CONTROL area (above Atoms): the atom-coordinate selectors =====
+    % ===== CONTROL area: the 4-axis (center,extent) navigator =====
     jCtrl = JPanel();  jCtrl.setLayout(BoxLayout(jCtrl, BoxLayout.Y_AXIS));
-    % --- FREQUENCY section: ephys band toggles -> temporal bandpass (Filter-tab DSP) ---
-    BW = java_scaled('value', 34);  BH = java_scaled('value', 22);
-    jFreq = gui_river([2 2], [0 7 2 7], 'Frequency');
-    bandDefs = i_bands();
-    jBands = javaArray('javax.swing.JToggleButton', size(bandDefs,1));
-    for i = 1:size(bandDefs,1)
-        tip = sprintf('%s (%g-%g Hz) band-pass (display filter, full sources)', bandDefs{i,1}, bandDefs{i,2}(1), bandDefs{i,2}(2));
-        jb  = gui_component('toggle', jFreq, '', bandDefs{i,3}, {Insets(0,0,0,0), Dimension(BW,BH)}, tip, @(h,e)bst_call(@()OnBand(i)));
-        jBands(i) = jb;
-    end
-    % Detect = run process_evt_refphase on the selected band -> the time-window skeleton
-    gui_component('button', jFreq, 'br hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
-    jCtrl.add(jFreq);
+    BW = java_scaled('value', 30);  BH = java_scaled('value', 22);
 
-    % --- SPACE section: eigenfilter smoothing (scale) + differential operator ---
-    % Drives the linked Helmholtz source 3D via view_helmholtz verbs. The eigenfilter UI
-    % is the SAME panel_eigenfilter_design machinery the Helmholtz panel uses (no new DSP).
-    jSpace = gui_river([2 2], [0 7 2 7], 'Space');
-    jSpaceSmoothOn = gui_component('checkbox', jSpace, '', 'Smooth', [], 'Eigenfilter low-pass on the source (spatial scale)', @(h,e)bst_call(@OnSpaceSmooth));
-    [spaceKeys, spaceDisp] = panel_eigenfilter_design('Kernels');
-    jSpaceKernel = gui_component('combobox', jSpace, 'tab hfill', [], {spaceDisp}, [], [], []);
-    iHeat = find(strcmp(spaceKeys,'heat'), 1);  if ~isempty(iHeat), jSpaceKernel.setSelectedIndex(iHeat-1); end
-    java_setcb(jSpaceKernel, 'ActionPerformedCallback', @(h,e)bst_call(@OnSpaceKernel));
-    jSpaceParams = gui_river([2 2], [0 2 0 2]);
-    jSpace.add('br hfill', jSpaceParams);
-    gui_component('label', jSpace, 'br', 'Op: ', [], [], [], []);
-    jSpacePot = gui_component('toggle', jSpace, '', char(934), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Potential \Phi (divergence: sources / sinks)', @(h,e)bst_call(@()OnSpaceComp('Irrot')));
-    jSpaceStr = gui_component('toggle', jSpace, '', char(936), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Stream \Psi (curl: vortices)', @(h,e)bst_call(@()OnSpaceComp('Solen')));
-    jCtrl.add(jSpace);
+    % TIME block (no preset yet)
+    [jTimeC, jTimeW] = i_axis_block(jCtrl, 'time', 'Time', 'center', char(177), []);
 
-    % --- RECORD row: detect the shaped field's extrema at the cursor -> atoms ---
-    jRec = gui_river([2 2], [0 7 2 7], 'Record');
-    gui_component('label', jRec, '', 'Peaks: ', [], [], [], []);
-    jPeaks = gui_component('text', jRec, '', '3', {Dimension(java_scaled('value',28), BH)}, 'Extrema kept per sign', []);
-    gui_component('button', jRec, 'tab hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor time as atoms', @(h,e)bst_call(@OnRecord));
-    jRegionTool = gui_component('toggle', jRec, 'br', 'Region tool', [], 'Heat-disk tool: click a cortex vertex to seed a region, scroll to grow/shrink it', @(h,e)bst_call(@()bst_geodesic_tool('Toggle', ctrl_region_state())));
-    gui_component('button', jRec, 'tab hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom (localizes a time-only marker)', @(h,e)bst_call(@OnCaptureRegion));
-    jCtrl.add(jRec);
+    % FREQUENCY block + band-atlas preset combobox (right slot)
+    bnames = i_bands();  bandItems = [bnames(:,1); {'custom'}];
+    jFreqBand = gui_component('combobox', [], [], [], {bandItems}, [], [], []);
+    jFreqBand.setSelectedItem('custom');
+    java_setcb(jFreqBand, 'ActionPerformedCallback', @(h,e)bst_call(@OnFreqPreset));
+    [jFreqC, jFreqW] = i_axis_block(jCtrl, 'freq', 'Frequency', 'center', char(177), jFreqBand);
+
+    % SOURCE block + Region tool (right slot) -- the seed/radius picker
+    jRegionTool = gui_component('toggle', [], '', 'Region', {Insets(0,0,0,0), Dimension(java_scaled('value',54),BH)}, 'Heat-disk tool: click a cortex vertex to seed (center), scroll to grow the radius (window)', @(h,e)bst_call(@()bst_geodesic_tool('Toggle', ctrl_region_state())));
+    [jSrcC, jSrcW] = i_axis_block(jCtrl, 'source', 'Source', 'center', 'radius', jRegionTool);
+
+    % SCALE block (basic: window -> heat smoothing; center reserved for Phase 5)
+    [jScaleC, jScaleW] = i_axis_block(jCtrl, 'scale', 'Scale', 'center', char(177), []);
+
+    % MEASUREMENT row (descriptor, not an axis) + actions
+    jMeas = gui_river([2 2], [0 7 2 7], 'Measurement');
+    jMeasPot = gui_component('toggle', jMeas, '', char(934), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Potential \Phi (divergence: sources / sinks)', @(h,e)bst_call(@()OnMeasurement('Irrot')));
+    jMeasStr = gui_component('toggle', jMeas, '', char(936), {Insets(0,0,0,0), Dimension(BW,BH)}, 'Stream \Psi (curl: vortices)', @(h,e)bst_call(@()OnMeasurement('Solen')));
+    gui_component('label', jMeas, 'tab', '  Peaks:', [], [], [], []);
+    jPeaks = gui_component('text', jMeas, '', '3', {Dimension(java_scaled('value',26), BH)}, 'Extrema kept per sign', []);
+    jCtrl.add(jMeas);
+
+    % ACTIONS row (kept: Detect / Record / Capture)
+    jAct = gui_river([2 2], [0 7 2 7], 'Actions');
+    gui_component('button', jAct, 'hfill', 'Detect windows', [], 'Run the band-power detector (refphase) on the selected band: writes the band-window stack + phase markers', @(h,e)bst_call(@OnDetect));
+    gui_component('button', jAct, 'br hfill', 'Record at cursor', [], 'Store the shaped field''s extrema at the cursor as atoms', @(h,e)bst_call(@OnRecord));
+    gui_component('button', jAct, 'br hfill', 'Capture region -> active atom', [], 'Snapshot the Region tool''s heat-disk into the selected atom', @(h,e)bst_call(@OnCaptureRegion));
+    jCtrl.add(jAct);
 
     jPanelNew.add(jCtrl, BorderLayout.NORTH);
 
     jPanelNew.add(jPanelAtoms, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
-        'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, 'jBands',jBands, ...
-        'jSpaceSmoothOn',jSpaceSmoothOn, 'jSpaceKernel',jSpaceKernel, 'SpaceKernelKeys',{spaceKeys}, ...
-        'jSpaceParams',jSpaceParams, 'jSpacePot',jSpacePot, 'jSpaceStr',jSpaceStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems, 'jRegionTool',jRegionTool));
+        'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
+        'jTimeC',jTimeC, 'jTimeW',jTimeW, 'jFreqC',jFreqC, 'jFreqW',jFreqW, 'jFreqBand',jFreqBand, ...
+        'jSrcC',jSrcC, 'jSrcW',jSrcW, 'jRegionTool',jRegionTool, 'jScaleC',jScaleC, 'jScaleW',jScaleW, ...
+        'jMeasPot',jMeasPot, 'jMeasStr',jMeasStr, 'jPeaks',jPeaks, 'jPhaseItems',jPhaseItems));
 end
 
-
-%% ===== FREQUENCY band toggles -> display bandpass (drives time series + Helmholtz source) =====
-function OnBand(i)
-    ctrl = bst_get('PanelControls', 'Dynamics');
-    if isempty(ctrl) || ~isfield(ctrl, 'jBands'), return; end
-    b  = i_bands();
-    on = ctrl.jBands(i).isSelected();
-    if on
-        for k = 1:numel(ctrl.jBands), if (k ~= i), ctrl.jBands(k).setSelected(false); end; end
-        lo = b{i,2}(1);  hi = b{i,2}(2);
-        panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);   % LP=hi, HP=lo, FullSources=1
-    else
-        panel_filter('SetFilters', 0, [], 0, [], 0, [], 0, 0);   % no band selected -> raw
-    end
-    % remember the band on the atom target (the frequency coordinate)
-    st = getappdata(0, 'DynamicsTarget');
-    if ~isempty(st)
-        if on, st.curBand = b{i,2};  st.curBandName = b{i,1};  else, st.curBand = [];  st.curBandName = ''; end
-        setappdata(0, 'DynamicsTarget', st);
-    end
-end
 
 % Standard EEG/MEG bands (delta/theta/alpha/beta/gamma): {name, [lo hi], greek-label}
 function b = i_bands()
@@ -185,6 +160,126 @@ function b = i_bands()
          'alpha',[8 13], char(945); ...
          'beta', [13 30],char(946); ...
          'gamma',[30 60],char(947)};
+end
+
+
+%% ===== UNIFORM AXIS BLOCK BUILDER =====
+% Symmetric row: [center field] [window field] [right selector slot].
+%   axis      'time'|'freq'|'source'|'scale'
+%   cLabel    left label for center; wLabel for window
+%   rightSel  the axis selector component already created (combobox/toggle) or [] (none)
+% Returns the center/window text fields.
+function [jC, jW] = i_axis_block(jCtrl, axis, title, cLabel, wLabel, rightSel)
+    import java.awt.*;
+    BH = java_scaled('value', 22);  FW = java_scaled('value', 52);
+    jB = gui_river([2 2], [0 7 2 7], title);
+    gui_component('label', jB, '', cLabel, [], [], [], []);
+    jC = gui_component('text', jB, '', '', {Dimension(FW,BH)}, ['Center (' axis ')'], []);
+    gui_component('label', jB, 'tab', wLabel, [], [], [], []);
+    jW = gui_component('text', jB, '', '', {Dimension(FW,BH)}, ['Window/extent (' axis ')'], []);
+    if ~isempty(rightSel), jB.add('tab', rightSel); end
+    java_setcb(jC, 'ActionPerformedCallback', @(h,e)bst_call(@()OnAxisChange(axis)));
+    java_setcb(jW, 'ActionPerformedCallback', @(h,e)bst_call(@()OnAxisChange(axis)));
+    jCtrl.add(jB);
+end
+
+
+%% ===== READ a block's (center, extent) into a Localization =====
+function loc = i_read_block(ctrl, axis)
+    loc = bst_atom('NewLoc', axis);
+    switch axis
+        case 'time',   jC = ctrl.jTimeC;  jW = ctrl.jTimeW;
+        case 'freq',   jC = ctrl.jFreqC;  jW = ctrl.jFreqW;
+        case 'source', jC = ctrl.jSrcC;   jW = ctrl.jSrcW;
+        case 'scale',  jC = ctrl.jScaleC; jW = ctrl.jScaleW;
+        otherwise, return;
+    end
+    c = str2double(char(jC.getText()));  w = str2double(char(jW.getText()));
+    if ~isnan(c), loc.center = c; end
+    if ~isnan(w), loc.extent = abs(w); else, loc.extent = 0; end
+    if isfinite(loc.center), if loc.extent>0, loc.state='window'; else, loc.state='point'; end; end
+end
+
+
+%% ===== AXIS CHANGE: write the cursor atom + drive the engine =====
+function OnAxisChange(axis) %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st), return; end
+    loc = i_read_block(ctrl, axis);
+    st.nav = bst_atom('Set', st.nav, axis, 1, loc);
+    setappdata(0, 'DynamicsTarget', st);
+    i_drive(axis, loc);
+end
+
+
+%% ===== FREQ PRESET: the band combobox fills the freq fields, THEN drives =====
+% Only the combobox calls this (not the field edits), so typing a custom value is never
+% overwritten by the selected band.
+function OnFreqPreset() %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl), return; end
+    i_freq_preset(ctrl);
+    OnAxisChange('freq');
+end
+
+
+%% ===== per-axis engine driver (reuses existing engines; keeps legacy coords) =====
+function i_drive(axis, loc)
+    [ctrl, st] = i_cs();  if isempty(st), return; end
+    switch axis
+        case 'time'
+            if isfinite(loc.center), try, panel_time('SetCurrentTime', loc.center); catch, end; end %#ok<CTCH>
+        case 'freq'
+            if isfinite(loc.center) && (loc.extent>0)
+                lo = loc.center - loc.extent;  hi = loc.center + loc.extent;
+                panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);
+                st.curBand = [lo hi];  st.curBandName = i_freq_name(ctrl);
+            else
+                panel_filter('SetFilters', 0, [], 0, [], 0, [], 0, 0);
+                st.curBand = [];  st.curBandName = '';
+            end
+        case 'source'
+            % center/window are populated by the Region tool (Task 2 syncs them); nothing to drive here
+        case 'scale'
+            if ~isempty(st.hFig) && ishandle(st.hFig) && ~isempty(st.Lambda) && (loc.extent>0)
+                params = struct('t', loc.extent);
+                try, view_helmholtz('SetSmoothing', st.hFig, 1, 'heat', params); catch, end %#ok<CTCH>
+                st.curScale = struct('on',1,'name','heat','params',params);
+            elseif ~isempty(st.hFig) && ishandle(st.hFig)
+                try, view_helmholtz('SetSmoothing', st.hFig, 0, 'heat', struct('t',1)); catch, end %#ok<CTCH>
+                st.curScale = struct('on',0,'name','heat','params',[]);
+            end
+    end
+    setappdata(0, 'DynamicsTarget', st);
+end
+
+
+%% ===== MEASUREMENT (operator descriptor; not an axis) =====
+function OnMeasurement(which) %#ok<DEFNU>
+    [ctrl, st] = i_cs();
+    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
+    if strcmp(which, 'Irrot')
+        if ctrl.jMeasPot.isSelected(), ctrl.jMeasStr.setSelected(false); name = 'Irrot'; else, name = 'Total'; end
+    else
+        if ctrl.jMeasStr.isSelected(), ctrl.jMeasPot.setSelected(false); name = 'Solen'; else, name = 'Total'; end
+    end
+    view_helmholtz('SetComponent', st.hFig, name);
+    st.curOp = name;  setappdata(0, 'DynamicsTarget', st);
+end
+
+
+%% ===== frequency-atlas preset: a chosen band fills the freq center/window fields =====
+function i_freq_preset(ctrl)
+    if ~isfield(ctrl,'jFreqBand') || isempty(ctrl.jFreqBand), return; end
+    sel = char(ctrl.jFreqBand.getSelectedItem());
+    b = i_bands();  k = find(strcmpi(b(:,1), sel), 1);
+    if isempty(k), return; end                                 % 'custom' -> leave fields as typed
+    lo = b{k,2}(1);  hi = b{k,2}(2);
+    ctrl.jFreqC.setText(num2str((lo+hi)/2));  ctrl.jFreqW.setText(num2str((hi-lo)/2));
+end
+function nm = i_freq_name(ctrl)
+    nm = '';
+    if isfield(ctrl,'jFreqBand') && ~isempty(ctrl.jFreqBand), nm = char(ctrl.jFreqBand.getSelectedItem()); end
+    if strcmpi(nm,'custom'), nm = ''; end
 end
 
 
@@ -277,42 +372,10 @@ function T = i_remove_band(T, bandName)
 end
 
 
-%% ===== SPACE controls -> drive the linked Helmholtz figure (view_helmholtz verbs) =====
-function OnSpaceSmooth()
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || isempty(st.Lambda) || ~ishandle(st.hFig), return; end
-    name   = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
-    params = panel_eigenfilter_design('ReadParams', ctrl.jSpaceParams, st.Lambda);
-    view_helmholtz('SetSmoothing', st.hFig, ctrl.jSpaceSmoothOn.isSelected(), name, params);
-    st.curScale = struct('on',ctrl.jSpaceSmoothOn.isSelected(), 'name',name, 'params',params);
-    setappdata(0, 'DynamicsTarget', st);
-end
-function OnSpaceKernel()
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || isempty(st.Lambda), return; end
-    key = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
-    panel_eigenfilter_design('BuildSliders', ctrl.jSpaceParams, key, st.Lambda, @() OnSpaceSmooth());
-    OnSpaceSmooth();
-end
-function OnSpaceComp(which)
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
-    if strcmp(which, 'Irrot')
-        if ctrl.jSpacePot.isSelected(), ctrl.jSpaceStr.setSelected(false); name = 'Irrot'; else, name = 'Total'; end
-    else
-        if ctrl.jSpaceStr.isSelected(), ctrl.jSpacePot.setSelected(false); name = 'Solen'; else, name = 'Total'; end
-    end
-    view_helmholtz('SetComponent', st.hFig, name);
-    st.curOp = name;  setappdata(0, 'DynamicsTarget', st);   % the atom's operator coordinate
-end
+%% ===== shared panel/target accessor =====
 function [ctrl, st] = i_cs()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
-end
-function i_space_enable(ctrl, tf)
-    for f = {'jSpaceSmoothOn','jSpaceKernel','jSpacePot','jSpaceStr'}
-        if isfield(ctrl, f{1}) && ~isempty(ctrl.(f{1})), ctrl.(f{1}).setEnabled(tf); end
-    end
 end
 
 
@@ -508,27 +571,16 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
-        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1]));
-    SetupSpace(hFig);
-    BuildTree();
-end
-
-
-%% ===== SPACE controls: bind to the linked Helmholtz figure (or disable) =====
-function SetupSpace(hFig)
-    ctrl = bst_get('PanelControls', 'Dynamics');
-    st   = getappdata(0, 'DynamicsTarget');
-    if isempty(ctrl) || ~isfield(ctrl, 'jSpaceParams'), return; end
-    St = [];
-    if ~isempty(hFig) && ishandle(hFig), St = getappdata(hFig, 'HelmholtzState'); end
-    if ~isempty(St) && isfield(St, 'Lambda') && ~isempty(St.Lambda)
-        st.Lambda = St.Lambda;  setappdata(0, 'DynamicsTarget', st);
-        key = panel_eigenfilter_design('CurrentKernel', ctrl.jSpaceKernel, ctrl.SpaceKernelKeys);
-        panel_eigenfilter_design('BuildSliders', ctrl.jSpaceParams, key, st.Lambda, @() OnSpaceSmooth());
-        i_space_enable(ctrl, true);
-    else
-        i_space_enable(ctrl, false);   % fallback surface (no source 3D) -> Space inert
+        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1], ...
+        'nav', bst_dynamics('NewGroup', 'cursor')));
+    % the scale driver needs the source eigenspectrum (Lambda) to build heat-kernel params
+    if ~isempty(hFig) && ishandle(hFig)
+        St = getappdata(hFig, 'HelmholtzState');
+        if ~isempty(St) && isfield(St,'Lambda') && ~isempty(St.Lambda)
+            st = getappdata(0, 'DynamicsTarget');  st.Lambda = St.Lambda;  setappdata(0, 'DynamicsTarget', st);
+        end
     end
+    BuildTree();
 end
 
 
