@@ -62,8 +62,16 @@ fileTag = '_pvc';
 
 % ===== PARSE INPUTS =====
 if nargin < 3 || isempty(fwhm)
-    errMsg = 'PSF FWHM is required for partial volume correction.';
-    return;
+    % No FWHM supplied: derive it from the PET metadata (scanner model + recon
+    % filter), falling back to a generic clinical value if the scanner is unknown.
+    PET = [];
+    try
+        w = load(file_fullpath(PetFile), 'PET');
+        if isfield(w, 'PET'), PET = w.PET; end
+    catch
+    end
+    [fwhm, fwhmSrc] = pet_scanner_fwhm(PET);
+    fprintf('BST> PET PVC: PSF FWHM = %.1f mm [%s]\n', fwhm, fwhmSrc);
 end
 % Expand scalar FWHM to 3D vector
 if isscalar(fwhm)

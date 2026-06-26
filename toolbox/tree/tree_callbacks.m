@@ -3436,12 +3436,21 @@ function PetPvc_Callback(PetFile, sSubject)
     else
         MriFileRef = sSubject.Anatomy(1).FileName;
     end
-    % Ask for FWHM
+    % Default FWHM from PET metadata (scanner model + recon filter); generic fallback
+    PET = [];
+    try
+        w = load(file_fullpath(PetFile), 'PET');
+        if isfield(w, 'PET'), PET = w.PET; end
+    catch
+    end
+    [defFwhm, fwhmSrc] = pet_scanner_fwhm(PET);
+    % Ask for FWHM (pre-filled from metadata)
     res = java_dialog('input', ...
-        ['<HTML>Enter the PSF FWHM in mm for partial volume correction.<BR>' ...
-         'This is the scanner resolution (e.g., 6 for most PET scanners).<BR><BR>' ...
+        ['<HTML>PSF FWHM in mm for partial volume correction.<BR>' ...
+         'Default from scanner metadata: <B>' num2str(defFwhm) ' mm</B> &nbsp;(' fwhmSrc ').<BR>' ...
+         'Override only if you know the effective resolution differs.<BR><BR>' ...
          'PSF FWHM (mm):'], ...
-        'Partial Volume Correction', [], '6');
+        'Partial Volume Correction', [], num2str(defFwhm));
     if isempty(res)
         return;
     end
