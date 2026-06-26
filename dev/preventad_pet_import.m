@@ -206,8 +206,12 @@ function MriFileOut = local_save_anat(iSubject, RefFile, sMri)
 % with a unique comment. Mirrors the save pattern of mri_realign/mri_coregister.
     sSubject = bst_get('Subject', iSubject);
     sMri.Comment = file_unique(sMri.Comment, {sSubject.Anatomy.Comment});
-    [folder] = bst_fileparts(file_fullpath(RefFile));
-    MriFileFull = file_unique(bst_fullfile(folder, ['subjectimage_' file_standardize(sMri.Comment) '.mat']));
+    folder = bst_fileparts(file_fullpath(RefFile));
+    % The GUI tree types a volume as PET (node 'volpet', with the PET processing
+    % options) PURELY from the '_volpet' tag in its FILENAME (node_create_subject);
+    % there is no struct field. Keep that tag so the registered 4D base is recognized
+    % as PET, not a plain MRI. The Comment stays the clean "PET <tracer>".
+    MriFileFull = file_unique(bst_fullfile(folder, ['subjectimage_' file_standardize(sMri.Comment) '_volpet.mat']));
     out_mri_bst(sMri, MriFileFull);
     iAnatomy = length(sSubject.Anatomy) + 1;
     sSubject.Anatomy(iAnatomy) = db_template('Anatomy');
