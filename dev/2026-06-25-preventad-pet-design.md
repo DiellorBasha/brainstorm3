@@ -1,6 +1,27 @@
 # PREVENT-AD PET import — register to existing MEG anatomy
 
-**Date:** 2026-06-25   **Status:** DRAFTED, ON HOLD (run tomorrow after MEG batch)
+**Date:** 2026-06-25 (rev 2026-06-26)   **Status:** IMPLEMENTED + validated (4D base)
+
+## 2026-06-26 REWORK — 4D registered base (current design)
+
+`dev/preventad_pet_import.m` now produces, per tracer, the **4D dynamic PET volume
+registered + resliced to the subject's T1** as the BASE PET data — no averaging, no
+SUVR, no surface projection. Pipeline per tracer:
+`import_mri (4D)` → `mri_realign(..., 'ignore')` (keep all frames) →
+`mri_coregister(..., 'spm', 1)` (4D estimate + frame-wise mri_reslice) → label the
+result **`PET <tracer>`** (like the original BIDS file) → delete the raw import.
+Realign + coregister run on in-memory STRUCTS, so no intermediate DB nodes are
+created (only the raw import, which is then removed). Validated on sub-MTL0005:
+`PET 18FNAV4694` [256x256x256x6] + `PET 18Fflortaucipir` [256x256x256x4] on the T1
+grid; integral conserved across all frames.
+⚑ Required a fix to `toolbox/anatomy/mri_coregister.m` (4D path): SPM's own reslice
+of the "other" frames silently dropped ~58% of every non-first frame; now
+SPM-estimate + mri_reslice (committed b81b4f84). SUVR / masking / surface projection
+are NO LONGER part of the import — they become downstream steps on the 4D base.
+
+---
+
+## Original design (2026-06-25, SUVR-based — SUPERSEDED by the 4D rework above)
 
 ## Goal
 

@@ -1,18 +1,20 @@
 function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
-% PREVENTAD_PET_IMPORT: Import + process PREVENT-AD PET volumes for ONE subject into
-% the EXISTING Brainstorm subject of the same name (registering PET to the SAME
-% FreeSurfer/ico5 anatomy already imported by the MEG pipeline).
+% PREVENTAD_PET_IMPORT: Import PREVENT-AD PET as a 4D (dynamic) volume registered and
+% resliced to the subject's T1 - the faithful BASE PET data (no averaging, no SUVR).
 %
-% For the matched subject this:
-%   1. resolves the existing subject (must already exist from the MEG import) and
-%      its structural T1 + ASEG volume atlas,
-%   2. for each PET tracer volume (BIDS trc-* under ses-*/pet/):
-%        import_mri (as PET) -> mri_realign (frames -> mean) ->
-%        mri_coregister (to the subject T1) -> pet_process (SUVR + surface).
+% For each tracer of the matched (already-imported) subject, this:
+%   1. imports the original dynamic 4D PET volume (all frames),
+%   2. motion-corrects the frames with SPM realign (no aggregation: frames kept),
+%   3. coregisters + reslices ALL frames to the subject's FreeSurfer T1
+%      (mri_coregister 4D path: SPM estimate + frame-wise mri_reslice),
+%   4. labels the result simply "PET <tracer>" (like the original BIDS file) and
+%      DELETES the raw/realigned intermediates (which are not usable in Brainstorm
+%      without registration). Realign + coregister run on in-memory structs, so no
+%      intermediate DB nodes are created.
 %
-% PET volumes attach to the subject's anatomy, so the surface-projected SUVR lands
-% on the SAME ico5 cortex as the MEG/Dirac source maps (per-subject MEG<->amyloid<->tau
-% fusion on a shared mesh). No anatomy is (re)imported.
+% The result is a 4D, T1-registered, resliced PET volume per tracer - viewable
+% frame-by-frame and a faithful base for any downstream PET analysis (SUVR, PVC,
+% surface projection) computed separately. No anatomy is (re)imported.
 %
 % USAGE:  Out = preventad_pet_import(BidsPetDir, 'sub-MTL0002')
 %         Out = preventad_pet_import(BidsPetDir, 'sub-MTL0002', Opts)
@@ -22,29 +24,20 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
 %   SubjectName: BIDS subject id, e.g. 'sub-MTL0002' (must already exist in the
 %                'preventad' protocol with FreeSurfer anatomy).
 %   Opts (all optional; defaults shown):
-%       .AtlasName   'ASEG'        anatomy Comment of the volume atlas for SUVR/mask
-%       .RefROI      'Cerebellum'  SUVR reference region (amyloid & tau: cerebellar)
-%       .MaskROI     'Brainmask'   masking ROI (used when ApplyMask=1)
-%       .ApplyMask   1             apply the brain mask
-%       .DoProject   1             project SUVR to the cortex surface
-%       .DoSUVR      1             run pet_process (SUVR); 0 = stop after coregister
-%       .Aggregation 'mean'        dynamic-frame aggregation (mri_realign)
-%       .CoregMethod 'spm'         mri_coregister method
+%       .Aggregation       'ignore'  frame aggregation for mri_realign; 'ignore'
+%                                     keeps all frames (4D base). Use 'mean' etc. to
+%                                     collapse instead.
+%       .CoregMethod       'spm'     mri_coregister method
+%       .KeepIntermediates 0         if 1, keep the raw + realigned volumes too
 %
 % OUTPUT:
-%   Out : struct array (one per processed tracer) with fields
-%         .Subject .Tracer .Imported .Aggregated .Coregistered .Suvr .Surface .Skipped
+%   Out : struct array (one per tracer) with fields .Subject .Tracer .Base .Skipped
 %
-% NOTE (verify once, after the MEG batch): SUVR needs an ASEG *_volatlas on the
-% subject. The MEG import used process_import_bids (icosphere); confirm that path
-% set isVolumeAtlas so the ASEG atlas exists, else pet_process errors here.
-%
-% SEE ALSO: tutorial_pet_processing, import_mri, mri_realign, mri_coregister, pet_process
+% SEE ALSO: import_mri, mri_realign, mri_coregister
 %
 % Author: Diellor Basha, 2026
 
-    Out = struct('Subject',{},'Tracer',{},'Imported',{},'Aggregated',{}, ...
-                 'Coregistered',{},'Suvr',{},'Surface',{},'Skipped',{});
+    Out = struct('Subject',{},'Tracer',{},'Base',{},'Skipped',{});
 
     % ---- defaults ----
     if (nargin < 1) || isempty(BidsPetDir)
@@ -54,8 +47,7 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         error('SubjectName is required (e.g. ''sub-MTL0002'').');
     end
     if (nargin < 3) || isempty(Opts), Opts = struct(); end
-    Def = struct('AtlasName','ASEG', 'RefROI','Cerebellum', 'MaskROI','Brainmask', ...
-                 'ApplyMask',1, 'DoProject',1, 'DoSUVR',1, 'Aggregation','mean', 'CoregMethod','spm');
+    Def = struct('Aggregation','ignore', 'CoregMethod','spm', 'KeepIntermediates',0);
     fn = fieldnames(Def);
     for i = 1:numel(fn)
         if ~isfield(Opts, fn{i}) || isempty(Opts.(fn{i})), Opts.(fn{i}) = Def.(fn{i}); end
@@ -75,30 +67,19 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         gui_brainstorm('SetCurrentProtocol', iProtocol);
     end
 
-    % ---- resolve the EXISTING subject (matched by name) ----
+    % ---- resolve the EXISTING subject + its T1 ----
     [sSubject, iSubject] = bst_get('Subject', SubjectName);
     if isempty(iSubject) || isempty(sSubject) || isempty(sSubject.Anatomy)
         error(['Subject "%s" not found (or has no anatomy) in protocol "%s". ' ...
                'PET registers to the EXISTING MEG anatomy; import MEG first.'], SubjectName, ProtocolName);
     end
-
-    % ---- structural T1 (reference for coregistration) ----
-    MriFile = local_find_t1(sSubject);
-    if isempty(MriFile)
+    T1file = local_find_t1(sSubject);
+    if isempty(T1file)
         error('Could not identify the structural T1 anatomy for "%s".', SubjectName);
     end
+    sT1 = in_mri_bst(T1file);
 
-    % ---- ASEG volume atlas presence (needed by pet_process) ----
-    if Opts.DoSUVR
-        iAtlas = find(strcmpi({sSubject.Anatomy.Comment}, Opts.AtlasName), 1);
-        if isempty(iAtlas)
-            error(['Volume atlas "%s" not found for "%s" (needed for SUVR). ' ...
-                   'Confirm the FreeSurfer ASEG atlas was imported (isVolumeAtlas), ' ...
-                   'or set Opts.DoSUVR=0.'], Opts.AtlasName, SubjectName);
-        end
-    end
-
-    % ---- discover PET tracer volumes (BIDS ses-*/pet/*_pet.nii.gz) ----
+    % ---- discover PET tracer volumes ----
     petFiles = local_list_pet(BidsPetDir, SubjectName);
     if isempty(petFiles)
         error('No PET volumes found under %s/%s/ses-*/pet/.', BidsPetDir, SubjectName);
@@ -106,42 +87,45 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
 
     % ---- process each tracer ----
     for k = 1:numel(petFiles)
-        petFile = petFiles{k};
-        tracer  = local_tracer_tag(petFile);
+        petFile  = petFiles{k};
+        tracer   = local_tracer_tag(petFile);
+        baseName = ['PET ' tracer];
 
-        % idempotency: skip if a SUVR output for this tracer already exists
-        [sSubject] = bst_get('Subject', iSubject);   % refresh (anatomy grows per tracer)
-        if local_already_done(sSubject, tracer)
+        % idempotency: skip if the 4D base already exists for this tracer
+        sSubject = bst_get('Subject', iSubject);
+        if any(strcmp({sSubject.Anatomy.Comment}, baseName))
             o = local_rec(SubjectName, tracer); o.Skipped = true;
             Out(end+1) = o; %#ok<AGROW>
-            bst_progress('text', sprintf('PET %s / %s: already processed, skipping', SubjectName, tracer));
+            bst_progress('text', sprintf('PET %s / %s: base already exists, skipping', SubjectName, tracer));
             continue;
         end
 
-        bst_progress('text', sprintf('PET %s / %s: import', SubjectName, tracer));
-        % import_mri needs 'PET' in the Comment to set volType=PET (display); also carries the tracer
-        Comment = ['PET ' tracer];
-        impFile = import_mri(iSubject, petFile, [], 0, 0, Comment);
+        % 1) import the raw dynamic 4D volume (DB node, removed below unless kept)
+        bst_progress('text', sprintf('PET %s / %s: import (4D)', SubjectName, tracer));
+        impFile = import_mri(iSubject, petFile, [], 0, 0, [baseName ' (raw)']);
+        sImp = in_mri_bst(impFile);
 
-        bst_progress('text', sprintf('PET %s / %s: realign+aggregate', SubjectName, tracer));
-        aggFile = mri_realign(impFile, 'spm_realign', 0, Opts.Aggregation);
+        % 2) realign frames (keep all frames; in-memory struct -> not saved)
+        bst_progress('text', sprintf('PET %s / %s: realign frames', SubjectName, tracer));
+        sAgg = mri_realign(sImp, 'spm_realign', 0, Opts.Aggregation);
 
-        bst_progress('text', sprintf('PET %s / %s: coregister to T1', SubjectName, tracer));
-        coregFile = mri_coregister(aggFile, MriFile, Opts.CoregMethod, 1);
-
-        suvrFile = ''; surfFile = '';
-        if Opts.DoSUVR
-            bst_progress('text', sprintf('PET %s / %s: SUVR + surface', SubjectName, tracer));
-            [suvrFile, errMsg, surfFile] = pet_process(coregFile, Opts.AtlasName, ...
-                Opts.RefROI, Opts.MaskROI, Opts.ApplyMask, Opts.DoProject);
-            if ~isempty(errMsg)
-                error('pet_process failed for %s / %s: %s', SubjectName, tracer, errMsg);
-            end
+        % 3) coregister + reslice ALL frames to T1 (in-memory struct -> not saved)
+        bst_progress('text', sprintf('PET %s / %s: coregister 4D -> T1', SubjectName, tracer));
+        [~, errMsg, ~, sBase] = mri_coregister(sAgg, sT1, Opts.CoregMethod, 1);
+        if ~isempty(errMsg) || isempty(sBase)
+            local_delete_anat(iSubject, {impFile});   % drop the raw import on failure
+            error('Coregistration failed for %s / %s: %s', SubjectName, tracer, errMsg);
         end
 
+        % 4) drop intermediates, save the 4D base labeled like the original tracer
+        if ~Opts.KeepIntermediates
+            local_delete_anat(iSubject, {impFile});
+        end
+        sBase.Comment = baseName;
+        baseFile = local_save_anat(iSubject, T1file, sBase);
+
         o = local_rec(SubjectName, tracer);
-        o.Imported = impFile; o.Aggregated = aggFile; o.Coregistered = coregFile;
-        o.Suvr = suvrFile; o.Surface = surfFile; o.Skipped = false;
+        o.Base = baseFile; o.Skipped = false;
         Out(end+1) = o; %#ok<AGROW>
     end
 
@@ -151,13 +135,11 @@ end
 
 %% ===== helpers =====
 function o = local_rec(subj, tracer)
-    o = struct('Subject',subj, 'Tracer',tracer, 'Imported','', 'Aggregated','', ...
-               'Coregistered','', 'Suvr','', 'Surface','', 'Skipped',false);
+    o = struct('Subject',subj, 'Tracer',tracer, 'Base','', 'Skipped',false);
 end
 
 function MriFile = local_find_t1(sSubject)
-% Pick the structural T1: the anatomy that is NOT a volume atlas and NOT a PET/SUVR
-% volume. Prefer the subject's default anatomy (iAnatomy) when it qualifies.
+% Structural T1: anatomy that is not a volume atlas and not a PET/SUVR volume.
     MriFile = '';
     isCand = true(1, numel(sSubject.Anatomy));
     for i = 1:numel(sSubject.Anatomy)
@@ -181,13 +163,13 @@ function petFiles = local_list_pet(BidsPetDir, SubjectName)
     sesDirs = dir(fullfile(BidsPetDir, SubjectName, 'ses-*'));
     sesDirs = sesDirs([sesDirs.isdir]);
     if isempty(sesDirs)
-        sesDirs = struct('name', {''});   % allow pet/ directly under subject
+        sesDirs = struct('name', {''});
     end
     for s = 1:numel(sesDirs)
         petDir = fullfile(BidsPetDir, SubjectName, sesDirs(s).name, 'pet');
         f = dir(fullfile(petDir, '*_pet.nii.gz'));
         for i = 1:numel(f)
-            if strncmp(f(i).name, '._', 2), continue; end   % AppleDouble metadata
+            if strncmp(f(i).name, '._', 2), continue; end
             petFiles{end+1} = fullfile(petDir, f(i).name); %#ok<AGROW>
         end
     end
@@ -202,15 +184,35 @@ function tracer = local_tracer_tag(petFile)
     if ~isempty(tok), tracer = tok{1}; else, tracer = base; end
 end
 
-function tf = local_already_done(sSubject, tracer)
-% A tracer is "done" if some anatomy comment carries both the tracer tag and the
-% SUVR rescale tag ('rescaled', stamped by mri_rescale).
-    tf = false;
-    t = lower(tracer);
-    for i = 1:numel(sSubject.Anatomy)
-        cm = lower(sSubject.Anatomy(i).Comment);
-        if ~isempty(strfind(cm, t)) && ~isempty(strfind(cm, 'rescaled'))
-            tf = true; return;
+function local_delete_anat(iSubject, fileList)
+% Delete anatomy volume(s) from disk + DB (descending index, fix iAnatomy).
+    if isempty(fileList), return; end
+    fileList = cellfun(@file_short, fileList, 'UniformOutput', 0);
+    sSubject = bst_get('Subject', iSubject);
+    file_delete(cellfun(@file_fullpath, fileList, 'UniformOutput', 0), 1);
+    [~, iDel] = ismember(fileList, {sSubject.Anatomy.FileName});
+    iDel = sort(iDel(iDel > 0), 'descend');
+    for k = iDel(:)'
+        sSubject.Anatomy(k) = [];
+        if ~isempty(sSubject.iAnatomy) && (k < sSubject.iAnatomy)
+            sSubject.iAnatomy = sSubject.iAnatomy - 1;
         end
     end
+    bst_set('Subject', iSubject, sSubject);
+end
+
+function MriFileOut = local_save_anat(iSubject, RefFile, sMri)
+% Save an MRI struct as a new anatomy node next to a reference file (e.g. the T1),
+% with a unique comment. Mirrors the save pattern of mri_realign/mri_coregister.
+    sSubject = bst_get('Subject', iSubject);
+    sMri.Comment = file_unique(sMri.Comment, {sSubject.Anatomy.Comment});
+    [folder] = bst_fileparts(file_fullpath(RefFile));
+    MriFileFull = file_unique(bst_fullfile(folder, ['subjectimage_' file_standardize(sMri.Comment) '.mat']));
+    out_mri_bst(sMri, MriFileFull);
+    iAnatomy = length(sSubject.Anatomy) + 1;
+    sSubject.Anatomy(iAnatomy) = db_template('Anatomy');
+    sSubject.Anatomy(iAnatomy).FileName = file_short(MriFileFull);
+    sSubject.Anatomy(iAnatomy).Comment  = sMri.Comment;
+    bst_set('Subject', iSubject, sSubject);
+    MriFileOut = file_short(MriFileFull);
 end
