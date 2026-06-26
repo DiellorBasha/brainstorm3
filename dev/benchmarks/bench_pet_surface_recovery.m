@@ -149,10 +149,42 @@ function R = bench_pet_surface_recovery(SubjectName, Opts)
     % ===== REPORT (amyloid & tau, const pattern, at PSF=FWHM) =====
     local_print_table(M, Opts.FWHM);
 
+    % ===== PVC EXPERIMENT (a): Muller-Gartner recovery + FWHM sensitivity =====
+    % True PSF is Opts.FWHM; we PVC with the CORRECT FWHM and with over-specified
+    % values (4 mm, 6 mm = the old generic default) to show the over-correction risk
+    % on sharp HRRT data. Const field, mid-centered sampling.
+    StrueC = local_field('const', Vw);
+    ribbonFieldC = zeros(nVox,1);
+    for f = Dlift, ribbonFieldC = ribbonFieldC + Hget(f)*StrueC; end
+    assumedFwhms = unique([Opts.FWHM, 4.0, 6.0]);
+    P = struct('contrast',{},'method',{},'assumedFWHM',{},'RC',{},'biasMean',{},'RMSE',{});
+    smpD = [0 0.5 1]; smpW = [0.1 0.8 0.1];                 % benchmark-best mid-centered sampler
+    for ic = 1:numel(contrasts)
+        C = contrasts(ic);
+        volTrue = zeros(cubeSize);
+        volTrue(ribbonMask) = ribbonFieldC(ribbonMask) ./ ribbonW(ribbonMask);
+        volTrue(wmMask)  = C.WM;
+        volTrue(csfMask) = C.CSF;
+        volB = local_gauss3(volTrue, Opts.FWHM, voxsize);   % true-PSF blur
+        recN = local_sample(volB(:), Hget, smpD, smpW, nVert);
+        [rc,bm,~,rmse] = local_metrics(recN(valid), StrueC(valid));
+        P(end+1) = struct('contrast',C.name,'method','NoPVC','assumedFWHM',NaN,'RC',rc,'biasMean',bm,'RMSE',rmse); %#ok<AGROW>
+        for af = assumedFwhms
+            volP = local_mg_pvc(volB, ribbonMask, wmMask, cubeSize, voxsize, af);
+            recP = local_sample(volP(:), Hget, smpD, smpW, nVert);
+            [rc,bm,~,rmse] = local_metrics(recP(valid), StrueC(valid));
+            P(end+1) = struct('contrast',C.name,'method',sprintf('MG@%.1f',af),'assumedFWHM',af, ...
+                'RC',rc,'biasMean',bm,'RMSE',rmse); %#ok<AGROW>
+        end
+    end
+    R.pvc = P;
+    local_print_pvc(P, Opts.FWHM);
+
     % ===== FIGURES =====
     if Opts.DoFigures
         local_fig_bars(M, Opts, variants);
         local_fig_depthbias(figBias, thick_mm(valid), valid, Opts, variants);
+        local_fig_pvc(P, Opts);
         fprintf('Figures saved to %s\n', Opts.OutDir);
     end
 end
@@ -239,6 +271,59 @@ function [rc,bm,bs,rmse,rr] = local_metrics(rec, tru)
     rc = mean(rec)/mean(tru);
     bm = mean(b); bs = std(b); rmse = sqrt(mean(b.^2));
     cc = corrcoef(rec, tru); rr = cc(1,2);
+end
+
+function rec = local_sample(volVec, Hget, depths, w, nVert)
+    w = w/sum(w); rec = zeros(nVert,1);
+    for id = 1:numel(depths)
+        H = Hget(depths(id));
+        rec = rec + w(id) * ((H'*volVec) ./ max(full(sum(H,1))', eps));
+    end
+end
+
+function volP = local_mg_pvc(volB, ribbonMask, wmMask, cubeSize, voxsize, assumedFwhm)
+% Muller-Gartner voxelwise PVC (CSF zeroed): correct GM for WM spill-in and GM
+% spill-out using a Gaussian PSF at the ASSUMED FWHM. WM mean estimated from eroded WM.
+    wmEr = local_erode(wmMask, cubeSize, 2);
+    wmMean = mean(volB(wmEr));
+    if ~isfinite(wmMean), wmMean = mean(volB(wmMask)); end
+    wmImg = zeros(cubeSize); wmImg(wmMask) = wmMean;
+    spillin = local_gauss3(wmImg, assumedFwhm, voxsize);
+    gmFrac  = local_gauss3(reshape(double(ribbonMask), cubeSize), assumedFwhm, voxsize);
+    volP = volB;
+    volP(ribbonMask) = (volB(ribbonMask) - spillin(ribbonMask)) ./ max(gmFrac(ribbonMask), 0.1);
+end
+
+function m = local_erode(maskVec, cubeSize, r)
+    m = ~local_dilate(~maskVec, cubeSize, r);
+end
+
+function local_print_pvc(P, trueFwhm)
+    fprintf('\n=== PVC recovery (const field, true PSF=%.1f mm) ===\n', trueFwhm);
+    for cn = {'amyloid','tau'}
+        S = P(strcmp({P.contrast},cn{1}));
+        fprintf('-- %-7s  %-10s %7s %9s %8s\n', cn{1}, 'method','RC','biasMean','RMSE');
+        for i = 1:numel(S)
+            fprintf('            %-10s %7.3f %9.3f %8.3f\n', S(i).method, S(i).RC, S(i).biasMean, S(i).RMSE);
+        end
+    end
+end
+
+function local_fig_pvc(P, Opts)
+    methods = unique({P.method}, 'stable');
+    amy = nan(numel(methods),1); tau = nan(numel(methods),1);
+    for i = 1:numel(methods)
+        a = P(strcmp({P.contrast},'amyloid') & strcmp({P.method},methods{i}));
+        t = P(strcmp({P.contrast},'tau')     & strcmp({P.method},methods{i}));
+        if ~isempty(a), amy(i)=a.RC; end
+        if ~isempty(t), tau(i)=t.RC; end
+    end
+    f = figure('Visible','off','Position',[100 100 800 450]);
+    bar([amy tau]); set(gca,'XTick',1:numel(methods),'XTickLabel',methods);
+    hold on; yline(1,'k--','perfect recovery'); ylabel('Recovery coefficient'); ylim([0 1.35]);
+    legend({'amyloid','tau'},'Location','northwest');
+    title(sprintf('MG-PVC recovery vs assumed FWHM (true PSF=%.1f mm)', Opts.FWHM)); grid on;
+    print(f, fullfile(Opts.OutDir,'bench_pet_pvc_recovery.png'), '-dpng','-r120'); close(f);
 end
 
 function local_print_table(M, FWHM)
