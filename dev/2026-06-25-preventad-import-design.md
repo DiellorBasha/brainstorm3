@@ -82,9 +82,14 @@ Location: `dev/preventad_import.m` (dev scratch script, not a shipped tutorial).
      'free'`, nComponents=3) — matches the Dirac dSPM source space.
    - **NEW: Dirac dSPM** via `process_inverse_dirac` on the same head model
      (process defaults; also unconstrained 3-vector).
-7. Power maps — **standard dSPM only**: PSD → relative norm → project to default
-   anatomy → spatial smooth 3 → average → contact-sheet snapshot. Dirac dSPM
-   stops at the shared kernel.
+7. Power maps — **standard dSPM AND Dirac dSPM**: PSD (6 bands) → relative norm →
+   project to default anatomy → spatial smooth 3 → average → contact-sheet snapshot.
+   Standard runs on the per-file dSPM results directly; Dirac (a SHARED kernel,
+   DataFile='') requires resolving its per-recording LINK nodes first (process_psd
+   can't run on the bare shared kernel). Dirac PSD comment tagged `,Dirac` to keep
+   the two distinguishable (esp. in Group_analysis). [2026-06-26: Dirac added; the
+   first 66 imported subjects predate this and lack Dirac power maps -> backfill
+   them via a GUI process job.]
 8. Save report (display wrapped in try/catch: `bst_report('Open')` hits a removed
    JDK class `sun.misc.BASE64Encoder` on Apple silicon; the report .mat is still
    saved).

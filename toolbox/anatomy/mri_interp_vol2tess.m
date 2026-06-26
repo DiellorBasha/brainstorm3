@@ -121,9 +121,21 @@ vol2tess = cell(1, numel(SurfaceFiles)); % Use cell array to handle different ve
 cube2vec = double(sMriSrc.Cube(:,:,:,1));
 cube2vec = cube2vec(:);
 
+global GlobalData;
 for nSurf = 1:numel(SurfaceFiles)
     nVertices = size(sSurf{nSurf}.Vertices, 1);
-    tess2mri_interp = tess_interp_mri(SurfaceFiles{nSurf}, sMriRef);
+    % Surface<->MRI interpolation: compute once per surface and reuse within the
+    % session. tess_interp_mri only persists the matrix to the surface FILE; it does
+    % NOT refresh the in-memory (GlobalData) copy, so repeated projections in one
+    % session (e.g. successive PET tracers) would recompute the heavy [nVox x nVert]
+    % matrix. Populate GlobalData here so subsequent calls reuse it (mirrors
+    % bst_memory's GetTess2MriInterp accessor).
+    [~, iSurfMem] = bst_memory('LoadSurface', SurfaceFiles{nSurf});
+    tess2mri_interp = GlobalData.Surface(iSurfMem).tess2mri_interp;
+    if isempty(tess2mri_interp)
+        tess2mri_interp = tess_interp_mri(SurfaceFiles{nSurf}, sMriRef);
+        GlobalData.Surface(iSurfMem).tess2mri_interp = tess2mri_interp;
+    end
     ivol2tess = tess2mri_interp' * cube2vec;
     vWeights = sum(tess2mri_interp, 1);
     ivol2tess = ivol2tess ./ vWeights';

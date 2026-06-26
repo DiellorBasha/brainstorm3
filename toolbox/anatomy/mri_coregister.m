@@ -135,10 +135,18 @@ switch lower(Method)
         Mat = spm_get_space(V2.fname);
         spm_get_space(V2.fname, M*Mat);
         clear V2 I2 XYZ2
-        
+
+        % DYNAMIC (4D) volumes (e.g. dynamic PET): SPM's own reslice of the extra
+        % frames (the "other" field of a 4D NIfTI) silently corrupts every frame
+        % beyond the first. So for a 4D source we ESTIMATE the transform with SPM
+        % (frame 1 <-> ref; the frames are assumed already mutually aligned, e.g. by
+        % mri_realign) and reslice ALL frames afterwards with Brainstorm's
+        % 4D-capable mri_reslice. The 3D path keeps SPM's estimate+reslice unchanged.
+        isDynReslice = isReslice && (size(sMriSrc.Cube, 4) > 1);
+
         % Create coregistration batch
-        if isReslice
-            % Coregister: Estimate and reslice
+        if isReslice && ~isDynReslice
+            % Coregister: Estimate and reslice (3D, via SPM)
             bst_progress('text', 'Calling SPM batch...(Coregister: Estimate & Reslice)');
             matlabbatch{1}.spm.spatial.coreg.estwrite.ref      = {[NiiRefFile, ',1']};
             matlabbatch{1}.spm.spatial.coreg.estwrite.source   = {[NiiSrcFile, ',1']};
@@ -149,7 +157,8 @@ switch lower(Method)
             % Output file
             NiiRegFile = bst_fullfile(TmpDir, 'rspm_src.nii');
         else
-            % Coregister: Estimate
+            % Coregister: Estimate only (estimate-only request, OR a 4D source whose
+            % frames are resliced below with mri_reslice). Updates the source header.
             bst_progress('text', 'Calling SPM batch...(Coregister: Estimate)');
             matlabbatch{1}.spm.spatial.coreg.estimate.ref      = {[NiiRefFile, ',1']};
             matlabbatch{1}.spm.spatial.coreg.estimate.source   = {[NiiSrcFile, ',1']};
@@ -171,6 +180,18 @@ switch lower(Method)
                 bst_progress('stop');
             end
             return;
+        end
+        % 4D: reslice EVERY frame to the reference grid with mri_reslice (the SPM
+        % estimate above baked the coregistration transform into the source header /
+        % vox2ras, so a vox2ras reslice lands the frames in reference space).
+        if isDynReslice
+            [sMriReg, errMsg] = mri_reslice(sMriReg, sMriRef, 'vox2ras', 'vox2ras', isAtlas);
+            if ~isempty(errMsg)
+                if ~isProgress
+                    bst_progress('stop');
+                end
+                return;
+            end
         end
         % Delete the temporary files
         file_delete(TmpDir, 1, 1);

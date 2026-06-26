@@ -298,7 +298,8 @@ sSrcRestDirac = bst_process('CallProcess', 'process_inverse_dirac', sFilesRest, 
     'sensortypes', 'MEG');
 
 
-%% ===== POWER MAPS (standard dSPM only) =====
+%% ===== POWER MAPS (standard dSPM + Dirac dSPM) =====
+% --- Standard dSPM ---
 % Process: Power spectrum density (Welch)
 sSrcPsd = bst_process('CallProcess', 'process_psd', sSrcRest, [], ...
     'timewindow',  [0, 100], ...
@@ -346,6 +347,74 @@ if DoSnapshots && ~isempty(sSrcPsdAvg)
     hFigContact = view_contactsheet(hFig, 'freq', 'fig');
     bst_report('Snapshot', hFigContact, sSrcPsdAvg.FileName, 'Power');
     close([hFig, hFigContact]);
+end
+
+% --- Dirac dSPM ---
+% The Dirac inverse is a SHARED kernel (DataFile=''), so process_psd cannot run on
+% the bare kernel returned by the inverse - it needs the per-recording LINK nodes
+% (link|kernel|data) that db_links created. Resolve those from the rest studies.
+DiracLinkFiles = {};
+for iR = 1:numel(sFilesRest)
+    sStudyR = bst_get('AnyFile', sFilesRest(iR).FileName);
+    if isempty(sStudyR) || isempty(sStudyR.Result), continue; end
+    for iRes = 1:numel(sStudyR.Result)
+        fnR = sStudyR.Result(iRes).FileName;
+        if ~isempty(strfind(fnR, 'link|')) && ~isempty(strfind(fnR, 'DiracEig')) ...
+                && ~isempty(strfind(fnR, sFilesRest(iR).FileName))
+            DiracLinkFiles{end+1} = fnR; %#ok<AGROW>
+        end
+    end
+end
+
+if isempty(DiracLinkFiles)
+    fprintf('WARNING: No Dirac source links found; skipping Dirac power maps.\n');
+else
+    % Process: Power spectrum density (Welch) on the Dirac sources
+    sSrcPsdD = bst_process('CallProcess', 'process_psd', DiracLinkFiles, [], ...
+        'timewindow',  [0, 100], ...
+        'win_length',  4, ...
+        'win_overlap', 50, ...
+        'clusters',    {}, ...
+        'scoutfunc',   1, ...  % Mean
+        'edit',        struct(...
+             'Comment',         'Power,FreqBands,Dirac', ...
+             'TimeBands',       [], ...
+             'Freqs',           {{'delta', '2, 4', 'mean'; 'theta', '5, 7', 'mean'; 'alpha', '8, 12', 'mean'; 'beta', '15, 29', 'mean'; 'gamma1', '30, 59', 'mean'; 'gamma2', '60, 90', 'mean'}}, ...
+             'ClusterFuncTime', 'none', ...
+             'Measure',         'power', ...
+             'Output',          'all', ...
+             'SaveKernel',      0));
+
+    % Process: Spectrum normalization (relative power)
+    sSrcPsdNormD = bst_process('CallProcess', 'process_tf_norm', sSrcPsdD, [], ...
+        'normalize', 'relative', ...
+        'overwrite', 0);
+
+    % Process: Project on default anatomy: surface
+    sSrcPsdProjD = bst_process('CallProcess', 'process_project_sources', sSrcPsdNormD, [], ...
+        'headmodeltype', 'surface');  % Cortex surface
+
+    % Process: Spatial smoothing (3.00)
+    sSrcPsdProjD = bst_process('CallProcess', 'process_ssmooth_surfstat', sSrcPsdProjD, [], ...
+        'fwhm',      3, ...
+        'overwrite', 1);
+
+    % Process: Average: Everything
+    sSrcPsdAvgD = bst_process('CallProcess', 'process_average', sSrcPsdProjD, [], ...
+        'avgtype',   1, ...  % Everything
+        'avg_func',  1, ...  % Arithmetic average:  mean(x)
+        'weighted',  0, ...
+        'matchrows', 0, ...
+        'iszerobad', 0);
+
+    % Screen capture (guarded; skipped in headless batch)
+    if DoSnapshots && ~isempty(sSrcPsdAvgD)
+        hFigD = view_surface_data([], sSrcPsdAvgD.FileName);
+        set(hFigD, 'Position', [200 200 200 200]);
+        hFigContactD = view_contactsheet(hFigD, 'freq', 'fig');
+        bst_report('Snapshot', hFigContactD, sSrcPsdAvgD.FileName, 'Power (Dirac)');
+        close([hFigD, hFigContactD]);
+    end
 end
 
 

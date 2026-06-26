@@ -48,8 +48,16 @@ intermediates → artifact: detect cardiac(ECG)+blink(VEOG)+saccade(HEOG), remov
 cardiac∩blink, SSP cardiac/blink/saccade → **bad-segment detect → rename bad_** →
 noisecov(task-noise) → overlapping-spheres headmodel → **manifold (gauge=trivial)** →
 **dSPM UNCONSTRAINED** (`SourceOrient 'free'`) → **Dirac dSPM** (process_inverse_dirac,
-400 modes/hemi, tau 0.5) → power maps (standard dSPM only). Imports into EXISTING
-`preventad` protocol (never deletes it). Per subject ≈ 2 GB, ≈ 7-10 min.
+400 modes/hemi, tau 0.5) → power maps for **BOTH** standard dSPM and Dirac dSPM
+(PSD 6 bands → relative → project-to-default-anat → smooth3 → average). Imports into
+EXISTING `preventad` protocol (never deletes it). Per subject ≈ 2 GB, ≈ 7-10 min.
+
+⚑ **Dirac power maps added 2026-06-26** (AFTER the first 66 subjects imported) — the
+66 done subjects have standard-only power maps; the remaining 45 will get BOTH. User
+will backfill Dirac power maps for the 66 via a GUI process job. Implementation note:
+Dirac is a SHARED kernel (DataFile=''), so the script resolves its per-recording LINK
+nodes (link|...DiracEig...|data) from the rest studies before running process_psd
+(process_psd can't run on the bare shared kernel); Dirac PSD comment = 'Power,FreqBands,Dirac'.
 
 ## 4. HOW TO RESUME (local)
 
