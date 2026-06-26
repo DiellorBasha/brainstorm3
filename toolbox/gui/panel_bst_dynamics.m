@@ -411,6 +411,7 @@ function OnDetect() %#ok<DEFNU>
     i_detect_events(bandName, band, evt, markers);
     i_apply(st);                                                  % refresh tree (mirrors the detection events)
     [~, st] = i_cs();                                            % i_apply rewrote the target
+    st.detSel = []; setappdata(0, 'DynamicsTarget', st);        % clear any stale staged-window index
     i_focus_time(st, [evt(1,1), evt(2,1)]);                      % focus the FIRST detected window
     bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
 end
@@ -541,7 +542,7 @@ function OnClearDetection() %#ok<DEFNU>
     panel_record('UpdateEventsList');
     panel_record('ReplotEvents');                               % re-plot the (now cleared) markers; do NOT ReloadFigures (would reload events from disk)
     if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % discarding preview must not dirty the recording
-    [~, st] = i_cs();  if ~isempty(st), i_apply(st); end
+    [~, st] = i_cs();  if ~isempty(st), st.detSel = []; i_apply(st); end
 end
 
 
@@ -601,7 +602,7 @@ end
 function tf = i_owns_rec(st, hFig)
     global GlobalData; %#ok<TLEV>
     tf = false;
-    if isempty(hFig) || ~ishandle(hFig) || isempty(st.T.DataFile), return; end
+    if isempty(hFig) || ~ishandle(hFig) || isempty(st.T) || ~isfield(st.T,'DataFile') || isempty(st.T.DataFile), return; end
     [~,~,iDS] = bst_figures('GetFigure', hFig);
     if isempty(iDS) || isempty(GlobalData.DataSet(iDS).DataFile), return; end
     tf = file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile);
@@ -706,6 +707,8 @@ function st = i_freq_overlay_clear(st)
         catch
         end
         i_driving(false);
+    else
+        st.hSpec = [];                                           % null a stale (deleted) handle
     end
 end
 
@@ -724,7 +727,7 @@ function i_sync_freq(st, range)
     st.curBand = [lo hi];
     if strcmpi(nm,'custom'), st.curBandName = ''; else, st.curBandName = nm; end
     setappdata(0, 'DynamicsTarget', st);
-    % reflect the band name in the combobox (display); any cascade is idempotent and overlay-guarded
+    % reflect the band name in the combobox; an exact preset match snaps fields+strip to the standard band (magnetic-to-band), 'custom' keeps the dragged values; overlay re-drive is i_driving-guarded
     try, ctrl.jFreqBand.setSelectedItem(nm); catch, end %#ok<CTCH>
 end
 
@@ -1212,12 +1215,14 @@ function TreeSel_Callback()
             end
             st.detSel = [];
         elseif strcmp(info.kind, 'detwinroot')
+            st.detSel = [];
             evs = panel_record('GetEvents', [], 1);
             if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
                 i_focus_time(st, evs(info.g).times(:,1)');
                 st.detSel = [info.g, 1];
             end
         elseif strcmp(info.kind, 'detwin')
+            st.detSel = [];
             evs = panel_record('GetEvents', [], 1);
             if (info.g <= numel(evs)) && (info.w <= size(evs(info.g).times,2))
                 win = evs(info.g).times(:, info.w)';
