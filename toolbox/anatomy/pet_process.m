@@ -1,5 +1,5 @@
-function [MriFileOut, errMsg, SurfaceFileOut] = pet_process(PetFile, AtlasName, roiName, maskROI, applyMask, doProject)
-% PET_PROCESS: Script PET processing pipeline (SUVR rescale and/or masking) with minimal redundant saving.
+function [MriFileOut, errMsg, SurfaceFileOut] = pet_process(PetFile, AtlasName, roiName, maskROI, applyMask, doProject, pvcOpts)
+% PET_PROCESS: Script PET processing pipeline (PVC, SUVR rescale, masking) with minimal redundant saving.
 %
 % INPUTS:
 %   - PetFile   : PET file path
@@ -8,6 +8,9 @@ function [MriFileOut, errMsg, SurfaceFileOut] = pet_process(PetFile, AtlasName, 
 %   - maskROI   : Name of the ROI for masking (string, can be empty)
 %   - applyMask : Logical, true to apply mask, false otherwise
 %   - doProject : Logical, true to project PET to surface, false otherwise
+%   - pvcOpts   : (optional) Structure with PVC options (see pet_pvc.m)
+%                  If provided, PVC is applied before SUVR rescaling.
+%                  Required fields: .fwhm (PSF FWHM in mm)
 %
 % OUTPUTS:
 %   - MriFileOut    : Output MRI file path (string)
@@ -39,6 +42,9 @@ errMsg = '';
 if nargin < 6 || isempty(doProject)
     doProject = 0;
 end
+if nargin < 7
+    pvcOpts = [];
+end
 
 try
     % Get Subject for PET file
@@ -52,6 +58,26 @@ try
     % Load PET file in sMRI structure
     sMri = in_mri_bst(PetFile);
     orgComment = sMri.Comment;
+
+    % --- Partial Volume Correction (before SUVR) ---
+    if ~isempty(pvcOpts) && isfield(pvcOpts, 'fwhm') && pvcOpts.fwhm > 0
+        % Get reference MRI for tissue segmentation
+        if isfield(sSubject, 'iAnatomy') && ~isempty(sSubject.iAnatomy)
+            MriFileRef = sSubject.Anatomy(sSubject.iAnatomy).FileName;
+        else
+            MriFileRef = sSubject.Anatomy(1).FileName;
+        end
+        % Run PVC — saves corrected PET to database, returns new file path
+        [PvcFile, errMsgPvc] = pet_pvc(PetFile, MriFileRef, pvcOpts.fwhm, pvcOpts);
+        if ~isempty(errMsgPvc)
+            errMsg = ['PVC failed: ' errMsgPvc];
+            return;
+        end
+        % Continue processing with the PVC-corrected file
+        PetFile = PvcFile;
+        sMri = in_mri_bst(PetFile);
+        orgComment = sMri.Comment;
+    end
 
     % --- SUVR Rescale ---
     if ~isempty(roiName)

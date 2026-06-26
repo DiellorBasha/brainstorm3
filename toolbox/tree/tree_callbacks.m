@@ -3321,6 +3321,7 @@ function fcnPetProcessing(jPopup, sSubject, iAnatomy)
         % === PET PROCESSING ===
         AddSeparator(jMenu);
         gui_component('MenuItem', jMenu, [], 'Compute SUVR', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@gui_show_dialog, 'PET processing options', @panel_process_pet, 1, [], PetFile));
+        gui_component('MenuItem', jMenu, [], 'Partial volume correction', IconLoader.ICON_VOLPET, [], @(h,ev)PetPvc_Callback(PetFile, sSubject));
         gui_component('MenuItem', jMenu, [], 'Project volume to surface', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@mri_interp_vol2tess, PetFile, [], 'PET'));
     end
 end
@@ -3423,6 +3424,40 @@ function s = petBool(v)
         if v, s = 'yes'; else, s = 'no'; end
     elseif ischar(v),               s = v;
     else,                           s = 'n/a';
+    end
+end
+
+
+%% ===== PET PVC CALLBACK =====
+function PetPvc_Callback(PetFile, sSubject)
+    % Get reference MRI
+    if isfield(sSubject, 'iAnatomy') && ~isempty(sSubject.iAnatomy)
+        MriFileRef = sSubject.Anatomy(sSubject.iAnatomy).FileName;
+    else
+        MriFileRef = sSubject.Anatomy(1).FileName;
+    end
+    % Ask for FWHM
+    res = java_dialog('input', ...
+        ['<HTML>Enter the PSF FWHM in mm for partial volume correction.<BR>' ...
+         'This is the scanner resolution (e.g., 6 for most PET scanners).<BR><BR>' ...
+         'PSF FWHM (mm):'], ...
+        'Partial Volume Correction', [], '6');
+    if isempty(res)
+        return;
+    end
+    fwhm = str2double(res);
+    if isnan(fwhm) || fwhm <= 0
+        bst_error('FWHM must be a positive number.', 'PET PVC');
+        return;
+    end
+    % Run PVC
+    bst_progress('start', 'PET PVC', 'Running partial volume correction...');
+    [MriFilePvc, errMsg] = pet_pvc(PetFile, MriFileRef, fwhm);
+    bst_progress('stop');
+    if ~isempty(errMsg)
+        bst_error(errMsg, 'PET PVC');
+    else
+        disp(['BST> PVC corrected PET saved as: ' MriFilePvc]);
     end
 end
 
