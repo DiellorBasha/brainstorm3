@@ -664,6 +664,9 @@ function FigureMouseUpCallback(hFig, event)
         GraphSelection = getappdata(hFig, 'GraphSelection');
         if (length(GraphSelection) == 2) && (GraphSelection(1) == GraphSelection(2))
             SetTimeSelectionLinked(hFig, []);
+        elseif (length(GraphSelection) == 2) && all(isfinite(GraphSelection)) && ~isempty(getappdata(0, 'DynamicsTarget'))
+            % Bidirectional Dynamics focus: report a completed user time-selection to the panel.
+            try, panel_bst_dynamics('NotifySelection', hFig, 'time', GraphSelection); catch, end %#ok<CTCH>
         end
     end
     

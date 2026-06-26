@@ -740,6 +740,33 @@ function i_focus_time(st, win)
 end
 
 
+%% ===== TIME SYNC-BACK: a user edit of the Time Selection updates the panel (view -> panel) =====
+% Records the active focus window. If a STAGED detection window is selected (st.detSel),
+% rewrites that window's [onset offset] in the staged event (pre-save adjust). Never mutates
+% already-saved atoms.
+function i_sync_time(st, range)
+    st.focusTime = range;
+    setappdata(0, 'DynamicsTarget', st);
+    if ~isfield(st,'detSel') || isempty(st.detSel), return; end
+    ie = st.detSel(1);  w = st.detSel(2);
+    evs = panel_record('GetEvents', [], 1);
+    if (ie > numel(evs)) || (w > size(evs(ie).times,2)) || (size(evs(ie).times,1) ~= 2), return; end
+    global GlobalData; %#ok<TLEV>
+    iDS = panel_record('GetCurrentDataset');
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    sEvent = evs(ie);
+    sEvent.times(:, w) = sort(range(:));
+    i_driving(true);
+    try
+        panel_record('SetEvents', sEvent, ie);
+        panel_record('ReplotEvents');
+    catch
+    end
+    i_driving(false);
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged edit must not dirty the recording
+end
+
+
 %% ===== SYNC the Source block fields from the geodesic tool state =====
 function SyncSource() %#ok<DEFNU>
     [ctrl, st] = i_cs();
