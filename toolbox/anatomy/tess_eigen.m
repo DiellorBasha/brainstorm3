@@ -563,9 +563,12 @@ function local_registry_consistency(Op, isFace, isDirac)
     regFace  = isfield(P,'domain')     && strcmpi(P.domain, 'face');
     regQuat  = isfield(P,'field_type') && strcmpi(P.field_type, 'quaternion');
     if (regFace ~= logical(isFace)) || (regQuat ~= logical(isDirac))
+        id_str  = '?'; if isfield(P,'id'),         id_str  = P.id;         end
+        dom_str = '?'; if isfield(P,'domain'),     dom_str = P.domain;     end
+        ft_str  = '?'; if isfield(P,'field_type'), ft_str  = P.field_type; end
         warning('tess_eigen:registryMismatch', ...
             ['Operator registry (%s: domain=%s field_type=%s) disagrees with the ' ...
              'Variant-derived flags (isFace=%d isDirac=%d). nxr ids may have drifted.'], ...
-            P.id, P.domain, P.field_type, isFace, isDirac);
+            id_str, dom_str, ft_str, isFace, isDirac);
     end
 end
