@@ -205,6 +205,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         error('tess_eigen:badOperatorFile', ...
             'Operator file is missing Operator/Mass/GlobalVertices: %s', OperatorFile);
     end
+    local_registry_consistency(Op, isFace, isDirac);
 
     % --- nxr version for provenance ---
     nxrVer = '';
@@ -546,4 +547,25 @@ function [V, D] = bst_eigs_smallest(A, B, k, opts)
     [d, idx] = sort(d, 'ascend');
     V = V(:, idx);
     D = diag(d);
+end
+
+% ----------------------------------------------------------------------------
+function local_registry_consistency(Op, isFace, isDirac)
+% Guard: if the operator node carries nxr v0.2.0 registry metadata, verify its
+% domain / field-type agrees with the Variant-derived flags. Warn (never error)
+% on drift so a future nxr id repurpose is caught loudly without breaking the
+% solve. No-op when Registry is absent (old nodes / pre-registry binary).
+    if ~isfield(Op,'Registry') || isempty(Op.Registry) || ~isfield(Op.Registry,'Primary') ...
+            || isempty(Op.Registry.Primary)
+        return;
+    end
+    P = Op.Registry.Primary;
+    regFace  = isfield(P,'domain')     && strcmpi(P.domain, 'face');
+    regQuat  = isfield(P,'field_type') && strcmpi(P.field_type, 'quaternion');
+    if (regFace ~= logical(isFace)) || (regQuat ~= logical(isDirac))
+        warning('tess_eigen:registryMismatch', ...
+            ['Operator registry (%s: domain=%s field_type=%s) disagrees with the ' ...
+             'Variant-derived flags (isFace=%d isDirac=%d). nxr ids may have drifted.'], ...
+            P.id, P.domain, P.field_type, isFace, isDirac);
+    end
 end
