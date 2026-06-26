@@ -144,6 +144,7 @@ switch lower(structureName)
               'FaceAux',        [], ...   % Hodge-Face only: 1x2 struct(.ScalarMass [F x F], .GradFace [3F x F], .FaceNormal [F x 3]) for the Hodge lift
               'Frame',          [], ...   % Connection Laplacian only: 1x2 struct(.e1 [V x 3], .e2 [V x 3], .normal [V x 3]) -- canonical per-vertex tangent frame the complex eigenmodes decode in (field = real(U).*e1 + imag(U).*e2)
               'Cholesky',       [], ...   % lazy factor cache (tess_cholesky): 1x2 cell, dF=struct('L','p','free','n') of the pinned A=Operator{hh}; [] until first solve attaches it
+              'Registry',       [], ...   % nxr v0.2.0 operator-registry metadata: struct(.Primary <operatorInfo>, .Components <1xN operatorInfo>); [] if registry unavailable
               'Provenance',     []);
 
     case 'eigenmat'
