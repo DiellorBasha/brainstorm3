@@ -402,7 +402,15 @@ function FigureMouseUpCallback(hFig, event)
             DisplayFigurePopup(hFig);
         end
     end
-    
+    % Bidirectional Dynamics focus: report a completed user freq-selection to the Dynamics panel.
+    if hasMoved && ~isempty(getappdata(0, 'DynamicsTarget'))
+        TfInfo = getappdata(hFig, 'Timefreq');
+        GraphSelection = getappdata(hFig, 'GraphSelection');
+        if ~isempty(TfInfo) && strcmpi(TfInfo.DisplayMode,'Spectrum') && ~isempty(GraphSelection) && all(isfinite(GraphSelection))
+            try, panel_bst_dynamics('NotifySelection', hFig, 'freq', GraphSelection); catch, end %#ok<CTCH>
+        end
+    end
+
     % Reset MouseMove callbacks for current figure
     set(hFig, 'WindowButtonMotionFcn', []); 
     % Remove mouse callbacks appdata

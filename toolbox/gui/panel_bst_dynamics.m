@@ -241,9 +241,11 @@ function i_drive(axis, loc)
                 lo = loc.center - loc.extent;  hi = loc.center + loc.extent;
                 panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);
                 st.curBand = [lo hi];  st.curBandName = i_freq_name(ctrl);
+                st = i_freq_overlay(st, lo, hi);                 % ensure PSD + drive its freq selection
             else
                 panel_filter('SetFilters', 0, [], 0, [], 0, [], 0, 0);
                 st.curBand = [];  st.curBandName = '';
+                st = i_freq_overlay_clear(st);                   % clear the spectrum band strip
             end
         case 'source'
             % center/window are populated by the Region tool (Task 2 syncs them); nothing to drive here
@@ -408,6 +410,9 @@ function OnDetect() %#ok<DEFNU>
     % The events auto-render on the time series + mirror in the tree; Save converts them to atoms.
     i_detect_events(bandName, band, evt, markers);
     i_apply(st);                                                  % refresh tree (mirrors the detection events)
+    [~, st] = i_cs();                                            % i_apply rewrote the target
+    st.detSel = []; setappdata(0, 'DynamicsTarget', st);        % clear any stale staged-window index
+    i_focus_time(st, [evt(1,1), evt(2,1)]);                      % focus the FIRST detected window
     bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
 end
 
@@ -537,7 +542,7 @@ function OnClearDetection() %#ok<DEFNU>
     panel_record('UpdateEventsList');
     panel_record('ReplotEvents');                               % re-plot the (now cleared) markers; do NOT ReloadFigures (would reload events from disk)
     if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % discarding preview must not dirty the recording
-    [~, st] = i_cs();  if ~isempty(st), i_apply(st); end
+    [~, st] = i_cs();  if ~isempty(st), st.detSel = []; i_apply(st); end
 end
 
 
@@ -545,6 +550,223 @@ end
 function [ctrl, st] = i_cs()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
+end
+
+
+%% ===== BIDIRECTIONAL FOCUS: re-entrancy guard =====
+% True while the panel is DRIVING a figure selection (panel->view), so a redraw-triggered
+% hook cannot echo back (view->panel) and create a feedback loop.
+function tf = i_driving(varargin)
+    persistent FLAG;
+    if isempty(FLAG), FLAG = false; end
+    if (nargin >= 1), FLAG = logical(varargin{1}); end
+    tf = FLAG;
+end
+
+%% ===== NOTIFY SELECTION (view -> panel) =====
+% Called by figure_timeseries (axis='time') / figure_spectrum (axis='freq') on mouse-up
+% when the user edited a native selection box. range=[lo hi] in seconds (time) or Hz (freq).
+% No-op unless a Dynamics session owns the notifying figure and we are not mid-drive.
+function NotifySelection(hFig, axis, range) %#ok<DEFNU>
+    if i_driving(), return; end
+    st = getappdata(0, 'DynamicsTarget');
+    if isempty(st), return; end
+    if isempty(range) || (numel(range) < 2) || any(~isfinite(range)), return; end
+    range = sort(double(range(:)'));
+    switch axis
+        case 'freq'
+            if ~i_owns_spec(st, hFig), return; end
+            i_sync_freq(st, range);
+        case 'time'
+            if ~i_owns_rec(st, hFig), return; end
+            i_sync_time(st, range);
+    end
+end
+
+%% ===== FOCUS OWNERSHIP / FIGURE LOOKUP =====
+% The recording time-series figure for this Dynamics session (matches st.T.DataFile);
+% falls back to any DataTimeSeries figure (the time selection is linked across them anyway).
+function hFig = i_rec_figure(st)
+    global GlobalData; %#ok<TLEV>
+    hFig = [];
+    if isempty(st) || ~isfield(st,'T') || isempty(st.T) || isempty(st.T.DataFile), return; end
+    hAll = bst_figures('GetFiguresByType', {'DataTimeSeries'});
+    for h = hAll(:)'
+        [~,~,iDS] = bst_figures('GetFigure', h);
+        if ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).DataFile) && file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile)
+            hFig = h;  return;
+        end
+    end
+    if ~isempty(hAll), hFig = hAll(1); end
+end
+function tf = i_owns_rec(st, hFig)
+    global GlobalData; %#ok<TLEV>
+    tf = false;
+    if isempty(hFig) || ~ishandle(hFig) || isempty(st.T) || ~isfield(st.T,'DataFile') || isempty(st.T.DataFile), return; end
+    [~,~,iDS] = bst_figures('GetFigure', hFig);
+    if isempty(iDS) || isempty(GlobalData.DataSet(iDS).DataFile), return; end
+    tf = file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile);
+end
+function tf = i_owns_spec(st, hFig)
+    tf = isfield(st,'hSpec') && ~isempty(st.hSpec) && ishandle(st.hSpec) && isequal(double(st.hSpec), double(hFig));
+end
+
+%% ===== BAND MATCH: a [lo hi] range -> preset name or 'custom' =====
+function nm = i_band_match(lo, hi)
+    nm = 'custom';
+    b = i_bands();
+    for k = 1:size(b,1)
+        if (abs(b{k,2}(1) - lo) < 0.51) && (abs(b{k,2}(2) - hi) < 0.51), nm = b{k,1};  return; end
+    end
+end
+
+
+%% ===== PSD LIFECYCLE: find-or-open-or-compute the spectrum figure for this recording =====
+function hSpec = i_ensure_psd(st)
+    hSpec = [];
+    DataFile = st.T.DataFile;
+    if isempty(DataFile), return; end
+    % 1) already-open Spectrum figure for this recording?
+    hAll = bst_figures('GetFiguresByType', 'Spectrum');
+    for h = hAll(:)'
+        TfInfo = getappdata(h, 'Timefreq');
+        if isempty(TfInfo) || ~isfield(TfInfo,'FileName') || isempty(TfInfo.FileName), continue; end
+        [sTfStudy, ~, iTf] = bst_get('TimefreqFile', TfInfo.FileName);
+        if isempty(sTfStudy) || isempty(iTf) || (iTf == 0), continue; end
+        sTf = sTfStudy.Timefreq(iTf);
+        if ~isempty(sTf.DataFile) && file_compare(sTf.DataFile, DataFile)
+            hSpec = h;  i_fix_spec_xlim(hSpec);  return;
+        end
+    end
+    % 2) precomputed PSD timefreq file for this recording?
+    TfFile = i_find_psd_file(DataFile);
+    % 3) else compute one
+    if isempty(TfFile), TfFile = i_compute_psd(DataFile); end
+    if isempty(TfFile), return; end
+    try
+        hSpec = view_spectrum(TfFile, 'Spectrum');
+    catch
+        hSpec = [];  return;
+    end
+    i_fix_spec_xlim(hSpec);
+end
+
+% Fix the spectrum X-axis to 0-60 Hz (focus convention).
+function i_fix_spec_xlim(hSpec)
+    if isempty(hSpec) || ~ishandle(hSpec), return; end
+    hAxes = findobj(hSpec, '-depth', 1, 'Tag', 'AxesGraph');
+    if ~isempty(hAxes), try, set(hAxes, 'XLim', [0 60]); catch, end; end %#ok<CTCH>
+end
+
+% Find an existing PSD timefreq file associated with the recording (Comment contains "PSD").
+function TfFile = i_find_psd_file(DataFile)
+    TfFile = '';
+    sStudy = bst_get('AnyFile', DataFile);
+    if isempty(sStudy) || ~isfield(sStudy,'Timefreq') || isempty(sStudy.Timefreq), return; end
+    for i = 1:numel(sStudy.Timefreq)
+        sT = sStudy.Timefreq(i);
+        if ~isempty(sT.DataFile) && file_compare(sT.DataFile, DataFile) && ~isempty(regexpi(sT.Comment, 'PSD', 'once'))
+            TfFile = sT.FileName;  return;
+        end
+    end
+end
+
+% Compute an averaged magnitude PSD over the recording (MEG), return its timefreq file path.
+function TfFile = i_compute_psd(DataFile)
+    TfFile = '';
+    sIn = bst_process('GetInputStruct', DataFile);
+    if isempty(sIn), return; end
+    sOut = bst_process('CallProcess', 'process_psd', sIn, [], ...
+        'timewindow',  [], ...
+        'win_length',  4, ...
+        'win_overlap', 50, ...
+        'units',       'physical', ...
+        'sensortypes', 'MEG', ...
+        'win_std',     0, ...
+        'edit', struct('Comment','PSD: Dynamics focus', 'TimeBands',[], 'Freqs',[], ...
+                       'ClusterFuncTime','none', 'Measure','magnitude', 'Output','all', 'SaveKernel',0));
+    if ~isempty(sOut) && isfield(sOut,'FileName') && ~isempty(sOut(1).FileName), TfFile = sOut(1).FileName; end
+end
+
+
+%% ===== FREQ OVERLAY: drive the spectrum band strip (panel -> view) =====
+function st = i_freq_overlay(st, lo, hi)
+    hSpec = i_ensure_psd(st);
+    st.hSpec = hSpec;
+    if isempty(hSpec) || ~ishandle(hSpec), return; end
+    i_driving(true);
+    try, figure_spectrum('SetFreqSelection', hSpec, [lo hi]); catch, end %#ok<CTCH>
+    i_driving(false);
+end
+function st = i_freq_overlay_clear(st)
+    if isfield(st,'hSpec') && ~isempty(st.hSpec) && ishandle(st.hSpec)
+        i_driving(true);
+        try
+            setappdata(st.hSpec, 'GraphSelection', []);          % [] clears WITHOUT prompting (SetFreqSelection([]) would prompt)
+            figure_spectrum('DrawSelection', st.hSpec);
+        catch
+        end
+        i_driving(false);
+    else
+        st.hSpec = [];                                           % null a stale (deleted) handle
+    end
+end
+
+
+%% ===== FREQ SYNC-BACK: a user edit on the spectrum updates the panel (view -> panel) =====
+function i_sync_freq(st, range)
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl), return; end
+    lo = range(1);  hi = range(2);
+    if (hi - lo) < 1e-6, return; end
+    % reflect the dragged band in the panel fields
+    ctrl.jFreqC.setText(num2str((lo+hi)/2));
+    ctrl.jFreqW.setText(num2str((hi-lo)/2));
+    % apply the matching time-series bandpass directly (combo cascade may not fire if value is unchanged)
+    panel_filter('SetFilters', 1, hi, 1, lo, 0, [], 0, 1);
+    nm = i_band_match(lo, hi);
+    st.curBand = [lo hi];
+    if strcmpi(nm,'custom'), st.curBandName = ''; else, st.curBandName = nm; end
+    setappdata(0, 'DynamicsTarget', st);
+    % reflect the band name in the combobox; an exact preset match snaps fields+strip to the standard band (magnetic-to-band), 'custom' keeps the dragged values; overlay re-drive is i_driving-guarded
+    try, ctrl.jFreqBand.setSelectedItem(nm); catch, end %#ok<CTCH>
+end
+
+
+%% ===== TIME FOCUS: drive the recording's Time Selection box (panel -> view) =====
+function i_focus_time(st, win)
+    if isempty(win) || (numel(win) < 2) || any(~isfinite(win(1:2))), return; end
+    hRec = i_rec_figure(st);
+    if isempty(hRec) || ~ishandle(hRec), return; end
+    i_driving(true);
+    try, figure_timeseries('SetTimeSelectionManual', hRec, [win(1) win(2)]); catch, end %#ok<CTCH>
+    i_driving(false);
+end
+
+
+%% ===== TIME SYNC-BACK: a user edit of the Time Selection updates the panel (view -> panel) =====
+% Records the active focus window. If a STAGED detection window is selected (st.detSel),
+% rewrites that window's [onset offset] in the staged event (pre-save adjust). Never mutates
+% already-saved atoms.
+function i_sync_time(st, range)
+    st.focusTime = range;
+    setappdata(0, 'DynamicsTarget', st);
+    if ~isfield(st,'detSel') || isempty(st.detSel), return; end
+    ie = st.detSel(1);  w = st.detSel(2);
+    evs = panel_record('GetEvents', [], 1);
+    if (ie > numel(evs)) || (w > size(evs(ie).times,2)) || (size(evs(ie).times,1) ~= 2), return; end
+    global GlobalData; %#ok<TLEV>
+    iDS = panel_record('GetCurrentDataset');
+    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
+    sEvent = evs(ie);
+    sEvent.times(:, w) = sort(range(:));
+    i_driving(true);
+    try
+        panel_record('SetEvents', sEvent, ie);
+        panel_record('ReplotEvents');
+    catch
+    end
+    i_driving(false);
+    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged edit must not dirty the recording
 end
 
 
@@ -880,6 +1102,7 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
         'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1], ...
+        'hSpec',[], 'focusTime',[], 'detSel',[], ...
         'nav', bst_dynamics('NewGroup', 'cursor')));
     BuildTree();
 end
@@ -922,9 +1145,21 @@ function BuildTree()
             nodeList{end+1} = detNode;  nodeInfo(end+1) = struct('kind','detroot','g',0,'w',0); %#ok<AGROW>
             for ie = find(isDet)
                 e = evs(ie);
-                leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
-                detNode.add(leaf);
-                nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+                isWin = ~isempty(regexp(e.label, '\([0-9.]+-[0-9.]+ Hz\)$', 'once')) && (size(e.times,1) == 2);
+                if isWin
+                    winNode = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                    detNode.add(winNode);
+                    nodeList{end+1} = winNode;  nodeInfo(end+1) = struct('kind','detwinroot','g',ie,'w',0); %#ok<AGROW>
+                    for w = 1:size(e.times,2)
+                        leaf = DefaultMutableTreeNode(sprintf(' %.3f - %.3f s', e.times(1,w), e.times(2,w)));
+                        winNode.add(leaf);
+                        nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detwin','g',ie,'w',w); %#ok<AGROW>
+                    end
+                else
+                    leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                    detNode.add(leaf);
+                    nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+                end
             end
         end
     end
@@ -954,6 +1189,7 @@ function TreeSel_Callback()
     if ~isempty(info)
         st.curGroup = info.g;
         if strcmp(info.kind, 'stack') && (size(st.T.Groups(info.g).times,1) == 1) && ~isempty(st.T.Groups(info.g).vertices)
+            st.detSel = [];
             % simple (recorded) group: list ALL its atoms flat on the right
             [rows, occMap] = i_group_atoms(st.T, info.g);
             for k = 1:numel(rows), model.addElement(rows{k}); end
@@ -961,7 +1197,10 @@ function TreeSel_Callback()
             [rows, occMap] = i_window_atoms(st.T, info.g, info.w, i_field(st,'showPhase',[1 1 1 1]));
             for k = 1:numel(rows), model.addElement(rows{k}); end
             i_jump(st.T.Groups(info.g).times(1, info.w));   % selecting a window jumps to its onset
+            i_focus_time(st, st.T.Groups(info.g).times(:, info.w)');   % and focuses the [onset offset] box
+            st.detSel = [];                                  % saved window -> no staged-edit target
         elseif strcmp(info.kind, 'atom')
+            st.detSel = [];
             % single atom of a simple band group: list just it (and it is highlightable)
             G = st.T.Groups(info.g);
             if (info.w <= numel(G.vertices))
@@ -973,6 +1212,23 @@ function TreeSel_Callback()
             evs = panel_record('GetEvents', [], 1);
             if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
                 i_jump(evs(info.g).times(1,1));
+            end
+            st.detSel = [];
+        elseif strcmp(info.kind, 'detwinroot')
+            st.detSel = [];
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
+                i_focus_time(st, evs(info.g).times(:,1)');
+                st.detSel = [info.g, 1];
+            end
+        elseif strcmp(info.kind, 'detwin')
+            st.detSel = [];
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && (info.w <= size(evs(info.g).times,2))
+                win = evs(info.g).times(:, info.w)';
+                i_jump(win(1));
+                i_focus_time(st, win);
+                st.detSel = [info.g, info.w];   % remember for time-drag sync-back (Task 7)
             end
         end
     else

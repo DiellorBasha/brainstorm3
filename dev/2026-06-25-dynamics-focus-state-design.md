@@ -160,3 +160,29 @@ parieto-occipital ~10.55 Hz burst at ~22.6 s):
   selection (not on every panel interaction).
 - Hooks in `figure_timeseries`/`figure_spectrum` must be inert for all non-Dynamics
   users (guard on a Dynamics-target appdata check before any work).
+
+## 8. Validation (2026-06-25)
+
+Implemented via subagent-driven development (7 tasks, per-task spec+quality review).
+Controller end-to-end live validation on the raw `S01_AEF_01_notch` alpha recording
+(real GUI Dynamics session, PSD auto-computed) — **all paths pass, zero runtime errors**:
+
+- **Freq drive:** alpha preset → PSD spectrum opens, band strip exactly `[8 13]`,
+  X-axis `[0 60]`, `curBandName=alpha`.
+- **Freq sync-back:** simulated drag to `[18 24]` → panel fields center/half = 21/3,
+  combo flips to `custom`; the `i_driving` guard suppresses the echo (no loop).
+- **Time drive:** Detect found 62 alpha windows; the Time Selection box lands on the
+  first window `[0.453 0.890]`.
+- **Staged navigation:** the Atoms tree shows `detwinroot` + 62 per-window `detwin`
+  leaves; selecting a later window re-points the box (tree branch `i_jump`s first to
+  load the raw page, then focuses).
+- **Time sync-back:** dragging the box over a staged window rewrites that window's
+  `[onset offset]`; `focusTime` is recorded; the recording's `isModified` flag is
+  preserved (render-only, never dirties the file); the guard suppresses the echo.
+- **Inertness:** with no Dynamics session, the figure hooks no-op cleanly.
+
+**Known raw-recording nuance (minor):** `i_focus_time` snaps to the currently-loaded
+raw page; focusing a window in another page requires loading that page first. The tree
+selection branches do this (`i_jump` precedes `i_focus_time`); `OnDetect`'s first-window
+focus does not, which is harmless when the first window is on the initial page. Non-raw
+(imported/averaged) recordings are single-page and unaffected.
