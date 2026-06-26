@@ -3,8 +3,7 @@ function test_nxr_v020_registry_e2e()
 % id matches the expected mapping. Face/Covariant variants require the L/R
 % Structures atlas (present on FreeSurfer-imported cortex).
 
-    SurfaceFile = local_pick_cortex();
-    assert(~isempty(SurfaceFile), 'No cortex surface in the current protocol.');
+    SurfaceFile = bst_canonical_cortex(20484);   % ico5 canonical test cortex (has VertNormals)
 
     cases = { ...
         'Laplace-Beltrami',     'laplaceBeltrami'; ...
@@ -25,15 +24,3 @@ function test_nxr_v020_registry_e2e()
     fprintf('test_nxr_v020_registry_e2e: ALL PASS\n');
 end
 
-function SurfaceFile = local_pick_cortex()
-    SurfaceFile = '';
-    ProtocolSubjects = bst_get('ProtocolSubjects');
-    if isempty(ProtocolSubjects), return; end
-    allSubj = [ProtocolSubjects.Subject];
-    for i = 1:numel(allSubj)
-        S = allSubj(i);
-        if ~isfield(S,'Surface') || isempty(S.Surface), continue; end
-        k = find(strcmpi({S.Surface.SurfaceType}, 'Cortex'), 1);
-        if ~isempty(k), SurfaceFile = S.Surface(k).FileName; return; end
-    end
-end

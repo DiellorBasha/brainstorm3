@@ -3,9 +3,7 @@ function test_tess_operators_registry()
 % Picks the first cortex surface with a usable Structures atlas in the
 % current protocol; errors with guidance if none is loaded.
 
-    SurfaceFile = local_pick_cortex();
-    assert(~isempty(SurfaceFile), ...
-        'No cortex surface found in the current protocol — load a subject first.');
+    SurfaceFile = bst_canonical_cortex(20484);   % ico5 canonical test cortex (has VertNormals)
 
     Op = tess_operators(SurfaceFile, 'Laplace-Beltrami', 'NoSave', true);
     assert(isfield(Op,'Registry') && ~isempty(Op.Registry), 'Registry not populated');
@@ -22,15 +20,3 @@ function test_tess_operators_registry()
     fprintf('test_tess_operators_registry: ALL PASS\n');
 end
 
-function SurfaceFile = local_pick_cortex()
-    SurfaceFile = '';
-    ProtocolSubjects = bst_get('ProtocolSubjects');
-    if isempty(ProtocolSubjects), return; end
-    allSubj = [ProtocolSubjects.Subject];
-    for i = 1:numel(allSubj)
-        S = allSubj(i);
-        if ~isfield(S,'Surface') || isempty(S.Surface), continue; end
-        k = find(strcmpi({S.Surface.SurfaceType}, 'Cortex'), 1);
-        if ~isempty(k), SurfaceFile = S.Surface(k).FileName; return; end
-    end
-end
