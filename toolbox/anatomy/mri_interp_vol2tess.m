@@ -10,9 +10,10 @@ function [OutputFile, errorMsg] = mri_interp_vol2tess(MriFileSrc, MriFileRef, Co
 %    - MriFileRef : Reference MRI file
 %    - Condition  : Condition name for the projection
 %    - DisplayUnits:  Units of projected data for display
-%    - ProjFrac   : Weights for depth-weighted projection of data,
-%                   give as a 3-element vector for white matter, mid and 
-%                   pial surface, respectively (default: [0.1 0.8 0.1])
+%    - ProjFrac   : Weights for depth-weighted projection of data, given as a
+%                   3-element vector in the order [white, mid, pial] (i.e.
+%                   ProjFrac(1)->white surface, (2)->mid, (3)->pial).
+%                   Default [0.1 0.8 0.1] is symmetric (mid-weighted).
 %                 
 
 % @=============================================================================
@@ -114,8 +115,14 @@ sPial  = in_tess_bst(pialFile);
 sMid   = in_tess_bst(midFile);
 sWhite = in_tess_bst(whiteFile);
 
-SurfaceFiles = {pialFile, midFile, whiteFile};
-sSurf = {sPial, sMid, sWhite};
+% Order MUST match the documented ProjFrac order [white, mid, pial], because the
+% per-surface samples become the columns of vol2tess_mat and are weighted by
+% ProjFrac below. Previously this list was {pial, mid, white}, i.e. REVERSED vs the
+% docstring/callers, so an asymmetric ProjFrac (e.g. pet_process's [0.1 0.4 0.5],
+% meant as white/mid/pial) was applied to the wrong surfaces (0.5 landed on white,
+% not pial) - contaminating the cortical sample with white matter.
+SurfaceFiles = {whiteFile, midFile, pialFile};
+sSurf = {sWhite, sMid, sPial};
 vol2tess = cell(1, numel(SurfaceFiles)); % Use cell array to handle different vertex counts
 
 cube2vec = double(sMriSrc.Cube(:,:,:,1));
