@@ -191,26 +191,26 @@ function PlugDesc = GetSupported(SelPlug, UserDefVerbose)
 
     % === ANATOMY: NXR-COMPUTE (geometry compute backend) ===
     PlugDesc(end+1)              = GetStruct('nxr-compute');
-    PlugDesc(end).Version        = '0.1.0';
+    PlugDesc(end).Version        = '0.2.0';
     PlugDesc(end).Category       = 'Anatomy';
     PlugDesc(end).AutoUpdate     = 0;
     PlugDesc(end).AutoLoad       = 0;            % SPM-style install-on-demand
     PlugDesc(end).URLinfo        = 'https://github.com/neurodynamics-xr/nxr-compute';
     PlugDesc(end).ReadmeFile     = 'README.md';
     PlugDesc(end).CompiledStatus = 1;            % native code, download-only
-    % Release v0.1.0 ships multi-OS MEX zips organized by MATLAB track:
+    % Release v0.2.0 ships multi-OS MEX zips organized by MATLAB track:
     %   r2023a zip = Windows + Linux;  r2023b zip = Windows + Linux + macOS Apple Silicon.
     % Select the zip by MATLAB version; the macOS binary ships only in the r2023b zip.
-    nxrRel = 'https://github.com/neurodynamics-xr/nxr-compute/releases/download/v0.1.0/';
+    nxrRel = 'https://github.com/neurodynamics-xr/nxr-compute/releases/download/v0.2.0/';
     if (bst_get('MatlabVersion') >= 2302)   % R2023b or newer
-        nxrTrackZip = [nxrRel 'nxr-compute-mex-r2023b-v0.1.0.zip'];
+        nxrTrackZip = [nxrRel 'nxr-compute-mex-r2023b-v0.2.0.zip'];
     else                                    % R2023a
-        nxrTrackZip = [nxrRel 'nxr-compute-mex-r2023a-v0.1.0.zip'];
+        nxrTrackZip = [nxrRel 'nxr-compute-mex-r2023a-v0.2.0.zip'];
     end
     switch(OsType)
         case 'mac64arm'
             % macOS Apple Silicon binary ships only in the R2023b zip (needs MATLAB R2023b+)
-            PlugDesc(end).URLzip   = [nxrRel 'nxr-compute-mex-r2023b-v0.1.0.zip'];
+            PlugDesc(end).URLzip   = [nxrRel 'nxr-compute-mex-r2023b-v0.2.0.zip'];
             PlugDesc(end).TestFile = 'nxr_compute.mexmaca64';
         case 'win64'
             PlugDesc(end).URLzip   = nxrTrackZip;

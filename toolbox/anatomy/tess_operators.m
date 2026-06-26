@@ -437,6 +437,26 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     end
     OperatorMat.Provenance     = prov;
 
+    % --- nxr v0.2.0 operator-registry metadata (additive; guarded) ---
+    % Record the controlled-vocabulary descriptor of the assembled operator
+    % (Primary) and the operators it was built from (Components). Stays [] on a
+    % pre-registry nxr binary, so old/new binaries both work.
+    primaryId = bst_nxr_registry('idForVariant', Variant);
+    primMeta  = bst_nxr_registry('operator', primaryId);
+    if ~isempty(primMeta)
+        Reg = struct('Primary', primMeta, 'Components', []);
+        compIds = bst_nxr_registry('componentsForVariant', Variant);
+        compMeta = [];
+        for ci = 1:numel(compIds)
+            m = bst_nxr_registry('operator', compIds{ci});
+            if ~isempty(m)
+                if isempty(compMeta), compMeta = m; else, compMeta(end+1) = m; end %#ok<AGROW>
+            end
+        end
+        Reg.Components = compMeta;
+        OperatorMat.Registry = Reg;
+    end
+
     % --- save / register in DB ---
     if ~NoSave
         [sSubjectSave, iSubjectSave] = bst_get('SurfaceFile', SurfaceFile);
