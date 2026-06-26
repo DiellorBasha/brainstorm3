@@ -121,6 +121,12 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         if ~Opts.KeepIntermediates
             local_delete_anat(iSubject, {impFile});
         end
+        % Carry the PET metadata onto the surviving base node. Realign/coregister/
+        % reslice preserve the frame count, so the timing in sImp.PET stays valid;
+        % the raw import it was read from is deleted above.
+        if isfield(sImp, 'PET') && ~isempty(sImp.PET)
+            sBase.PET = sImp.PET;
+        end
         sBase.Comment = baseName;
         baseFile = local_save_anat(iSubject, T1file, sBase);
 
