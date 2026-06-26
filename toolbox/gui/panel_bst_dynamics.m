@@ -1115,9 +1115,21 @@ function BuildTree()
             nodeList{end+1} = detNode;  nodeInfo(end+1) = struct('kind','detroot','g',0,'w',0); %#ok<AGROW>
             for ie = find(isDet)
                 e = evs(ie);
-                leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
-                detNode.add(leaf);
-                nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+                isWin = ~isempty(regexp(e.label, '\([0-9.]+-[0-9.]+ Hz\)$', 'once')) && (size(e.times,1) == 2);
+                if isWin
+                    winNode = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                    detNode.add(winNode);
+                    nodeList{end+1} = winNode;  nodeInfo(end+1) = struct('kind','detwinroot','g',ie,'w',0); %#ok<AGROW>
+                    for w = 1:size(e.times,2)
+                        leaf = DefaultMutableTreeNode(sprintf(' %.3f - %.3f s', e.times(1,w), e.times(2,w)));
+                        winNode.add(leaf);
+                        nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detwin','g',ie,'w',w); %#ok<AGROW>
+                    end
+                else
+                    leaf = DefaultMutableTreeNode(sprintf('%s  (%d)', e.label, size(e.times,2)));
+                    detNode.add(leaf);
+                    nodeList{end+1} = leaf;  nodeInfo(end+1) = struct('kind','detevt','g',ie,'w',0); %#ok<AGROW>
+                end
             end
         end
     end
@@ -1147,6 +1159,7 @@ function TreeSel_Callback()
     if ~isempty(info)
         st.curGroup = info.g;
         if strcmp(info.kind, 'stack') && (size(st.T.Groups(info.g).times,1) == 1) && ~isempty(st.T.Groups(info.g).vertices)
+            st.detSel = [];
             % simple (recorded) group: list ALL its atoms flat on the right
             [rows, occMap] = i_group_atoms(st.T, info.g);
             for k = 1:numel(rows), model.addElement(rows{k}); end
@@ -1157,6 +1170,7 @@ function TreeSel_Callback()
             i_focus_time(st, st.T.Groups(info.g).times(:, info.w)');   % and focuses the [onset offset] box
             st.detSel = [];                                  % saved window -> no staged-edit target
         elseif strcmp(info.kind, 'atom')
+            st.detSel = [];
             % single atom of a simple band group: list just it (and it is highlightable)
             G = st.T.Groups(info.g);
             if (info.w <= numel(G.vertices))
@@ -1168,6 +1182,21 @@ function TreeSel_Callback()
             evs = panel_record('GetEvents', [], 1);
             if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
                 i_jump(evs(info.g).times(1,1));
+            end
+            st.detSel = [];
+        elseif strcmp(info.kind, 'detwinroot')
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && ~isempty(evs(info.g).times)
+                i_focus_time(st, evs(info.g).times(:,1)');
+                st.detSel = [info.g, 1];
+            end
+        elseif strcmp(info.kind, 'detwin')
+            evs = panel_record('GetEvents', [], 1);
+            if (info.g <= numel(evs)) && (info.w <= size(evs(info.g).times,2))
+                win = evs(info.g).times(:, info.w)';
+                i_jump(win(1));
+                i_focus_time(st, win);
+                st.detSel = [info.g, info.w];   % remember for time-drag sync-back (Task 7)
             end
         end
     else
