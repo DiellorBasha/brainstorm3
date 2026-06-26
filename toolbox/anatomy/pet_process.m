@@ -132,7 +132,12 @@ try
         % Use the subject's name as the condition
         Condition = 'PET';
         DisplayUnits = '';
-        ProjFrac = [0.1 0.4 0.5];
+        % Mid-centered depth profile [white mid pial] = [0.1 0.8 0.1]. The synthetic
+        % surface-recovery benchmark (dev/benchmarks/bench_pet_surface_recovery) shows
+        % a mid-dominant sample recovers cortical uptake best and is least sensitive to
+        % cortical thickness, whereas a pial- or white-skewed profile pulls in CSF or
+        % white-matter signal (the latter was the old reversed-order bug).
+        ProjFrac = [0.1 0.8 0.1];
         [SurfaceFileOut, errProj] = mri_interp_vol2tess(MriFileOut, refMriFile, Condition, DisplayUnits, ProjFrac);
         if ~isempty(errProj)
             errMsg = ['PET processed, but projection failed: ', errProj];
