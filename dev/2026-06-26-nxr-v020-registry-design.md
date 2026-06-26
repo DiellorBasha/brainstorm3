@@ -1,6 +1,28 @@
 # nxr-compute v0.2.0 upgrade + operator-registry adoption
 
-**Date:** 2026-06-26   **Branch:** `feature/nxr-v020-registry`   **Status:** SPEC (approved, pre-implementation)
+**Date:** 2026-06-26   **Branch:** `feature/nxr-v020-registry`   **Status:** IMPLEMENTED + live-validated 2026-06-26
+
+## Implementation status (2026-06-26)
+
+Implemented on `feature/nxr-v020-registry` and live-validated against the managed
+v0.2.0 install on the `preventad` protocol (ico5 canonical cortex). All six
+operator variants stamp the correct registry primary id
+(`laplaceBeltrami`, `leviCivitaConnectionLaplacian`, `relativeDirac`,
+`relativeFaceDirac`, `faceLaplacianGreenGauss`, `flatCovariantLaplacian`).
+Validation scripts (all green): `dev/tests/test_nxr_v020_smoke.m`,
+`test_bst_nxr_registry.m`, `test_operatormat_registry_field.m`,
+`test_tess_operators_registry.m`, `test_tess_eigen_registry_check.m`,
+`test_nxr_v020_registry_e2e.m`.
+
+Notes from validation:
+- ⚑ The published v0.2.0 `nxr_compute('version')` still returns the string
+  `"nxr-compute 0.1.0"` (hardcoded, not bumped upstream). Functionally v0.2.0 —
+  `operatorInfo`/`fieldInfo` (PR #5) are present. Cosmetic; bump in a future nxr release.
+- ⚑ Pre-existing (NOT this project): `tess_operators` `'Hodge-Face'` (the
+  `TessMat.VertNormals(vH(Floc(:,1)),:)` line) crashes with a cryptic index error
+  when the surface has empty `VertNormals` (e.g. the high-res `tess_cortex_*_high`
+  surfaces). Tests use `bst_canonical_cortex(20484)` (ico5, has VertNormals). Worth
+  a defensive guard in a separate change.
 
 ## Goal
 
