@@ -186,6 +186,19 @@ try
     % ===== EXPORT PET TO NIFTI =====
     bst_progress('text', 'Running partial volume correction...');
     PetNiiFile = bst_fullfile(TmpDir, 'pvc_pet.nii');
+    % The PET has been resliced onto the reference MRI grid, but it can still carry a
+    % STALE NIfTI vox2ras from the original (pre-reslice) PET. Exported as-is, the PET
+    % and the MRI-derived tissue maps then describe DIFFERENT world geometries, so
+    % PETPVE12 warns "images do not all have same orientation/voxel sizes", resamples
+    % onto another grid, and the corrected volume comes back misaligned with the
+    % T1/atlases. When the PET shares the reference voxel grid (the PVC pipeline always
+    % reslices the PET to the T1 first), export it with the reference geometry so both
+    % NIfTIs sit on one grid; the correction then stays voxel-aligned.
+    if isequal(size(sMriPet.Cube(:,:,:,1)), size(sMriRef.Cube(:,:,:,1))) && ...
+            isfield(sMriPet,'SCS') && isfield(sMriRef,'SCS') && ...
+            isequal(sMriPet.SCS.R, sMriRef.SCS.R) && isequal(sMriPet.SCS.T, sMriRef.SCS.T)
+        sMriPet.Header = sMriRef.Header;
+    end
     out_mri_nii(sMriPet, PetNiiFile);
 
     % ===== BUILD PETPVE12 JOB =====
