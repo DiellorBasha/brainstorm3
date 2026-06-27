@@ -27,7 +27,12 @@ function [TransfWorld, cost, info] = mri_bbregister(sMriPet, sMriRef, WhiteSurfF
 %   WhiteSurfFile: white (GM/WM) surface file, registered to sMriRef.
 %   TinitWorld   : 4x4 initial PET-world -> anat-world transform ([] = identity).
 %   Opts         : .SampleDist (mm, 1.5), .SubSample (max verts when no heat, 5000),
-%                  .Mslope (0.5), .HeatT (heat time, 0 = off), .FrameCombine ('mean'|'median').
+%                  .Mslope (0.5), .HeatT (heat time, 0 = off), .FrameCombine ('mean'|'median'),
+%                  .PialSurfFile ('' = derive from WhiteSurfFile), .GmFrac (0.6, GM sample
+%                  capped to this fraction of the cortical thickness so it stays inside the ribbon).
+%
+% The GM/WM sampling direction is anchored to the white->pial axis (NOT vertex normals): it is
+% unambiguously GM-ward, so the result is independent of any normal-winding convention.
 %
 % OUTPUTS:
 %   TransfWorld  : 4x4 refined PET-world -> anat-world rigid transform.
@@ -44,17 +49,25 @@ function [TransfWorld, cost, info] = mri_bbregister(sMriPet, sMriRef, WhiteSurfF
     if (nargin < 4), TinitWorld = []; end
     if isempty(TinitWorld), TinitWorld = eye(4); end
     if (nargin < 5) || isempty(Opts), Opts = struct(); end
-    Def = struct('SampleDist',1.5, 'SubSample',5000, 'Mslope',0.5, 'HeatT',0, 'FrameCombine','mean');
+    Def = struct('SampleDist',1.5, 'SubSample',5000, 'Mslope',0.5, 'HeatT',0, 'FrameCombine','mean', ...
+                 'PialSurfFile','', 'GmFrac',0.6);
     fn = fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i})||isempty(Opts.(fn{i})), Opts.(fn{i})=Def.(fn{i}); end; end
 
     % World units per millimetre (Brainstorm 'world' may be metres).
     p0 = cs_convert(sMriRef,'voxel','world',[1 1 1]); p1 = cs_convert(sMriRef,'voxel','world',[2 1 1]);
     wpm = norm(p1 - p0) / sMriRef.Voxsize(1);
 
-    % White surface: world vertices + consistent vertex normals.
+    % White surface vertices (world).
     sSurf = in_tess_bst(WhiteSurfFile);
     Vw = cs_convert(sMriRef,'scs','world', sSurf.Vertices);
-    Nw = local_vertnormals(Vw, sSurf.Faces);
+    % Radial direction ANCHORED TO ANATOMY: white->pial is unambiguously GM-ward (pial is
+    % always outside white), so the GM/WM sampling direction does NOT depend on any vertex-
+    % normal winding convention. This is critical: sampling inward (WM) vs outward (GM, then
+    % CSF) are different tissue transitions, and a flipped normal would silently corrupt them.
+    PialSurfFile = Opts.PialSurfFile; if isempty(PialSurfFile), PialSurfFile = strrep(WhiteSurfFile,'white','pial'); end
+    sPial = in_tess_bst(PialSurfFile);
+    Vp = cs_convert(sMriRef,'scs','world', sPial.Vertices);
+    Uvec = Vp - Vw; th = sqrt(sum(Uvec.^2,2)); u = Uvec ./ max(th,eps);   % GM-ward unit + ribbon thickness
 
     % Tangential heat smoother (needs the FULL surface; no subsampling when active).
     HS = [];
@@ -62,12 +75,14 @@ function [TransfWorld, cost, info] = mri_bbregister(sMriPet, sMriRef, WhiteSurfF
         HS = local_heat_setup(WhiteSurfFile, Opts.HeatT);
     elseif size(Vw,1) > Opts.SubSample
         sel = round(linspace(1, size(Vw,1), Opts.SubSample));
-        Vw = Vw(sel,:); Nw = Nw(sel,:);
+        Vw = Vw(sel,:); u = u(sel,:); th = th(sel);
     end
     d = Opts.SampleDist * wpm;
 
     S = struct();
-    S.gmW = Vw + d*Nw; S.wmW = Vw - d*Nw;
+    % GM sample toward pial but capped INSIDE the ribbon (never reaches CSF); WM just inside white.
+    S.gmW = Vw + min(d, Opts.GmFrac*th).*u;
+    S.wmW = Vw - d.*u;
     S.c = mean(Vw,1)'; S.wpm = wpm; S.Tinit = TinitWorld;
     S.sMriPet = sMriPet; S.PET = double(sMriPet.Cube); S.cubeSz = size(S.PET(:,:,:,1));
     S.HS = HS; S.FrameCombine = Opts.FrameCombine;
@@ -155,17 +170,6 @@ function I = local_interp(PET, vox, cubeSz)
     I = nan(size(vox,1),1);
     if any(ok), I(ok) = interpn(PET, vox(ok,1), vox(ok,2), vox(ok,3), 'linear', NaN); end
 end
-
-function N = local_vertnormals(V, F)
-    % cross(v3-v1, v2-v1) matches Brainstorm's face winding -> OUTWARD normals (verified
-    % against the stored VertNormals and the white->pial direction). The opposite order
-    % gives inward normals.
-    v1=V(F(:,1),:); v2=V(F(:,2),:); v3=V(F(:,3),:);
-    fn = cross(v3-v1, v2-v1, 2); nV = size(V,1); N = zeros(nV,3); idx = F(:);
-    for dd=1:3, N(:,dd) = accumarray(idx, repmat(fn(:,dd),3,1), [nV 1]); end
-    N = N ./ (sqrt(sum(N.^2,2))+eps);
-end
-
 
 %% ===== tangential (Laplace-Beltrami heat) smoothing of a per-vertex field =====
 function HS = local_heat_setup(WhiteSurfFile, t)
