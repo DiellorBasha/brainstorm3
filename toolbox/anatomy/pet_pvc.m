@@ -81,6 +81,13 @@ end
 if nargin < 4 || isempty(pvcOpts)
     pvcOpts = struct();
 end
+% ===== METHOD DISPATCH =====
+% GTM (regional Rousset) is a native path - corrects all regions, needs neither SPM nor
+% PETPVE12 (uses the subject's parcellation directly). MG (default) continues below.
+if isfield(pvcOpts, 'method') && strcmpi(pvcOpts.method, 'gtm')
+    [MriFilePvc, errMsg] = pet_gtm(PetFile, fwhm, pvcOpts);
+    return;
+end
 if ~isfield(pvcOpts, 'gmThresh')    || isempty(pvcOpts.gmThresh),    pvcOpts.gmThresh    = 0.5;         end
 if ~isfield(pvcOpts, 'csfZeroing')  || isempty(pvcOpts.csfZeroing),  pvcOpts.csfZeroing  = 1;           end
 if ~isfield(pvcOpts, 'wmcsfMethod') || isempty(pvcOpts.wmcsfMethod), pvcOpts.wmcsfMethod = 'threshold'; end
