@@ -239,10 +239,20 @@ end
 if isfield(sMriSrc, 'NCS')
     sMriReg.NCS = sMriRef.NCS;
 end
-if isfield(sMriRef, 'InitTransf') && ~isempty(sMriRef.InitTransf) && ismember('vox2ras', sMriRef.InitTransf(:,1))
+% The resliced volume now lives on the REFERENCE grid, so ALL of its geometry must
+% describe THAT grid. Inherit the reference's vox2ras (InitTransf) and NIfTI Header
+% unconditionally; if the reference has no explicit vox2ras, drop the source's so a
+% now-STALE transform is never exported to NIfTI (out_mri_nii trusts Header.nifti /
+% InitTransf for the vox2ras). Otherwise a volume resliced to a reference that lacks an
+% explicit vox2ras (e.g. a FreeSurfer T1) would keep the source's original oblique
+% vox2ras while its data sits on the reference grid - a header/data mismatch that breaks
+% any downstream NIfTI export (e.g. PET PVC tissue alignment).
+if isfield(sMriRef, 'InitTransf')
     sMriReg.InitTransf = sMriRef.InitTransf;
+elseif isfield(sMriReg, 'InitTransf')
+    sMriReg.InitTransf = [];
 end
-if isfield(sMriRef, 'Header') && isfield(sMriRef.Header, 'nifti') && isfield(sMriRef.Header.nifti, 'vox2ras') && ~isempty(sMriRef.Header.nifti.vox2ras)
+if isfield(sMriRef, 'Header')
     sMriReg.Header = sMriRef.Header;
 end
 % % Apply transformation: reference MRI => SPM/MNI => original MRI
