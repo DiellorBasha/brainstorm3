@@ -18,11 +18,18 @@ tau **0.60 +/- 0.41** (variable); MGX-GTM ceiling 0.88-0.90 +/- 0.05. So at the 
 level our MG tracks PETSurfer's MG well (pooled r=0.90, CCC=0.84) — the single-subject
 "compression" (sub-MTL0002 CCC 0.26) was NOT representative.
 
-**New finding — tau variability:** flortaucipir is much more variable than amyloid, with
-2/10 clear outliers (sub-MTL0020 r=-0.45, sub-MTL0039 r=0.36 vs PETSurfer MG). Suspects:
-flortaucipir off-target binding (choroid plexus/basal ganglia/meninges) interacting with
-SPM-Segment tissue maps, and/or coregistration on those specific tau scans. → *investigate
-the 2 outliers individually; off-target compartments argue for GTM (Baker 2017).*
+**Tau outliers ROOT-CAUSED (2026-06-26, systematic-debugging):** sub-MTL0020 & sub-MTL0039
+flortaucipir are NOT a PVC/GTM problem. Tracing the data flow: the discrepancy is present in
+the OBSERVED (pre-PVC) regional means and is TAU-SPECIFIC — same subject's amyloid observed vs
+PETSurfer observed r=0.93/0.97 (excellent) while tau = −0.13/0.48. PVC (MG & GTM) barely changes
+the pattern (exonerated); the extracerebral-split and the "atlas-like" gtmpvc look were red
+herrings (piecewise-constant GTM is universal). Confirmed visually (dev/benchmarks/diag_tau_coreg.png):
+0020's cortical-ribbon contour aligns with its AMYLOID PET but is shifted off its TAU PET.
+→ **ROOT CAUSE: flortaucipir PET→T1 coregistration failure on specific scans** (tau = lower SNR,
+weak GM/WM contrast → SPM mri_coregister falls into a bad solution). UPSTREAM of all PVC/surface
+work. FIX belongs in the import/coregistration step (preventad_pet_import → mri_coregister):
+options = more robust cost-fn/init, bbregister-style boundary registration (PETSurfer uses it),
+NAC/early-frame reference, or a PET-MR mutual-information QC gate to flag+redo bad coregs.
 
 ## Weaknesses (ranked)
 1. **GM-only correction (Müller-Gärtner).** MG corrects only the GM compartment and
