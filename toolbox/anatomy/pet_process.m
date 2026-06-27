@@ -79,15 +79,17 @@ try
         orgComment = sMri.Comment;
     end
 
-    % --- SUVR Rescale ---
+    % --- SUVR Rescale (robust reference: erosion + trimmed mean, via pet_suvr) ---
     if ~isempty(roiName)
-        [~, sMriRescale, errMsgRescale, fileTagRescale] = mri_rescale(sMri, sAtlas, roiName);
-        if ~isempty(errMsgRescale)
-            errMsg = errMsgRescale;
+        % Resolve the reference ROI to a binary mask (same atlas/region path as before),
+        % then normalize with the robust reference (eroded + trimmed mean) rather than a plain mean.
+        [~, ~, errMsgMask, ~, binMask] = mri_mask(sMri, sAtlas, roiName, 1);
+        if ~isempty(errMsgMask)
+            errMsg = errMsgMask;
             return;
         end
-        sMri = sMriRescale;
-        fileTag = fileTagRescale;
+        [sMri, ~] = pet_suvr(sMri, [], struct('RefMask', binMask));
+        fileTag = '_suvr';
     else
         fileTag = '';
     end

@@ -17,8 +17,10 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
 %
 % INPUTS:
 %   sMriPet : (PVC'd) static PET MRI struct, resliced to the anatomy grid.
-%   sAseg   : ASEG volume atlas struct (.Cube of integer labels) on the same grid.
-%   Opts    : .RefLabels (default [8 47]) .Erode (voxels, 1) .Robust ('trim'|'mean'|'median')
+%   sAseg   : ASEG volume atlas struct (.Cube of integer labels) on the same grid. May be []
+%             if Opts.RefMask is supplied.
+%   Opts    : .RefMask (precomputed binary reference mask; overrides RefLabels/sAseg)
+%             .RefLabels (default [8 47]) .Erode (voxels, 1) .Robust ('trim'|'mean'|'median')
 %             .TrimPct (each-tail fraction for 'trim', 0.10).
 %
 % OUTPUTS:
@@ -30,17 +32,22 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
 % Author: Diellor Basha, 2026
 
     if (nargin<3)||isempty(Opts), Opts=struct(); end
-    Def=struct('RefLabels',[8 47],'Erode',1,'Robust','trim','TrimPct',0.10);
-    fn=fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i})||isempty(Opts.(fn{i})), Opts.(fn{i})=Def.(fn{i}); end; end
+    Def=struct('RefMask',[],'RefLabels',[8 47],'Erode',1,'Robust','trim','TrimPct',0.10);
+    fn=fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i}), Opts.(fn{i})=Def.(fn{i}); end; end
 
     cube = double(sMriPet.Cube(:,:,:,1));
-    if ~isequal(size(cube), size(sAseg.Cube))
-        error('pet_suvr:grid', 'PET grid %s != ASEG grid %s (reslice PET to anatomy first).', ...
-              mat2str(size(cube)), mat2str(size(sAseg.Cube)));
+    % Reference mask: precomputed (any region, from the caller) or built from ASEG labels.
+    if ~isempty(Opts.RefMask)
+        mask = logical(Opts.RefMask);
+    elseif ~isempty(sAseg)
+        mask = ismember(sAseg.Cube, Opts.RefLabels);
+    else
+        error('pet_suvr:ref', 'Provide Opts.RefMask, or sAseg + Opts.RefLabels.');
     end
-
-    % Reference mask -> erode (peel PVE-contaminated boundary).
-    mask = ismember(sAseg.Cube, Opts.RefLabels);
+    if ~isequal(size(cube), size(mask))
+        error('pet_suvr:grid', 'PET grid %s != reference mask grid %s (reslice PET to anatomy first).', ...
+              mat2str(size(cube)), mat2str(size(mask)));
+    end
     er = mask; for k=1:Opts.Erode, er = local_erode(er); end
     if nnz(er) < 50, er = mask; end                      % erosion too aggressive -> fall back
 
