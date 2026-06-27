@@ -5,15 +5,24 @@ Branch `experimental/pet`. Recorded 2026-06-26 from the 3-way PVC comparison
 PETSurfer MGX (voxelwise MG) and PETSurfer GTM (Rousset regional), on
 `sub-MTL0002` / `18FNAV4694`, regional SUVR over FreeSurfer ROIs, cerebellum-normalized.
 
-## Quantitative status (cortex ROIs, n=68)
-| comparison | type | r | CCC |
+## Quantitative status — COHORT (10 subjects x 2 tracers, batch_pvc_3way)
+POOLED cortical ROIs (N=1360, each ROI cerebellum-normalized):
+| comparison | type | pooled r | pooled CCC |
 |---|---|---|---|
-| OURS vs MGX | cross-pipeline, **same method (MG)** | **0.73** | 0.26 |
-| MGX vs GTM | same pipeline (PETSurfer), cross-method | 0.89 | 0.77 |
-| OURS vs GTM | cross-pipeline, cross-method | 0.61 | 0.33 |
+| OURS vs MGX | cross-pipeline, **same method (MG)** | **0.90** | **0.84** |
+| MGX vs GTM | same pipeline (PETSurfer), cross-method | 0.97 | 0.97 |
+| OURS vs GTM | cross-pipeline, cross-method | 0.85 | 0.80 |
 
-PETSurfer's internal MG-vs-GTM agreement (0.89) is the practical ceiling. Our MG
-reaches r=0.73 vs PETSurfer's MG — good spatial agreement — but low CCC.
+Per-subject cortex r (mean +/- SD): OURS-MGX amyloid **0.76 +/- 0.09** (robust),
+tau **0.60 +/- 0.41** (variable); MGX-GTM ceiling 0.88-0.90 +/- 0.05. So at the cohort
+level our MG tracks PETSurfer's MG well (pooled r=0.90, CCC=0.84) — the single-subject
+"compression" (sub-MTL0002 CCC 0.26) was NOT representative.
+
+**New finding — tau variability:** flortaucipir is much more variable than amyloid, with
+2/10 clear outliers (sub-MTL0020 r=-0.45, sub-MTL0039 r=0.36 vs PETSurfer MG). Suspects:
+flortaucipir off-target binding (choroid plexus/basal ganglia/meninges) interacting with
+SPM-Segment tissue maps, and/or coregistration on those specific tau scans. → *investigate
+the 2 outliers individually; off-target compartments argue for GTM (Baker 2017).*
 
 ## Weaknesses (ranked)
 1. **GM-only correction (Müller-Gärtner).** MG corrects only the GM compartment and

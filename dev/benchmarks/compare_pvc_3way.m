@@ -1,4 +1,4 @@
-function R = compare_pvc_3way(SubjectName, tracer, PvcComment, PsRoot)
+function R = compare_pvc_3way(SubjectName, tracer, PvcComment, PsRoot, Opts)
 % COMPARE_PVC_3WAY: Three-way regional-SUVR comparison of PET partial-volume correction:
 %   (1) OURS   - PETPVE12 Muller-Gartner (voxelwise), computed in Brainstorm.
 %   (2) MGX    - PETSurfer extended Muller-Gartner (voxelwise) -> mgx.gm.nii.gz.
@@ -25,6 +25,9 @@ function R = compare_pvc_3way(SubjectName, tracer, PvcComment, PsRoot)
     if (nargin < 4) || isempty(PsRoot)
         PsRoot = '/Volumes/SpikeData-2/workspace/library/datasets/preventad/pet/derivatives/petsurfer';
     end
+    if (nargin < 5) || isempty(Opts), Opts = struct(); end
+    if ~isfield(Opts,'DoFig'),   Opts.DoFig = 1;   end
+    if ~isfield(Opts,'Verbose'), Opts.Verbose = 1; end
     OutDir = bst_fileparts(mfilename('fullpath'));
     psDir  = fullfile(PsRoot, SubjectName, 'ses-01', tracer, 'gtmpvc.output');
 
@@ -61,23 +64,29 @@ function R = compare_pvc_3way(SubjectName, tracer, PvcComment, PsRoot)
     O=[rows.ours]'; M=[rows.mgx]'; T=[rows.gtm]'; cls={rows.class}; isctx=strcmp(cls,'cortex');
 
     % ===== pairwise metrics (all ROIs + cortex-only) =====
-    fprintf('\n=== %s / %s : 3-way PVC regional SUVR (n=%d ROIs, %d cortical) ===\n', SubjectName, tracer, numel(O), nnz(isctx));
-    fprintf('%-28s  %7s %7s | %8s %7s\n','pair (method vs method)','r_all','CCC_all','r_ctx','CCC_ctx');
     prs = {'OURS vs MGX  (xpipe, same MG)','ours','mgx'; ...
            'MGX  vs GTM  (PETSurfer, x-method)','mgx','gtm'; ...
            'OURS vs GTM  (xpipe, x-method)','ours','gtm'};
     V = struct('ours',O,'mgx',M,'gtm',T);
-    R.metrics = struct();
+    R.metrics = struct('pair',{},'r_all',{},'ccc_all',{},'r_ctx',{},'ccc_ctx',{});
     for k=1:size(prs,1)
         a=V.(prs{k,2}); b=V.(prs{k,3});
-        fprintf('%-28s  %7.3f %7.3f | %8.3f %7.3f\n', prs{k,1}, ...
-            local_corr(a,b), local_ccc(a,b), local_corr(a(isctx),b(isctx)), local_ccc(a(isctx),b(isctx)));
+        R.metrics(k) = struct('pair',prs{k,1}, 'r_all',local_corr(a,b), 'ccc_all',local_ccc(a,b), ...
+            'r_ctx',local_corr(a(isctx),b(isctx)), 'ccc_ctx',local_ccc(a(isctx),b(isctx)));
     end
-    fprintf('[weakness] OURS corrects GM only (WM/CSF set to constants) -> non-cortex ROIs diverge by design.\n');
-
-    % ===== figure: 3 scatter panels =====
-    local_fig3(O,M,T,isctx,SubjectName,tracer,OutDir);
-    fprintf('Figure saved to %s\n', OutDir);
+    if Opts.Verbose
+        fprintf('\n=== %s / %s : 3-way PVC regional SUVR (n=%d ROIs, %d cortical) ===\n', SubjectName, tracer, numel(O), nnz(isctx));
+        fprintf('%-34s  %7s %7s | %8s %7s\n','pair (method vs method)','r_all','CCC_all','r_ctx','CCC_ctx');
+        for k=1:numel(R.metrics)
+            m=R.metrics(k);
+            fprintf('%-34s  %7.3f %7.3f | %8.3f %7.3f\n', m.pair, m.r_all, m.ccc_all, m.r_ctx, m.ccc_ctx);
+        end
+        fprintf('[weakness] OURS corrects GM only (WM/CSF set to constants) -> non-cortex ROIs diverge by design.\n');
+    end
+    if Opts.DoFig
+        local_fig3(O,M,T,isctx,SubjectName,tracer,OutDir);
+        if Opts.Verbose, fprintf('Figure saved to %s\n', OutDir); end
+    end
 end
 
 
