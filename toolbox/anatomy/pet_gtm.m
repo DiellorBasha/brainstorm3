@@ -69,11 +69,27 @@ function [MriFileGtm, errMsg, regTable] = pet_gtm(PetFile, fwhm, gtmOpts)
         bst_progress('text', 'Building GTM regions...');
         ids = unique(L(:)); ids = ids(ids ~= 0);
         keep = ids(arrayfun(@(id) nnz(L==id) >= gtmOpts.minVox, ids));
-        Lr = zeros(cubeSize);                       % relabelled: 1..R-1 = kept regions, R = rest
-        for r = 1:numel(keep), Lr(L==keep(r)) = r; end
-        restId = numel(keep) + 1; Lr(Lr==0) = restId;
-        regIds = [keep(:); 0];                       % 0 marks the rest region in the output table
-        R = restId;
+        nKeep = numel(keep);
+        Lr = zeros(cubeSize);                        % relabelled: 1..nKeep = kept brain regions
+        for r = 1:nKeep, Lr(L==keep(r)) = r; end
+        restMask = (Lr == 0);
+        % Split the leftover ("rest") into an EXTRACEREBRAL nuisance region (skull/scalp/
+        % meninges - inside the head, outside the brain) and AIR (outside the head), using
+        % the subject's scalp surface. Modeling extracerebral signal as its own region lets
+        % GTM remove its spill-in into cortex (important for off-target tracers like tau);
+        % a single "rest" region would mix near-zero air with nonzero skull/scalp.
+        headMask = local_headmask(sSubject, sMriPet, cubeSize);
+        if ~isempty(headMask)
+            Lr(restMask &  headMask) = nKeep + 1;    % extracerebral tissue
+            Lr(restMask & ~headMask) = nKeep + 2;    % air
+            regIds = [keep(:); -1; -2];              % -1 = extracerebral, -2 = air
+            R = nKeep + 2;
+        else
+            Lr(restMask) = nKeep + 1;
+            regIds = [keep(:); -1];                  % -1 = rest (no scalp surface available)
+            R = nKeep + 1;
+            fprintf('BST> PET GTM: no scalp surface -> single rest region (extracerebral not modeled).\n');
+        end
         idx = cell(R,1); n = zeros(R,1);
         for i = 1:R, idx{i} = find(Lr==i); n(i) = numel(idx{i}); end
 
@@ -129,6 +145,21 @@ function [MriFileGtm, errMsg, regTable] = pet_gtm(PetFile, fwhm, gtmOpts)
     if ~isProgress, bst_progress('stop'); end
 end
 
+
+function headMask = local_headmask(sSubject, sMriRef, cubeSize)
+% Voxelize the subject's scalp ("head mask") surface into a filled binary head mask on
+% the reference grid. Returns [] if no scalp surface is available.
+    headMask = [];
+    if ~isfield(sSubject,'Surface') || isempty(sSubject.Surface), return; end
+    iScalp = find(strcmpi({sSubject.Surface.SurfaceType}, 'Scalp'), 1);
+    if isempty(iScalp), return; end
+    try
+        tess2mri = tess_interp_mri(sSubject.Surface(iScalp).FileName, sMriRef);
+        headMask = logical(tess_mrimask(cubeSize, tess2mri));
+    catch
+        headMask = [];
+    end
+end
 
 function vol = local_gauss3(vol, fwhm_mm, voxsize_mm)
     sig = fwhm_mm / 2.35482;
