@@ -1,18 +1,25 @@
 function [GMpvc, info] = pet_pvc_surface(sMriPet, sMriRef, WhiteSurfFile, Opts)
 % PET_PVC_SURFACE: surface-native partial volume correction in the intrinsic/extrinsic split.
 %
-% CANDIDATE / experimental. Corrects partial-volume effect directly on the cortical surface by
-% separating it into two geometrically-distinct parts:
-%   RADIAL (extrinsic): the signed WM->GM->CSF tissue spill along the cortical normal. Modeled
-%     per-vertex as a 1-D Mueller-Gaertner: GM = (obs - m_wm*WM)/m_gm, where the PSF tissue
-%     fractions m_wm,m_gm follow from the cortical THICKNESS (|pial-white|) and the PSF width.
-%   TANGENTIAL (intrinsic): blur of real GM signal WITHIN the ribbon (no tissue spill - it is all
-%     cortex). Removed by a regularized (Wiener) Laplace-Beltrami eigenfilter h(lam)=G/(G^2+alpha).
+% CANDIDATE / experimental. Corrects partial-volume effect directly on the cortical surface.
+% The TISSUE-FRACTION effect (spill-in/out) is, by construction, a purely RADIAL/extrinsic
+% phenomenon: along the cortical normal the PSF crosses WM->GM->CSF, while the tangential plane
+% is all the same tissue (its PSF integral is unity -> zero spill). So the partial-volume
+% correction is the per-vertex 1-D Mueller-Gaertner:
+%     GM = (obs - m_wm*WM)/m_gm ,   m_wm,m_gm = PSF tissue fractions from THICKNESS (|pial-white|).
+% This is theoretically exact for locally-flat cortex; curvature couples the directions only where
+% the radius of curvature shrinks to ~a PSF-width of the thickness (a small high-curvature minority).
 %
-% The radial step is the workhorse; it is ILL-CONDITIONED in thin cortex (m_gm -> 0), so a
-% GmFracMin floor guards the division and the returned info.thin flags those (unreliable) vertices.
-% The sampling direction is anchored to the white->pial axis (NOT vertex normals), so tissue
-% identity is robust to surface conventions.
+% Two things the experiments established and that this first-order version bakes in:
+%   - MEDIAL WALL: vertices where FreeSurfer collapses pial onto white (thickness ~ 0) are NOT
+%     cortex (verified to coincide 100% with the Desikan-unlabeled region). They are MASKED (NaN),
+%     not regularized.
+%   - TANGENTIAL deconvolution is a SEPARATE concern (sharpening real signal, not tissue-fraction
+%     correction) and is OFF by default. It is also ill-posed and scale-mismatched to global
+%     eigenmodes; enable Opts.DoTangential only for optional sub-PSF sharpening.
+%
+% Sampling is anchored to the white->pial axis (NOT vertex normals), so tissue identity is robust
+% to surface conventions. Radial step needs no eigenmodes -> scales to the high-res surface.
 %
 % USAGE:  [GMpvc, info] = pet_pvc_surface(sMriPet, sMriRef, WhiteSurfFile, Opts)
 %
@@ -21,20 +28,22 @@ function [GMpvc, info] = pet_pvc_surface(sMriPet, sMriRef, WhiteSurfFile, Opts)
 %   sMriRef      : anatomical MRI struct (defines surface SCS<->world).
 %   WhiteSurfFile: white surface file (pial derived by name unless Opts.PialSurfFile given).
 %   Opts         : .PialSurfFile ('') .PsfFwhm (mm, [] = auto from scanner/metadata)
-%                  .WmOffset (mm into WM for the WM-level estimate, 3) .GmFracMin (0.1)
-%                  .DoTangential (true) .Alpha (Wiener reg, 1e-2) .nModes (600).
+%                  .WmOffset (mm into WM for the WM-level estimate, 3) .MinThick (mm, medial-wall
+%                  mask below this, 1.0) .GmFracMin (radial-division guard, 0.1)
+%                  .DoTangential (false) .Alpha (Wiener reg, 1e-2) .nModes (600).
 %
 % OUTPUTS:
-%   GMpvc        : [nVert x 1] partial-volume-corrected GM uptake on the cortex (pre-SUVR).
-%   info         : struct(.thin, .WmLevel, .PsfFwhm, .m_gm, .m_wm, .thickness, .observed).
+%   GMpvc        : [nVert x 1] partial-volume-corrected GM uptake on the cortex (pre-SUVR);
+%                  NaN at masked medial-wall / non-cortex vertices.
+%   info         : struct(.mask, .nMask, .thin, .WmLevel, .PsfFwhm, .m_gm, .m_wm, .thickness, .observed).
 %
 % SEE ALSO: pet_pvc, pet_gtm, tess_operators, tess_eigen, mri_bbregister
 %
 % Author: Diellor Basha, 2026
 
     if (nargin<4)||isempty(Opts), Opts=struct(); end
-    Def=struct('PialSurfFile','','PsfFwhm',[],'WmOffset',3,'GmFracMin',0.1, ...
-               'DoTangential',true,'Alpha',1e-2,'nModes',600);
+    Def=struct('PialSurfFile','','PsfFwhm',[],'WmOffset',3,'MinThick',1.0,'GmFracMin',0.1, ...
+               'DoTangential',false,'Alpha',1e-2,'nModes',600);
     fn=fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i})||isempty(Opts.(fn{i})), Opts.(fn{i})=Def.(fn{i}); end; end
 
     % World units per mm.
@@ -64,13 +73,18 @@ function [GMpvc, info] = pet_pvc_surface(sMriPet, sMriRef, WhiteSurfFile, Opts)
     % Radial PSF tissue fractions from thickness (1-D Gaussian along the normal; CSF symmetric).
     m_wm = 0.5*erfc((th/2)./(sig*sqrt(2)));
     m_gm = 1 - 2*m_wm;
-    thin = m_gm < Opts.GmFracMin;                          % ill-conditioned radial division
+    thin = m_gm < Opts.GmFracMin;                          % residual ill-conditioning (rare after mask)
     m_gm_reg = max(m_gm, Opts.GmFracMin);
 
     % Radial Mueller-Gaertner: remove WM spill-in, recover GM spill-out.
     GMpvc = (observed - m_wm.*WmLevel) ./ m_gm_reg;
 
-    % Tangential intrinsic deconvolution (regularized LBO Wiener), per hemisphere.
+    % Medial wall / non-cortex (FreeSurfer collapses pial onto white -> thickness ~ 0; coincides
+    % with the Desikan-unlabeled region). Not cortex -> masked to NaN below (after any tangential step).
+    mask = (th/wpm) < Opts.MinThick;
+
+    % OPTIONAL tangential intrinsic deconvolution (regularized LBO Wiener), per hemisphere.
+    % Separate from the tissue-fraction PVC; off by default.
     if Opts.DoTangential
         Eig=tess_eigen(WhiteSurfFile,'Laplace-Beltrami','nModes',Opts.nModes);
         LBO=tess_operators(WhiteSurfFile,'Laplace-Beltrami');
@@ -82,9 +96,10 @@ function [GMpvc, info] = pet_pvc_surface(sMriPet, sMriRef, WhiteSurfFile, Opts)
             GMpvc(gv)=Phi*(h.*(Phi'*(Mh*f)));
         end
     end
+    GMpvc(mask) = NaN;
 
-    info=struct('thin',thin,'WmLevel',WmLevel,'PsfFwhm',fwhm,'m_gm',m_gm,'m_wm',m_wm, ...
-                'thickness',th/wpm,'observed',observed,'nThin',nnz(thin));
+    info=struct('mask',mask,'nMask',nnz(mask),'thin',thin & ~mask,'WmLevel',WmLevel,'PsfFwhm',fwhm, ...
+                'm_gm',m_gm,'m_wm',m_wm,'thickness',th/wpm,'observed',observed,'nThin',nnz(thin & ~mask));
 end
 
 function I=local_interp(PET,vox,cs)
