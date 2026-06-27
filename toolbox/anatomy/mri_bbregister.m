@@ -157,8 +157,11 @@ function I = local_interp(PET, vox, cubeSz)
 end
 
 function N = local_vertnormals(V, F)
+    % cross(v3-v1, v2-v1) matches Brainstorm's face winding -> OUTWARD normals (verified
+    % against the stored VertNormals and the white->pial direction). The opposite order
+    % gives inward normals.
     v1=V(F(:,1),:); v2=V(F(:,2),:); v3=V(F(:,3),:);
-    fn = cross(v2-v1, v3-v1, 2); nV = size(V,1); N = zeros(nV,3); idx = F(:);
+    fn = cross(v3-v1, v2-v1, 2); nV = size(V,1); N = zeros(nV,3); idx = F(:);
     for dd=1:3, N(:,dd) = accumarray(idx, repmat(fn(:,dd),3,1), [nV 1]); end
     N = N ./ (sqrt(sum(N.^2,2))+eps);
 end
