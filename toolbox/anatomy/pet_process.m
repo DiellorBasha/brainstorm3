@@ -60,15 +60,17 @@ try
     orgComment = sMri.Comment;
 
     % --- Partial Volume Correction (before SUVR) ---
-    if ~isempty(pvcOpts) && isfield(pvcOpts, 'fwhm') && pvcOpts.fwhm > 0
+    if ~isempty(pvcOpts)
         % Get reference MRI for tissue segmentation
         if isfield(sSubject, 'iAnatomy') && ~isempty(sSubject.iAnatomy)
             MriFileRef = sSubject.Anatomy(sSubject.iAnatomy).FileName;
         else
             MriFileRef = sSubject.Anatomy(1).FileName;
         end
+        % FWHM: explicit if provided, else [] -> pet_pvc auto-derives from scanner/metadata.
+        if isfield(pvcOpts, 'fwhm'), pvcFwhm = pvcOpts.fwhm; else, pvcFwhm = []; end
         % Run PVC — saves corrected PET to database, returns new file path
-        [PvcFile, errMsgPvc] = pet_pvc(PetFile, MriFileRef, pvcOpts.fwhm, pvcOpts);
+        [PvcFile, errMsgPvc] = pet_pvc(PetFile, MriFileRef, pvcFwhm, pvcOpts);
         if ~isempty(errMsgPvc)
             errMsg = ['PVC failed: ' errMsgPvc];
             return;
