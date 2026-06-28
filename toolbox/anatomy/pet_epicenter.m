@@ -1,9 +1,28 @@
 function [foci, basinLabel, info] = pet_epicenter(SurfaceFile, suvrMap, Opts)
 % PET_EPICENTER: cortical concentration foci (epicenters) of a surface SUVR map via discrete
 % Morse-Smale geometry. Heat-smooth (LBO) -> local maxima (mesh adjacency) -> gradient-ascent
-% basins -> persistence-ranked dominant + secondary foci.
+% basins -> persistence-ranked dominant + secondary foci. The dominant focus is the most
+% PERSISTENT (most prominent, largest-basin) concentration point, not merely the highest vertex.
 %
 % USAGE: [foci, basinLabel, info] = pet_epicenter(SurfaceFile, suvrMap, Opts)
+%
+% INPUTS:
+%   - SurfaceFile : Brainstorm cortex surface file (string).
+%   - suvrMap     : [nVert x 1] per-vertex SUVR (NaN allowed, e.g. masked medial wall).
+%   - Opts        : (optional) struct
+%       .HeatT      LBO heat-smoothing time (default 2e-5); larger = smoother.
+%       .MinPersist minimum persistence to keep a focus (default [] -> 0.15*range of the field).
+%       .nFociMax   maximum number of foci returned (default 10).
+%
+% OUTPUTS:
+%   - foci        : struct array, dominant first, fields:
+%                     .vertex (index) .peak (smoothed SUVR) .persistence .basinArea (# vertices).
+%                   Ranked by persistence; ties broken by peak height (each disconnected
+%                   hemisphere contributes one essential, full-range-persistence maximum).
+%   - basinLabel  : [nVert x 1] gradient-ascent basin index per vertex (0 = NaN/unassigned).
+%   - info        : struct .smoothed [nVert x 1] .nFoci .maxVerts (all raw maxima) .A (adjacency).
+%
+% SEE ALSO: pet_suvr, tess_operators, tess_vertconn, bst_gradient
 %
 % Author: Diellor Basha, 2026
     if (nargin<3)||isempty(Opts), Opts=struct(); end
