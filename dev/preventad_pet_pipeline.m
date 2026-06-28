@@ -53,14 +53,19 @@ function [Roi, Group] = preventad_pet_pipeline(Opts)
             trc=Opts.Tracers{ti};
             try
                 [sS,~]=bst_get('Subject',subj); cmt={sS.Anatomy.Comment};
-                % --- import PET if missing (optional) ---
+                af=@(c) sS.Anatomy(find(strcmp(cmt,c),1)).FileName;
+                % --- import the 4D base PET if missing (optional) ---
                 if ~any(strcmp(cmt,['PET ' trc '_mean'])) && ~any(strcmp(cmt,['PET ' trc])) && Opts.DoImport
                     preventad_pet_import(Opts.BidsPetDir, subj);
-                    [sS,~]=bst_get('Subject',subj); cmt={sS.Anatomy.Comment};
+                    [sS,~]=bst_get('Subject',subj); cmt={sS.Anatomy.Comment}; af=@(c) sS.Anatomy(find(strcmp(cmt,c),1)).FileName;
                 end
+                % --- temporal-average static (_mean = voxel-wise mean of the frames) if missing ---
                 baseC=['PET ' trc '_mean'];
+                if ~any(strcmp(cmt,baseC)) && any(strcmp(cmt,['PET ' trc]))
+                    mri_aggregate(af(['PET ' trc]), 'mean');
+                    [sS,~]=bst_get('Subject',subj); cmt={sS.Anatomy.Comment}; af=@(c) sS.Anatomy(find(strcmp(cmt,c),1)).FileName;
+                end
                 if ~any(strcmp(cmt,baseC)), nSkip=nSkip+1; fprintf('  %-14s %-16s SKIP (no PET)\n',subj,trc); continue; end
-                af=@(c) sS.Anatomy(find(strcmp(cmt,c),1)).FileName;
 
                 % --- PVC (reuse or run) ---
                 pvcC=['PET ' trc pvcSuffix];
