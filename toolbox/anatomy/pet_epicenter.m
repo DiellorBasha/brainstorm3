@@ -10,7 +10,7 @@ function [foci, basinLabel, info] = pet_epicenter(SurfaceFile, suvrMap, Opts)
     Def=struct('HeatT',2e-5,'MinPersist',[],'nFociMax',10);
     fn=fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i}), Opts.(fn{i})=Def.(fn{i}); end; end
 
-    sSurf=in_tess_bst(SurfaceFile); nV=size(sSurf.Vertices,1);
+    sSurf=in_tess_bst(SurfaceFile);
     f=double(suvrMap(:)); f(~isfinite(f))=NaN;
 
     % --- LBO heat smoothing (tangential), per hemisphere ---
@@ -22,8 +22,10 @@ function [foci, basinLabel, info] = pet_epicenter(SurfaceFile, suvrMap, Opts)
     A=A | A'; A=A - diag(diag(A));
     maxVerts=local_localmax(fs, A);
 
+    % --- gradient-ascent basins of attraction (Morse-Smale segmentation) ---
+    basinLabel=local_basins(fs, A, maxVerts);
+
     foci=struct('vertex',{},'peak',{},'persistence',{},'basinArea',{});
-    basinLabel=zeros(nV,1);
     info=struct('smoothed',fs,'nFoci',numel(maxVerts),'maxVerts',maxVerts,'A',{A});
 end
 
@@ -49,4 +51,24 @@ function mv=local_localmax(f, A)
         end
     end
     mv=mv(:);
+end
+
+% ===== steepest-ascent basins: each vertex flows to the max it climbs to =====
+function lbl=local_basins(f, A, maxVerts)
+    n=numel(f); nextUp=zeros(n,1);
+    for v=1:n
+        if ~isfinite(f(v)), continue; end
+        nb=find(A(:,v)); nb=nb(isfinite(f(nb)));
+        if isempty(nb), nextUp(v)=v; continue; end
+        [mx,k]=max(f(nb));
+        if mx<=f(v), nextUp(v)=v; else, nextUp(v)=nb(k); end
+    end
+    maxIdx=zeros(n,1); maxIdx(maxVerts)=1:numel(maxVerts);
+    lbl=zeros(n,1);
+    for v=1:n
+        if ~isfinite(f(v)), continue; end
+        p=v;
+        while nextUp(p)~=p, p=nextUp(p); end   % climb to the peak this vertex flows to
+        lbl(v)=maxIdx(p);
+    end
 end
