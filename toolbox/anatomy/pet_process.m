@@ -8,9 +8,19 @@ function [MriFileOut, errMsg, SurfaceFileOut] = pet_process(PetFile, AtlasName, 
 %   - maskROI   : Name of the ROI for masking (string, can be empty)
 %   - applyMask : Logical, true to apply mask, false otherwise
 %   - doProject : Logical, true to project PET to surface, false otherwise
-%   - pvcOpts   : (optional) Structure with PVC options (see pet_pvc.m)
-%                  If provided, PVC is applied before SUVR rescaling.
-%                  Required fields: .fwhm (PSF FWHM in mm)
+%   - pvcOpts   : (optional) Structure controlling PVC / smoothing / SUVR (see pet_pvc.m).
+%                  If provided, PVC is applied before SUVR rescaling. Fields:
+%                  .method     'mg' (default, Mueller-Gartner via pet_pvc) | 'gtm' (pet_gtm) |
+%                              'none' (SKIP PVC).
+%                  .fwhm       PSF FWHM in mm for PVC (auto from scanner metadata if omitted).
+%                  .SmoothFWHM Gaussian volume smoothing FWHM (mm) applied BEFORE SUVR (default 0).
+%                  .SuvrOpts   struct passed to pet_suvr (e.g. struct('Erode',0,'Robust','mean')).
+%
+%                  VLPP-STYLE (non-PVC, smoothed) run: pvcOpts = struct('method','none',
+%                  'SmoothFWHM',6, 'SuvrOpts',struct('Erode',0,'Robust','mean')). This reproduces
+%                  the Villeneuve Lab PET pipeline (smooth + plain-reference SUVR, no PVC):
+%                  https://github.com/villeneuvelab/vlpp  (validated: global cortical SUVR r=0.99
+%                  vs VLPP across 66 PREVENT-AD subjects; dev/benchmarks/demo_vlpp_style.m).
 %
 % OUTPUTS:
 %   - MriFileOut    : Output MRI file path (string)
@@ -60,7 +70,10 @@ try
     orgComment = sMri.Comment;
 
     % --- Partial Volume Correction (before SUVR) ---
-    if ~isempty(pvcOpts)
+    % pvcOpts.method='none' SKIPS PVC (e.g. a VLPP-style non-PVC smoothed pipeline, see header
+    % + https://github.com/villeneuvelab/vlpp). 'mg' (default) -> pet_pvc; 'gtm' -> pet_gtm.
+    doPvc = ~isempty(pvcOpts) && ~(isfield(pvcOpts,'method') && strcmpi(pvcOpts.method,'none'));
+    if doPvc
         % Get reference MRI for tissue segmentation
         if isfield(sSubject, 'iAnatomy') && ~isempty(sSubject.iAnatomy)
             MriFileRef = sSubject.Anatomy(sSubject.iAnatomy).FileName;
@@ -81,19 +94,32 @@ try
         orgComment = sMri.Comment;
     end
 
+    % --- Optional Gaussian volume smoothing BEFORE SUVR (VLPP-style; default off) ---
+    smoothTag = '';
+    if ~isempty(pvcOpts) && isfield(pvcOpts,'SmoothFWHM') && ~isempty(pvcOpts.SmoothFWHM) && any(pvcOpts.SmoothFWHM(:) > 0)
+        sMri.Cube = local_gauss3(double(sMri.Cube(:,:,:,1)), pvcOpts.SmoothFWHM, sMri.Voxsize);
+        sMri = bst_history('add', sMri, 'smooth', sprintf('Gaussian volume smoothing FWHM=%g mm', pvcOpts.SmoothFWHM(1)));
+        smoothTag = sprintf('_smooth%g', pvcOpts.SmoothFWHM(1));
+    end
+
     % --- SUVR Rescale (robust reference: erosion + trimmed mean, via pet_suvr) ---
     if ~isempty(roiName)
         % Resolve the reference ROI to a binary mask (same atlas/region path as before),
-        % then normalize with the robust reference (eroded + trimmed mean) rather than a plain mean.
+        % then normalize via pet_suvr. Default = eroded + trimmed mean; pvcOpts.SuvrOpts can
+        % override (e.g. Erode=0, Robust='mean' for a plain VLPP-style cerebellar reference).
         [~, ~, errMsgMask, ~, binMask] = mri_mask(sMri, sAtlas, roiName, 1);
         if ~isempty(errMsgMask)
             errMsg = errMsgMask;
             return;
         end
-        [sMri, ~] = pet_suvr(sMri, [], struct('RefMask', binMask));
-        fileTag = '_suvr';
+        suvrOpts = struct('RefMask', binMask);
+        if ~isempty(pvcOpts) && isfield(pvcOpts,'SuvrOpts') && isstruct(pvcOpts.SuvrOpts)
+            sf = fieldnames(pvcOpts.SuvrOpts); for ii=1:numel(sf), suvrOpts.(sf{ii}) = pvcOpts.SuvrOpts.(sf{ii}); end
+        end
+        [sMri, ~] = pet_suvr(sMri, [], suvrOpts);
+        fileTag = [smoothTag '_suvr'];
     else
-        fileTag = '';
+        fileTag = smoothTag;
     end
 
     % --- Masking (if requested) ---
@@ -176,4 +202,18 @@ try
 
 catch ME
     errMsg = ME.message;
+end
+end
+
+% ===== 3D separable Gaussian volume smoothing (FWHM mm), toolbox-free (mirrors pet_gtm) =====
+function vol = local_gauss3(vol, fwhm_mm, voxsize_mm)
+    if isscalar(fwhm_mm),  fwhm_mm  = fwhm_mm  * [1 1 1]; end
+    if isempty(voxsize_mm) || any(voxsize_mm == 0), voxsize_mm = [1 1 1]; end
+    sig = fwhm_mm / 2.35482;
+    for d = 1:3
+        sv = sig(min(d,numel(sig))) / voxsize_mm(d); r = max(1, ceil(3*sv)); x = -r:r;
+        k = exp(-(x.^2)/(2*sv^2)); k = k/sum(k);
+        sh = ones(1,3); sh(d) = numel(k);
+        vol = convn(vol, reshape(k, sh), 'same');
+    end
 end
