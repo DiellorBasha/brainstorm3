@@ -62,21 +62,37 @@ function R = analyze_pet_epicenters(subjects, tracer)
     [cnt,o]=sort(cnt,'descend');
     fprintf('  top dominant-focus regions:\n');
     for k=1:min(8,numel(ureg)), fprintf('     %-28s %d\n', ureg{o(k)}, cnt(k)); end
-    % figure: cohort focus-density on the template white (LH lateral + medial)
+    % figure: cohort focus-density (LBO heat-smoothed so the concentration reads as a map, not
+    % per-vertex speckle), template LH lateral + medial.
     try
+        densS=local_smoothdens(tWf, dens, 25);   % ~25 graph-diffusion steps (~8-10mm spread)
         [~,lH]=tess_hemisplit(tW); idx=double(lH(:)); keep=all(ismember(tW.Faces,idx),2);
         rmp=zeros(size(tW.Vertices,1),1); rmp(idx)=1:numel(idx); Fh=rmp(tW.Faces(keep,:)); vw={[180 -10],[0 -10]};
+        cmax=max(densS(idx))+eps;
         f=figure('Visible','off','Position',[40 40 900 420]);
         for s2=1:2
             subplot(1,2,s2);
-            patch('Faces',Fh,'Vertices',tW.Vertices(idx,:),'FaceVertexCData',dens(idx),'FaceColor','interp','EdgeColor','none');
-            clim([0 max(dens(idx))+eps]); colormap(hot); view(vw{s2}); axis equal off vis3d; camlight headlight; lighting gouraud;
+            patch('Faces',Fh,'Vertices',tW.Vertices(idx,:),'FaceVertexCData',densS(idx),'FaceColor','interp','EdgeColor','none');
+            clim([0 cmax]); colormap(hot); view(vw{s2}); axis equal off vis3d; camlight headlight; lighting gouraud;
             vwn={'lateral','medial'}; title(sprintf('%s focus density (LH %s)',tracer,vwn{s2}),'Interpreter','none');
         end
         png=fullfile(here,sprintf('pet_epicenters_%s.png',tracer)); print(f,png,'-dpng','-r110'); close(f);
         fprintf('  figure -> %s\n', png);
     catch ME, fprintf('  figure skipped: %s\n', ME.message); end
     R=struct('rows',{R},'density',dens);
+end
+
+function ds=local_smoothdens(SurfaceFile, dens, nIter)
+    % Graph (adjacency) diffusion of the cohort focus-density: robust to the non-manifold template
+    % mesh (the LBO/nxr operator requires manifoldness; a density map does not). Each iteration is a
+    % lazy random-walk step (~1 edge ~2-3mm on ico5); total count renormalized for a stable scale.
+    sSurf=in_tess_bst(SurfaceFile);
+    if isfield(sSurf,'VertConn') && ~isempty(sSurf.VertConn), A=sSurf.VertConn;
+    else, A=tess_vertconn(sSurf.Vertices, sSurf.Faces); end
+    A=double(A|A'); deg=sum(A,2); deg(deg==0)=1; W=A./deg;     % row-normalized neighbour averaging
+    ds=double(dens(:)); s0=sum(ds);
+    for it=1:nIter, ds=0.5*ds + 0.5*(W*ds); end
+    if sum(ds)>0, ds=ds*(s0/sum(ds)); end
 end
 
 function reg=local_region(sW, v)
