@@ -25,8 +25,56 @@ function [foci, basinLabel, info] = pet_epicenter(SurfaceFile, suvrMap, Opts)
     % --- gradient-ascent basins of attraction (Morse-Smale segmentation) ---
     basinLabel=local_basins(fs, A, maxVerts);
 
+    % --- persistence of each maximum (super-level merge tree) -> rank + filter ---
+    pers=local_persistence(fs, A, maxVerts);
+    if isempty(Opts.MinPersist)
+        rng=max(fs(isfinite(fs)))-min(fs(isfinite(fs))); thr=0.15*rng;
+    else
+        thr=Opts.MinPersist;
+    end
+    keep=pers>=thr; mk=maxVerts(keep); pk=pers(keep);
+    % rank by persistence; break ties by peak height (each disconnected hemisphere has one
+    % essential, full-range-persistence max -> peak distinguishes the true epicenter).
+    [~,ord]=sortrows([pk(:), fs(mk(:))],'descend');
+    mk=mk(ord); pk=pk(ord);
+    if numel(mk)>Opts.nFociMax, mk=mk(1:Opts.nFociMax); pk=pk(1:Opts.nFociMax); end
     foci=struct('vertex',{},'peak',{},'persistence',{},'basinArea',{});
-    info=struct('smoothed',fs,'nFoci',numel(maxVerts),'maxVerts',maxVerts,'A',{A});
+    for i=1:numel(mk)
+        bi=find(maxVerts==mk(i),1);
+        foci(i)=struct('vertex',mk(i),'peak',fs(mk(i)),'persistence',pk(i),'basinArea',nnz(basinLabel==bi));
+    end
+
+    info=struct('smoothed',fs,'nFoci',numel(foci),'maxVerts',maxVerts,'A',{A});
+end
+
+% ===== persistence: peak height minus the level at which its basin merges into a higher one =====
+function pers=local_persistence(f, A, maxVerts)
+    n=numel(f); [~,order]=sort(f,'descend'); order=order(isfinite(f(order)));
+    comp=zeros(n,1); peakOf=zeros(n,1);                 % union-find parent + each root's peak vertex
+    isMax=false(n,1); isMax(maxVerts)=true;
+    pers=inf(numel(maxVerts),1); maxId=zeros(n,1); maxId(maxVerts)=1:numel(maxVerts);
+    for oi=1:numel(order)
+        v=order(oi);
+        nbUp=find(A(:,v)); nbUp=nbUp(comp(nbUp)>0);     % already-added (higher-or-equal) neighbours
+        roots=[]; for x=nbUp(:)', roots(end+1)=local_find(comp,x); end %#ok<AGROW>
+        roots=unique(roots);
+        if isempty(roots)
+            comp(v)=v; peakOf(v)=v;                     % new component born at a maximum
+        else
+            [~,hi]=max(f(arrayfun(@(r)peakOf(r),roots))); keepRoot=roots(hi);
+            comp(v)=keepRoot;
+            for r=roots(:)'
+                if r==keepRoot, continue; end
+                pv=peakOf(r);
+                if isMax(pv), pers(maxId(pv))=f(pv)-f(v); end   % lower peak dies at level f(v)
+                comp(r)=keepRoot;                               % merge into the higher peak
+            end
+        end
+    end
+    pers(~isfinite(pers))=max(f(isfinite(f)))-min(f(isfinite(f)));  % the global max never dies
+end
+function r=local_find(comp,x)
+    r=x; while comp(r)~=r && comp(r)~=0, r=comp(r); end
 end
 
 % ===== LBO heat smoothing of a vertex field (per hemisphere) =====
