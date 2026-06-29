@@ -2,7 +2,7 @@
 
 **Goal.** Promote the prototype connectome/combined Laplacians into proper Brainstorm operators:
 `tess_connectome` (find-or-create connectome from anatomy fibers) and two named operators in
-`tess_operators` (`Connectome Laplacian`, `Combined Laplacian`), with a registration-based fallback that
+`tess_operators` (`Connectome Laplacian`, `LB-Connectome`), with a registration-based fallback that
 lets any subject "borrow" the default HCP-1065 connectome when it has no DWI of its own.
 
 ## Reuse (do NOT duplicate Brainstorm)
@@ -36,7 +36,7 @@ lets any subject "borrow" the default HCP-1065 connectome when it has no DWI of 
 ## tess_operators: two named operators (stored as operator_ files)
 - **`Connectome Laplacian`** — graph Laplacian of the `tess_connectome` `W` (symmetric normalized
   `I - D^-1/2 W D^-1/2`, whole-brain). Stored like `Laplace-Beltrami`.
-- **`Combined Laplacian`** — `L = L_LBO (block-diag per-hemi) + gamma * L_connectome`. `gamma` balances
+- **`LB-Connectome`** — `L = L_LBO (block-diag per-hemi) + gamma * L_connectome`. `gamma` balances
   geodesic vs network (default from the fiber-length / spectrum scale; see the eigenwavelet mm
   calibration). FIRST operator that returns a SINGLE whole-brain basis (not `{LH, RH}`): its eigenmodes
   (via `tess_eigen`) span both hemispheres, and the DEC (`bst_gradient/divergence/curl`) flows across
@@ -52,7 +52,7 @@ registration's accuracy.
 ## Build order
 1. `tess_connectome` (ROI + vertex, own-fibers path) + validate vs `proto_fiber_connectome`.
 2. The template→subject registration fallback (`tess_interp_tess2tess`).
-3. `Connectome Laplacian` + `Combined Laplacian` in `tess_operators` (+ `tess_eigen` whole-brain path).
+3. `Connectome Laplacian` + `LB-Connectome` in `tess_operators` (+ `tess_eigen` whole-brain path).
 4. Operator-node storage + `db_update` migration (reuse the generic operator node).
 
 ## Open questions
