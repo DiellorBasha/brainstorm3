@@ -22,6 +22,11 @@ function R = proto_spread_eigenwavelet(SurfaceFile, A, Opts)
     % decompose each timepoint -> per-vertex per-band coefficients
     a1=A(:,1); a1(~isfinite(a1))=0;
     W1=bst_eigenwavelet('Analysis', a1, Eig, Op, frame); nB=size(W1,3);
+    % physical-scale calibration: each band's half-max-cutoff eigenvalue -> wavelength 2pi/sqrt(lambda)
+    % [mm] (exact via the Rayleigh quotient; lambda in 1/m^2 since surfaces are in metres).
+    lg=linspace(0,lmax,4000)'; Hg=bst_eigenwavelet('Evaluate',frame,lg); bandScaleMM=zeros(nB,1);
+    for m=1:nB, g=Hg(:,m)/max(Hg(:,m)); ic=find(g<=0.5,1); if isempty(ic), ic=numel(lg); end
+        bandScaleMM(m)=2*pi/sqrt(max(lg(max(ic,2)),eps))*1000; end
     Wv=zeros(nV,nB,nT); E=zeros(nB,nT);
     for t=1:nT
         a=A(:,t); a(~isfinite(a))=0;
@@ -33,5 +38,7 @@ function R = proto_spread_eigenwavelet(SurfaceFile, A, Opts)
     coarseB=1:max(1,round(nB/3));                          % coarse bands = the diffuse center
     epi=zeros(1,nT);
     for t=1:nT, Ev=sum(Wv(:,coarseB,t).^2,2); [~,epi(t)]=max(Ev); end
-    R=struct('E',E,'etot',etot,'scaleC',scaleC,'epi',epi,'nB',nB,'V',V,'Wv',Wv,'frame',frame);
+    scaleMM=interp1(1:nB, bandScaleMM, min(max(scaleC,1),nB));   % scale centroid in physical mm
+    R=struct('E',E,'etot',etot,'scaleC',scaleC,'scaleMM',scaleMM,'bandScaleMM',bandScaleMM, ...
+             'epi',epi,'nB',nB,'V',V,'Wv',Wv,'frame',frame);
 end
