@@ -190,6 +190,77 @@ function c = i_pad_cell(c, N)
 end
 
 
+%% ===== AXES: resolve the joint time-cortex axes (results-style binding) =====
+function ax = Axes(T, variant, nModes, tWin) %#ok<DEFNU>
+    % Resolve the JOINT (time, cortex) axes a dynamics table is bound to, mirroring how a results file
+    % binds a SurfaceFile + a Time vector. The CORTEX axis is an eigenbasis of the bound SurfaceFile
+    % (tess_eigen of the requested operator variant -> Phi, Lambda, mm via 2*pi/sqrt(lambda)); the TIME
+    % axis is the Time vector + Fs of the bound DataFile/ResultsFile; omega is the temporal FFT grid (Hz).
+    % This is the source-of-truth the JTV wavelet orchestrators read from (no separate bst_jtv needed).
+    %
+    % USAGE: ax = bst_dynamics('Axes', T, 'LB-Connectome', 300, [tStart tEnd])
+    if (nargin < 2) || isempty(variant), variant = 'Laplace-Beltrami'; end
+    if (nargin < 3) || isempty(nModes),  nModes  = 200; end
+    if (nargin < 4), tWin = []; end
+    if isempty(T.SurfaceFile), error('bst_dynamics(''Axes''): no SurfaceFile bound.'); end
+    % --- cortex axis (eigenbasis of the bound surface) ---
+    EigenMat = tess_eigen(T.SurfaceFile, variant, 'nModes', nModes, 'NoSave', true);
+    Op       = in_bst_operator(EigenMat.OperatorFile);
+    % --- time axis (Time/Fs of the bound recording; raw -> reconstructed + windowed) ---
+    timeFile = T.DataFile;
+    if isempty(timeFile) && ~isempty(T.Groups)
+        if isfield(T.Groups,'ResultsFile') && ~isempty(T.Groups(1).ResultsFile), timeFile = T.Groups(1).ResultsFile;
+        elseif isfield(T.Groups,'DataFile') && ~isempty(T.Groups(1).DataFile),   timeFile = T.Groups(1).DataFile; end
+    end
+    if isempty(timeFile), error('bst_dynamics(''Axes''): no DataFile/ResultsFile bound for the time axis.'); end
+    [Time, Fs] = i_load_time(timeFile, tWin);
+    nT = numel(Time); NFFT = nT;
+    omega = (0:NFFT-1) * (Fs / NFFT);                 % temporal frequency grid (Hz)
+    tlag  = (0:nT-1) / Fs;                             % time-lag axis (s) for eigen-time (ts) kernels
+    % --- assemble (assign cell fields after struct() to avoid struct-array widening) ---
+    ax = struct('Variant',EigenMat.Variant, 'Time',Time, 'Fs',Fs, 'nT',nT, 'NFFT',NFFT, ...
+                'omega',omega, 'tlag',tlag, 'SurfaceFile',T.SurfaceFile, 'TimeFile',timeFile);
+    ax.EigenMat = EigenMat;  ax.Operator = Op;
+    ax.Phi = EigenMat.Phi;   ax.Lambda = EigenMat.Lambda;  ax.Mass = Op.Mass;
+    ax.GlobalVertices = EigenMat.GlobalVertices;
+end
+
+function [Time, Fs] = i_load_time(file, tWin)
+    % Resolve a >=2-sample time vector (s) + Fs (Hz) from a results/data/raw file. A kernel results file
+    % follows to its DataFile; a raw (continuous) file is reconstructed from the sFile sampling rate and
+    % windowed (default first 4 s) - the whole continuous recording is impractical for an FFT.
+    if (nargin < 2), tWin = []; end
+    ft = file_gettype(file);
+    if any(strcmpi(ft, {'results','link','presults'}))
+        R = in_bst_results(file, 0, 'Time', 'DataFile');
+        if numel(R.Time) > 2
+            Time = R.Time;
+        elseif ~isempty(R.DataFile)
+            [Time, Fs] = i_load_time(R.DataFile, tWin); return;
+        else
+            error('bst_dynamics(''Axes''): results file has no usable time axis.');
+        end
+    else
+        D = in_bst_data(file, 'Time', 'F');
+        if numel(D.Time) > 2
+            Time = D.Time;                                         % stored epoch/average vector
+        elseif isstruct(D.F) && isfield(D.F,'prop')                % raw sFile -> reconstruct
+            t = D.F.prop.times; fs = D.F.prop.sfreq;
+            if isempty(tWin), tWin = [t(1), min(t(2), t(1) + 4)]; end   % default 4 s window
+            Time = max(t(1), tWin(1)) : 1/fs : min(t(2), tWin(2));
+        else
+            Time = D.Time;
+        end
+    end
+    if numel(Time) < 2, error('bst_dynamics(''Axes''): could not resolve a >=2-sample time axis.'); end
+    Fs = 1 / (Time(2) - Time(1));
+    if ~isempty(tWin) && (numel(Time) > 2)                          % window a stored vector
+        sel = (Time >= tWin(1)) & (Time <= tWin(2));
+        if any(sel), Time = Time(sel); end
+    end
+end
+
+
 %% ===== LOAD =====
 function T = Load(DynamicsFile)
     % Phase 1: load by absolute path (the 'dynamics_' type is not yet registered
