@@ -110,10 +110,14 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             Variant = 'Hodge-Face';
         case {'covariant','flat-covariant','ambient'}
             Variant = 'Covariant';
+        case {'connectome-laplacian','connectome'}
+            Variant = 'Connectome Laplacian';
+        case {'lb-connectome','lbconnectome','laplace-beltrami-connectome'}
+            Variant = 'LB-Connectome';
         otherwise
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant'', ''Connectome Laplacian'', ''LB-Connectome''.'], OperatorName);
     end
 
     % --- find-or-reuse a cached operator node before the (expensive) nxr build ---
@@ -153,6 +157,20 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             if ~isempty(depFiles); db_delete_surface_node(depFiles, 1); end
             db_delete_surface_node(existFile, 1);
         end
+    end
+
+    % --- connectome operators: WHOLE-BRAIN, built from fibers via tess_connectome (no nxr, no
+    %     hemisphere split). The connectome couples the two hemispheres, so there is no per-hemisphere
+    %     decomposition: the operator is stored in the same operator-file format but with
+    %     GlobalVertices{1} spanning the connected whole brain and {2} empty. These are the first
+    %     whole-brain operators in Brainstorm (tess_eigen then produces a single whole-brain basis). ---
+    if ismember(Variant, {'Connectome Laplacian','LB-Connectome'})
+        OperatorMat = local_build_connectome_operator(SurfaceFile, Variant);
+        if ~NoSave
+            [~, iSubjectSave] = bst_get('SurfaceFile', SurfaceFile);
+            db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, sprintf('%s operator', Variant));
+        end
+        return;
     end
 
     % --- load surface ---
@@ -467,6 +485,59 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         Comment = sprintf('%s operator', Variant);
         db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, Comment);
     end
+end
+
+% ----------------------------------------------------------------------------
+function OperatorMat = local_build_connectome_operator(SurfaceFile, Variant)
+% Build a WHOLE-BRAIN connectome operator from the surface's fibers (own or HCP-registered, via
+% tess_connectome). Stored single-block: GlobalVertices{1} = the connected vertices, {2} empty.
+%   'Connectome Laplacian' : symmetric normalized graph Laplacian I - D^-1/2 W D^-1/2 (mass B = I)
+%   'LB-Connectome'        : K_LBO + gamma*(D - W) vs mass M_LBO  (the combined whole-brain operator;
+%                            the connectome bridges the per-hemisphere cotan Laplacian)
+    R    = tess_connectome(SurfaceFile, 'Resolution', 'vertex');
+    keep = R.keep;  Wk = R.W(keep, keep);  nk = numel(keep);
+    d    = full(sum(Wk, 2));
+    switch Variant
+        case 'Connectome Laplacian'
+            Dm12  = spdiags(1./sqrt(max(d,eps)), 0, nk, nk);
+            A     = speye(nk) - Dm12*Wk*Dm12;  A = (A + A')/2;
+            B     = speye(nk);
+            gv    = keep(:);
+            gamma = [];
+        case 'LB-Connectome'
+            % per-hemisphere LBO (cotan stiffness K, galerkin mass M), assembled block-diagonal
+            lbo = tess_operators(SurfaceFile, 'Laplace-Beltrami', 'NoSave', true);
+            nV  = size(in_tess_bst(SurfaceFile, 0).Vertices, 1);
+            K = sparse(nV, nV);  M = sparse(nV, nV);
+            for hh = 1:numel(lbo.GlobalVertices)
+                g = lbo.GlobalVertices{hh}; if isempty(g), continue; end
+                K(g,g) = lbo.Operator{hh};  M(g,g) = lbo.Mass{hh};
+            end
+            Lc = sparse(nV, nV);  Lc(keep, keep) = spdiags(d, 0, nk, nk) - Wk;   % connectome graph Laplacian
+            gamma = local_balance_gamma(K, Lc);
+            A  = K + gamma*Lc;  A = (A + A')/2;
+            B  = M;
+            gv = (1:nV)';
+    end
+    OperatorMat = db_template('operatormat');
+    OperatorMat.Variant        = Variant;
+    OperatorMat.ParentSurface  = SurfaceFile;
+    OperatorMat.Operator       = {A, []};
+    OperatorMat.Mass           = {B, []};
+    OperatorMat.GlobalVertices = {gv, []};
+    OperatorMat.GlobalFaces    = {[], []};
+    prov = struct('Backend','tess_connectome', 'Variant',Variant, 'Fibers',R.Provenance.fibers, ...
+                  'WholeBrain',true, 'ComputeDate',datestr(now,'yyyy-mm-dd HH:MM:SS'));
+    if ~isempty(gamma), prov.Gamma = gamma; end
+    OperatorMat.Provenance = prov;
+end
+
+% ----------------------------------------------------------------------------
+function gamma = local_balance_gamma(K, Lc)
+% Scale-portable balance of the connectome graph Laplacian against the LBO cotan stiffness:
+% match their mean nonzero diagonal magnitude (so gamma*(D-W) sits at the K diagonal scale).
+    dK = full(diag(K));  dL = full(diag(Lc));
+    gamma = mean(abs(dK(dK~=0))) / max(mean(abs(dL(dL~=0))), eps);
 end
 
 % ----------------------------------------------------------------------------

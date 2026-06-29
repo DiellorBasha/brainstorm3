@@ -112,10 +112,14 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             Variant = 'Dirac-Face';
         case {'hodge-face','hodgeface'}
             Variant = 'Hodge-Face';
+        case {'connectome-laplacian','connectome'}
+            Variant = 'Connectome Laplacian';
+        case {'lb-connectome','lbconnectome','laplace-beltrami-connectome'}
+            Variant = 'LB-Connectome';
         otherwise
             error('tess_eigen:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Connectome Laplacian'', ''LB-Connectome''.'], OperatorName);
     end
     isDiracFace = strcmpi(Variant, 'Dirac-Face');
     isHodgeFace = strcmpi(Variant, 'Hodge-Face');           % scalar lapFace eigensolve + Hodge vector lift
@@ -221,6 +225,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         case 'Connection Laplacian', prov.Ortho = 'M-orthonormal (smallest-positive)';
         case {'Dirac','Dirac-Face'}, prov.Ortho = 'Rayleigh-Ritz';
         case 'Hodge-Face',           prov.Ortho = 'Hodge lift (W_F-orthonormal)';
+        case {'Connectome Laplacian','LB-Connectome'}, prov.Ortho = 'B-orthonormal (real, whole-brain)';
         otherwise,                   prov.Ortho = '';
     end
     prov.ComputeDate = datestr(now,'yyyy-mm-dd HH:MM:SS');
@@ -240,6 +245,13 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         B  = Op.Mass{hh};
         gv = Op.GlobalVertices{hh};
 
+        % Whole-brain operators (Connectome Laplacian / LB-Connectome) store the entire brain in
+        % block 1 and leave block 2 empty (the connectome couples the hemispheres, so there is no
+        % per-hemisphere split). Skip the empty block.
+        if isempty(gv)
+            Phi{hh} = []; Lambda{hh} = []; GlobalVertices{hh} = []; continue;
+        end
+
         hemiName = 'left'; if hh == 2, hemiName = 'right'; end
         bst_progress('text', sprintf('Eigensolve: %s hemisphere (%s, K=%d)...', hemiName, Variant, K));
 
@@ -252,6 +264,10 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
         %   Hodge-Face           scalar lapFace + lift   -> 3D face vector fields
         switch Variant
             case 'Laplace-Beltrami'
+                [Vk, lamk] = local_solve_lbo(A, B, K);
+            case {'Connectome Laplacian','LB-Connectome'}
+                % real symmetric generalized A*phi = lambda*B*phi (B = I for the connectome graph
+                % Laplacian, B = M_LBO for LB-Connectome): the LBO solver path.
                 [Vk, lamk] = local_solve_lbo(A, B, K);
             case 'Connection Laplacian'
                 [Vk, lamk] = local_solve_connection(A, B, K);
