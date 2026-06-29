@@ -13,10 +13,14 @@ the **results file already IS the joint cortex-time axis** (`SurfaceFile`+`Time`
    `SurfaceFile` (cortex), `Time` (`Fs = 1/(Time(2)-Time(1))`), and `DataFile`. That is the joint
    time-vertex axis, complete with file I/O. **No `bst_jtv` is needed** — `bst_dynamics` adopts this same
    architecture so atoms inherit the axes.
-2. **The atom IS the joint filter.** `bst_atom` already abstracts all four axes as `(center, extent,
-   weighting)`. Hard = indicator (current); **soft = wavelet** (this work). The atom's output — a
-   time-localized, cortex-localized field with scale + frequency definition — is exactly what a dynamic
-   wavelet produces.
+2. **The atom IS the canonical dynamic wavelet; Scout/Event are level sets of it.** The atom carries a
+   smooth joint time-cortex wavelet kernel. Brainstorm's existing hard indicators are *derived views*: a
+   **level set of the cortical wavelet is a Scout** (region indicator), a **level set of the temporal
+   wavelet is an Event** (time window). So a Scout+Event pair is a thresholded atom (joint indicator), and
+   a **dynamic eigenwavelet is a time-varying scout/indicator**. The wavelet is primary; the indicator is
+   derived (level-set is the canonical route, not the only one). Consequently `bst_atom` drops the
+   `hard/soft` weighting flag — the atom *always* carries a wavelet kernel, and a `Levelset` operation
+   produces the Scout/Event when an indicator is wanted.
 3. **A filterbank = a bank of atoms** (the GSPBox bookkeeping, in our object).
 
 ## Mapping — GSPBox JTV ↔ Brainstorm (an expansion, not a rewrite)
@@ -38,17 +42,19 @@ These axes are *resolved on demand* from the bound files (exactly how a results 
 vector and references its cortex). The atom's `.scale [k1 k2]` and `.band [fLo fHi]` are then *windows on
 these axes* — the atom's footprint in the joint `(λ, ω)` domain.
 
-## B. The atom = the joint filter; `'soft'` weighting = wavelet
-`bst_atom`'s `(center, extent, weighting)` per axis becomes the wavelet spec:
-- **source axis**: `center`=seed vertex, `extent`=geodesic radius; `hard`=disk indicator → `soft`=spatial
-  eigenfilter kernel on the cortex eigenbasis (heat/mexhat/damped-wave) centred at the seed.
-- **time axis**: `center`/`extent`=window; `hard`=box → `soft`=temporal wavelet envelope.
-- **scale axis**: `[k1 k2]` selects the eigen-band the spatial kernel lives in.
-- **freq axis**: `[fLo fHi]` selects the temporal-frequency band.
-**Separable** atom = soft-source ⊗ soft-time (independent). **Non-separable** atom = the source and time
-axes COUPLE through a dispersion (damped-wave: the cortex scale `λ` sets the temporal oscillation) — this
-is the genuinely *dynamic* wavelet. `bst_atom` gains a `Kernel`/`Evaluate` path that turns a soft
-localization into the actual weighted field via the eigenfilter library.
+## B. The atom = the canonical joint wavelet; Scout/Event = level sets
+`bst_atom`'s per-axis localization carries a **wavelet kernel** (a design name + params), not a hard/soft
+flag:
+- **source axis**: `center`=seed vertex; kernel = a spatial eigenfilter on the cortex eigenbasis
+  (heat/mexhat/damped-wave). Its **level set** (threshold) = a **Scout** (region indicator).
+- **time axis**: `center`=time; kernel = a temporal envelope. Its **level set** = an **Event** (window).
+- **scale axis** `[k1 k2]` / **freq axis** `[fLo fHi]`: select the eigen-band / temporal-frequency band the
+  kernels live in.
+**Separable** atom = source-wavelet ⊗ time-wavelet (independent). **Non-separable** (genuinely *dynamic*)
+atom = the source and time axes COUPLE through a dispersion (damped-wave: the cortex scale `λ` sets the
+temporal oscillation) — a **time-varying scout**. `bst_atom` gains two paths: `Kernel`/`Evaluate`
+(localization → weighted field via the eigenfilter library) and `Levelset` (wavelet → Scout/Event
+indicator). The old `weighting='hard'|'soft'` field is removed; the indicator is just a level set.
 
 ## C. Dynamic eigenfilter library (`toolbox/eigen/eigfilter/`, Domain × Separable)
 The static library already exists (`heat`, `mexhat`, `log`, `tikhonov`, `diffgauss`, `inverse_heat`,
@@ -64,19 +70,24 @@ The static library already exists (`heat`, `mexhat`, `log`, `tikhonov`, `diffgau
 `bst_eigfilter_evaluate` gains the ts↔js conversion (`fft`/`ifft` along time, as `gsp_jtv_filter_evaluate`
 does) so a kernel stored in either domain applies in the joint spectral domain.
 
-## D. Orchestration — `bst_eigenfilter` / `bst_eigenwavelet`
-The verb orchestrators gain JTV-aware Analysis/Synthesis that read the axes from the bound results/dynamics
-structure and the kernel from the library:
+## D. The joint transform (`toolbox/math/`) + orchestration
+The joint Fourier transform extends the existing `manifold_ft`/`manifold_ift` (`C = Φ'(M·U)` / `U = Φ·C`)
+with the temporal axis — added in `toolbox/math/` as the sibling pair:
+```
+Chat = manifold_jft(Phi, M, U, NFFT)   % = fft(Phi'*(M*U), NFFT, 2)   cortex FT x time FT   [K x NFFT]
+U    = manifold_ijft(Phi, Chat)        % = Phi*ifft(Chat, [], 2)      inverse joint FT       [nV x nT]
+```
+The orchestrators (`bst_eigenfilter`/`bst_eigenwavelet`) then do JTV Analysis/Synthesis by reading the axes
+from the bound results/dynamics structure and the kernel from the library:
 ```
 W = bst_eigenwavelet('Analysis', F, EigenMat, OperatorMat, frame, JTVaxes)
-   C    = Φ'·(B·F)                 % cortex FT          [K x nT]
-   Chat = fft(C, NFFT, 2)          % time FT            [K x NFFT]
-   G    = bst_eigfilter_evaluate(kernel, Lambda, omega) % ts→js if needed
-   W    = Φ·real(ifft(Chat .* conj(G), NFFT, 2))        % inverse joint FT
+   Chat = manifold_jft(Phi, B, F, NFFT)                  % joint FT
+   G    = bst_eigfilter_evaluate(kernel, Lambda, omega)  % ts→js if needed
+   W    = manifold_ijft(Phi, Chat .* conj(G))            % filter + inverse joint FT
 ```
-The output is written back as a **bank of atoms** (one atom per band/scale, soft-weighted). For the
-**whole-brain LB-Connectome** eigenbasis the per-hemisphere loop collapses to one block, so dispersion acts
-over geometry **and** connectome.
+The output is written back as a **bank of atoms** (one atom per band/scale). For the **whole-brain
+LB-Connectome** eigenbasis the per-hemisphere loop collapses to one block, so dispersion acts over geometry
+**and** connectome.
 
 ## Physical units (the payoff)
 `λ→mm` (`2π/√λ`), `ω→Hz` (`Fs`), and the wave parameter `α→m/s` (temporal-freq `∝ α√λ`, spatial-freq `∝
@@ -93,7 +104,8 @@ composable.
 | Need | Exists | New |
 |---|---|---|
 | joint cortex-time axis + I/O | **results architecture** (`SurfaceFile`/`Time`/`DataFile`/`Fs`) | `bst_dynamics` adopts it |
-| 4-axis localization + hard/soft hook | **`bst_atom`** (`weighting='soft'` reserved) | fill `'soft'` (wavelet) |
+| 4-axis localization | **`bst_atom`** `(center,extent)` per axis | atom carries a wavelet kernel; `Levelset`→Scout/Event |
+| eigen transform | `manifold_ft`/`manifold_ift` (`toolbox/math/`) | + `manifold_jft`/`manifold_ijft` (joint, time FFT) |
 | eigenbasis | `tess_eigen` (LBO / whole-brain LB-Connectome) | — |
 | static eigenfilters | full library in `eigfilter/` | + dynamic ts/js designs |
 | verb orchestrators | `bst_eigenfilter`/`bst_eigenwavelet` | JTV Analysis/Synthesis + ts/js evaluate |
@@ -102,15 +114,18 @@ composable.
 ## Plan
 1. **`bst_dynamics` ← results architecture** — bind `SurfaceFile`/`DataFile`/operator-variant; resolve the
    `(Lambda, Time, Fs, omega)` axes on demand (mirrors how results reconstruct time + reference cortex).
-2. **Dynamic eigenfilter library** — `diffusion` (physical-time heat, the bridge) + `wave`/`dampedwave`/
+2. **`manifold_jft` / `manifold_ijft`** (`toolbox/math/`) — the joint transform (cortex eigen × time FFT),
+   sibling to `manifold_ft`/`manifold_ift`; round-trip + Parseval unit-tested.
+3. **Dynamic eigenfilter library** — `diffusion` (physical-time heat, the bridge) + `wave`/`dampedwave`/
    `kleingordon`/`meyerjtv`; `bst_eigfilter_evaluate` ts↔js conversion. Tag Domain × Separable.
-3. **`bst_atom` soft weighting** — `Kernel`/`Evaluate` path: a soft localization → the weighted field via
-   the library (separable source⊗time; non-separable dispersion).
-4. **Orchestrator JTV Analysis/Synthesis** — joint Fourier (`Φ'B` × `fft`), output as a bank of atoms;
-   frame-bounds/Parseval check.
-5. **Validate** — drop an atom on a posterior-occipital vertex, propagate `dampedwave` over the
+4. **`bst_atom` kernel + level-set** — `Kernel`/`Evaluate` (localization → weighted field via the library;
+   separable source⊗time, non-separable dispersion) + `Levelset` (wavelet → Scout/Event). Remove the
+   `hard/soft` weighting flag.
+5. **Orchestrator JTV Analysis/Synthesis** — through `manifold_jft`/`manifold_ijft` + the kernel; output a
+   bank of atoms; frame-bounds/Parseval check.
+6. **Validate** — drop an atom on a posterior-occipital vertex, propagate `dampedwave` over the
    **LB-Connectome** eigenbasis, recover the alpha traveling-wave speed (m/s); confirm the static heat is
-   the `ω`-independent limit.
+   the `ω`-independent limit, and that a level set of the atom reproduces a sensible Scout+Event.
 
 *(Reaction-diffusion: OUT of scope for now — nonlinear, no GSPBox analog; add later as a forward-sim
 dynamic atom.)*
