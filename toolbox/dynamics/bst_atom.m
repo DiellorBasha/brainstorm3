@@ -139,6 +139,47 @@ function G = Set(G, axis, occ, loc)
     end
 end
 
+%% ===== EVALUATE: realize an atom as a joint time-cortex WAVELET field =====
+function [W, gv] = Evaluate(G, occ, ax, kernelName, kernelParams) %#ok<DEFNU>
+    % Realize the atom occurrence as a smooth wavelet field W [nLoc x nT] over the eigenbasis support gv:
+    % propagate the source-axis seed through the cortex eigenbasis with a dynamic eigenfilter over the
+    % time axis. A dynamic (eigen-time) kernel gives a TIME-VARYING scout (a propagating wave); a static
+    % (eigen-frequency) kernel gives a smooth scout constant in time. This is the canonical wavelet; its
+    % cortical level set is a Scout and its temporal level set is an Event (see Levelset).
+    %
+    % USAGE: [W,gv] = bst_atom('Evaluate', G, occ, ax, 'dampedwave', struct('alpha',6,'beta',0.4))
+    %   ax = bst_dynamics('Axes', T, variant, nModes, tWin)
+    if (nargin < 2) || isempty(occ),          occ          = 1;            end
+    if (nargin < 4) || isempty(kernelName),   kernelName   = 'dampedwave'; end
+    if (nargin < 5) || isempty(kernelParams), kernelParams = struct();     end
+    seed = double(G.vertices(occ));
+    gv   = ax.GlobalVertices{1};  loc = find(gv == seed, 1);
+    if isempty(loc), error('bst_atom(''Evaluate''): seed vertex %d not in the eigenbasis support.', seed); end
+    Phi = ax.Phi{1};  Lam = ax.Lambda{1};  M = ax.Mass{1};
+    c0  = manifold_ft(Phi, M, full(sparse(loc,1,1,size(Phi,1),1)));    % seed in the eigenbasis [K x 1]
+    kp  = kernelParams;  if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(Lam); end
+    g    = bst_eigfilter_kernel(kernelName, kp);
+    meta = bst_eigfilter_kernel('info', kernelName);
+    if isfield(meta,'domain') && strcmpi(meta.domain,'ts')            % dynamic (eigen-time) -> propagate
+        W = manifold_ift(Phi, g(Lam, ax.tlag) .* c0);                 % [nLoc x nT]
+    else                                                              % static (eigen-frequency) -> smooth scout
+        W = repmat(manifold_ift(Phi, g(Lam) .* c0), 1, ax.nT);
+    end
+end
+
+%% ===== LEVELSET: derive the hard indicators (Scout / Event) from the wavelet =====
+function LS = Levelset(W, gv, thr, iRef) %#ok<DEFNU>
+    % A Scout is a level set of the CORTICAL wavelet (at the peak-energy time iRef); an Event is a level
+    % set of the TEMPORAL wavelet (energy over time). thr = fraction of the per-axis max (default 0.5).
+    if (nargin < 3) || isempty(thr), thr = 0.5; end
+    e = sum(W.^2, 1);
+    if (nargin < 4) || isempty(iRef), [~, iRef] = max(e); end
+    wRef = abs(W(:, iRef));
+    LS.scoutVertices = gv(wRef >= thr * max(wRef));     % cortical level set -> Scout (global vertices)
+    LS.eventSamples  = find(e   >= thr * max(e));        % temporal level set -> Event (sample indices)
+    LS.iRef          = iRef;
+end
+
 % group type consistent with the times row count
 function t = i_type(times)
     if (size(times,1) >= 2), t = 'extended'; else, t = 'simple'; end
