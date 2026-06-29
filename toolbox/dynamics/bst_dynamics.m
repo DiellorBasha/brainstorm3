@@ -204,7 +204,7 @@ function ax = Axes(T, variant, nModes, tWin) %#ok<DEFNU>
     if (nargin < 4), tWin = []; end
     if isempty(T.SurfaceFile), error('bst_dynamics(''Axes''): no SurfaceFile bound.'); end
     % --- cortex axis (eigenbasis of the bound surface) ---
-    EigenMat = tess_eigen(T.SurfaceFile, variant, 'nModes', nModes, 'NoSave', true);
+    EigenMat = tess_eigen(T.SurfaceFile, variant, 'nModes', nModes);   % cache + reuse the eigen_ file (no NoSave)
     Op       = in_bst_operator(EigenMat.OperatorFile);
     % --- time axis (Time/Fs of the bound recording; raw -> reconstructed + windowed) ---
     timeFile = T.DataFile;
