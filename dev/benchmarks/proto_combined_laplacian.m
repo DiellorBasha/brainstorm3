@@ -16,7 +16,7 @@ function R = proto_combined_laplacian(trkFile, seedRegion, beta)
     here=bst_fileparts(mfilename('fullpath'));
 
     % --- connectome on the ICBM152 default subject (Desikan, aligned to the MNI tractography) ---
-    [sDef,~]=bst_get('Subject','HCPtemplate'); sMri=in_mri_bst(sDef.Anatomy(sDef.iAnatomy).FileName);
+    [sDef,~]=bst_get('Subject',0); sMri=in_mri_bst(sDef.Anatomy(sDef.iAnatomy).FileName);   % default anatomy (holds the ICBM152 + HCP-1065 fibers)
     sIc=in_tess_bst(sDef.Surface(find(~cellfun('isempty',regexp({sDef.Surface.FileName},'cortex_mid_low\.mat$','once')),1)).FileName);
     EP=local_read_trk_endpoints(trkFile);
     toMNI=@(P)[-P(:,1)+79.5, -P(:,2)+81.5, P(:,3)-72];        % DSI ICBM152 2mm voxel(*2=mm)->MNI mm
