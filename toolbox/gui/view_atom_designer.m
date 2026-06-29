@@ -56,33 +56,31 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     end
     pref = {'dampedwave','wave','kleingordon','diffusion'};                 % favour the dynamic atoms
     dynK = [pref(ismember(pref,dynK)), setdiff(dynK, pref, 'stable')];
-    DIVIDER = '──────  spatial  ──────';
-    kList = [dynK, {DIVIDER}, spatialK];  iDiv = numel(dynK) + 1;
+    DH = '──── dynamic ────';  SH = '──── static ────';                    % #1: both group headers
+    kList = [{DH}, dynK, {SH}, spatialK];  iDH = 1;  iSH = numel(dynK) + 2;
 
     % --- state (closure-shared) ---
     state    = 'design';                 % 'design' | 'save'
-    kernel   = 'dampedwave';  lastKIdx = 1;
+    kernel   = 'dampedwave';  lastKIdx = 2;
     pScaleMM = round((scaleMinMM+scaleMaxMM)/2);   % spatial scale (mm)
     pSpeed   = 1.0;                      % wave speed c (m/s), non-separable only
     pDecay   = 0.5;                      % decay time (s), damped only
-    nFrames  = 100;  ax.nT = nFrames;  ax.tlag = (0:nFrames-1)/100;   % #4: standard 1 s @ 100 Hz time vector
+    nFrames  = 100;  ax.nT = nFrames;  ax.tlag = (0:nFrames-1)/100;   % standard 1 s @ 100 Hz time vector
     cmap = [ [linspace(0,1,32)';ones(32,1)], [linspace(0,1,32)';linspace(1,0,32)'], [ones(32,1);linspace(1,0,32)'] ];
     W = [];  curFrame = 1;  seedVtx = [];
     colormap(hAxes, cmap);
 
-    % --- top-right filter-design panel (#3) ---
-    hP = uipanel('Parent',hFig, 'Title','Filter design', 'Units','normalized', 'Position',[0.69 0.62 0.305 0.36], ...
+    % --- top-right filter-design panel: kernel + sliders, compactly spaced (#2,#3) ---
+    hP = uipanel('Parent',hFig, 'Title','Filter design', 'Units','normalized', 'Position',[0.70 0.68 0.295 0.30], ...
                  'FontUnits','points','FontSize',bst_get('FigFont'));
-    row = @(r) [0.04 0.82-0.14*r 0.40 0.10];  rowR = @(r) [0.45 0.82-0.14*r 0.52 0.10];
-    uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',row(0),'HorizontalAlignment','left');
-    hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Units','normalized','Position',rowR(0),'Callback',@KernelChanged);
-    hL1 = uicontrol(hP,'Style','text','String','Scale (mm)','Units','normalized','Position',row(1),'HorizontalAlignment','left');
-    hScale = uicontrol(hP,'Style','edit','String',num2str(pScaleMM),'Units','normalized','Position',rowR(1),'Callback',@ParamChanged);
-    hL2 = uicontrol(hP,'Style','text','String','Speed c (m/s)','Units','normalized','Position',row(2),'HorizontalAlignment','left');
-    hSpeed = uicontrol(hP,'Style','edit','String',num2str(pSpeed),'Units','normalized','Position',rowR(2),'Callback',@ParamChanged);
-    hL3 = uicontrol(hP,'Style','text','String','Decay (s)','Units','normalized','Position',row(3),'HorizontalAlignment','left');
-    hDecay = uicontrol(hP,'Style','edit','String',num2str(pDecay),'Units','normalized','Position',rowR(3),'Callback',@ParamChanged);
-    hSave = uicontrol(hP,'Style','pushbutton','String','Save atom','Units','normalized','Position',[0.06 0.04 0.88 0.12],'Callback',@SaveAtom);
+    yk = 0.80; ys = [0.60 0.43 0.26];  lw=0.30; sw=0.42; vw=0.16;
+    uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',[0.04 yk lw 0.13],'HorizontalAlignment','left');
+    hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Value',2,'Units','normalized','Position',[0.35 yk 0.61 0.14],'Callback',@KernelChanged);
+    [hScale,hScaleV] = i_slider(hP,'Scale', ys(1), lw,sw,vw, scaleMinMM, scaleMaxMM, pScaleMM, @ParamChanged);
+    [hSpeed,hSpeedV] = i_slider(hP,'Speed', ys(2), lw,sw,vw, 0.1, 10,  pSpeed, @ParamChanged);
+    [hDecay,hDecayV] = i_slider(hP,'Decay', ys(3), lw,sw,vw, 0.05, 2,  pDecay, @ParamChanged);
+    hSave = uicontrol(hP,'Style','pushbutton','String','Save','Units','normalized','Position',[0.80 0.04 0.16 0.14], ...
+                      'Callback',@SaveAtom, 'TooltipString','Save atom -> Scout + Event');
 
     hLabel = uicontrol(hFig,'Style','text','String','[design] Left-click the cortex to drop an atom; drag / click off = rotate; arrows = step time.', ...
         'Units','Pixels','Position',[8 6 800 18],'HorizontalAlignment','left','FontUnits','points','FontSize',bst_get('FigFont'));
@@ -97,22 +95,23 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     % ===== nested callbacks =====
     function KernelChanged(src,~)
         idx = get(src,'Value');
-        if idx == iDiv, set(src,'Value',lastKIdx); return; end          % skip the divider entry
+        if idx==iDH || idx==iSH, set(src,'Value',lastKIdx); return; end  % skip the group headers
         lastKIdx = idx;  opt = get(src,'String');  kernel = opt{idx};
         SyncControls();  Regen();
     end
     function ParamChanged(~,~)
-        pScaleMM=str2double(get(hScale,'String')); pSpeed=str2double(get(hSpeed,'String'));
-        pDecay=str2double(get(hDecay,'String'));   Regen();
+        pScaleMM=get(hScale,'Value'); pSpeed=get(hSpeed,'Value'); pDecay=get(hDecay,'Value');
+        set(hScaleV,'String',num2str(round(pScaleMM))); set(hSpeedV,'String',sprintf('%.2g',pSpeed)); set(hDecayV,'String',sprintf('%.2g',pDecay));
+        Regen();
     end
     function SyncControls()
         m = bst_eigfilter_kernel('info', kernel);
         isDyn = isfield(m,'domain') && ~isempty(m.domain);
         isSep = ~isfield(m,'separable') || m.separable;
-        set([hL2 hSpeed], 'Enable', i_en(isDyn && ~isSep));             % speed c: non-separable only
-        set([hL3 hDecay], 'Enable', i_en(strcmpi(kernel,'dampedwave'))); % decay: damped only
-        set(hLabel,'String',sprintf('[%s] %s%s | scale %s mm (cortex %.0f-%.0f mm) | t 0-%.2fs @100Hz', ...
-            state, kernel, i_en2b(isDyn&&~isSep,pSpeed), get(hScale,'String'), scaleMinMM, scaleMaxMM, ax.tlag(end)));
+        set([hSpeed hSpeedV], 'Enable', i_en(isDyn && ~isSep));          % speed c: non-separable only
+        set([hDecay hDecayV], 'Enable', i_en(strcmpi(kernel,'dampedwave'))); % decay: damped only
+        set(hLabel,'String',sprintf('[%s] %s%s | scale %.0f mm (cortex %.0f-%.0f mm) | t 0-%.2fs @100Hz', ...
+            state, kernel, i_en2b(isDyn&&~isSep,pSpeed), pScaleMM, scaleMinMM, scaleMaxMM, ax.tlag(end)));
     end
     function Regen(), if ~isempty(seedVtx), Generate(); end, end
     function OnDown(h,ev), downXY = get(hFig,'CurrentPoint'); i_call(origDown,h,ev); end
@@ -197,6 +196,11 @@ function i_call(fcn,h,ev)
 end
 function s = i_en(tf),  if tf, s='on'; else, s='off'; end, end
 function s = i_en2b(show,c), if show, s=sprintf(' | speed %.2g m/s', c); else, s=''; end, end
+function [hS,hV] = i_slider(p, name, y, lw, sw, vw, mn, mx, v0, cb)
+    uicontrol(p,'Style','text','String',name,'Units','normalized','Position',[0.04 y lw 0.12],'HorizontalAlignment','left');
+    hS = uicontrol(p,'Style','slider','Min',mn,'Max',mx,'Value',max(min(v0,mx),mn),'Units','normalized','Position',[0.35 y+0.01 sw 0.10],'Callback',cb);
+    hV = uicontrol(p,'Style','text','String',num2str(round(v0,2)),'Units','normalized','Position',[0.80 y vw 0.12],'HorizontalAlignment','left');
+end
 function L = i_mean_edge(V,F)
     e=[F(:,[1 2]);F(:,[2 3]);F(:,[3 1])]; L=mean(sqrt(sum((V(e(:,1),:)-V(e(:,2),:)).^2,2)));
 end
