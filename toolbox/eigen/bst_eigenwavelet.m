@@ -201,6 +201,64 @@ function [Frec, Messages, isError] = Synthesis(W, EigenMat, OperatorMat, frame) 
 end
 
 
+%% ===== JTVANALYSIS: decompose a time-vertex map through a dynamic (JTV) filterbank =====
+function [W, Messages, isError] = JTVAnalysis(F, ax, kernels) %#ok<DEFNU>
+    % Joint time-vertex analysis: decompose a source map F [nV x nT] through a bank of dynamic
+    % eigenfilter kernels (kernels = cell of struct('name',..,'params',..)). Each band is applied in the
+    % joint spectral domain (manifold_jft -> multiply by the kernel's joint-spectral gains -> manifold_ijft).
+    %   W [nV x nT x M] : the JTV coefficient fields (one per band/scale/speed).
+    % ax = bst_dynamics('Axes', T, variant, nModes, tWin).
+    Messages = ''; isError = 0;
+    M = numel(kernels); nT = size(F, 2); NFFT = nT;
+    W = zeros(size(F, 1), nT, M);
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};  if isempty(Phi), continue; end
+        Lam = ax.Lambda{h}(:);  B = ax.Mass{h};  gv = ax.GlobalVertices{h}(:);
+        Chat = manifold_jft(Phi, B, F(gv, :), NFFT);          % joint Fourier  [K x NFFT]
+        for m = 1:M
+            [g, dom] = i_jtv_kernel(kernels{m}, Lam);
+            if strcmpi(dom, 'ts'), axisVec = ax.tlag; else, axisVec = ax.omega; end
+            Gjs = bst_eigfilter_jtv_evaluate(g, dom, Lam, axisVec, NFFT);
+            W(gv, :, m) = real(manifold_ijft(Phi, Chat .* conj(Gjs), nT));
+        end
+    end
+end
+
+
+%% ===== JTVATOMS: localize a JTV scalogram into a bank of atoms =====
+function T = JTVAtoms(W, ax, thr) %#ok<DEFNU>
+    % Localize each band of a JTV scalogram W [nV x nT x M] into an atom: peak vertex (source), peak-energy
+    % time window (Event/level set), cortical level set (Scout). Returns a dynamicsmat (a bank of atoms).
+    if (nargin < 3) || isempty(thr), thr = 0.5; end
+    T = bst_dynamics('New', 'jtv-atoms');  T.SurfaceFile = ax.SurfaceFile;  T.DataFile = ax.TimeFile;
+    Vtx = []; if exist('in_tess_bst','file'), s = in_tess_bst(ax.SurfaceFile, 0); Vtx = s.Vertices; end
+    for m = 1:size(W, 3)
+        Wm = W(:, :, m);  e = sum(Wm.^2, 1);
+        if max(e) <= 0, continue; end
+        [~, iRef] = max(e);  [~, seed] = max(abs(Wm(:, iRef)));
+        G = bst_dynamics('NewGroup', sprintf('atom_%d', m));
+        G.vertices = seed;  if ~isempty(Vtx), G.pos = Vtx(seed, :); end
+        ev = find(e >= thr * max(e));  G.times = [ax.Time(ev(1)); ax.Time(ev(end))];
+        wRef = abs(Wm(:, iRef));  G.region = { find(wRef >= thr * max(wRef))' };
+        T = bst_dynamics('AddGroup', T, G);
+    end
+end
+
+
+function [g, dom] = i_jtv_kernel(spec, Lam)
+    p = spec.params;  if ~isfield(p, 'lmax') || isempty(p.lmax), p.lmax = max(Lam); end
+    g0 = bst_eigfilter_kernel(spec.name, p);
+    meta = bst_eigfilter_kernel('info', spec.name);
+    dom = 'js';  if isfield(meta, 'domain') && ~isempty(meta.domain), dom = meta.domain; end
+    if nargin(g0) == 1                                   % static spatial filter g(lambda): time-invariant
+        g = @(l, x) g0(l(:)) .* ones(1, numel(x));       %   -> G(lambda,omega) = g(lambda), constant over omega
+        dom = 'js';
+    else
+        g = g0;
+    end
+end
+
+
 %% ===== ATOM: wavelet atoms at a seed (filtered delta) =====
 % seedDir: scalar (Laplace-Beltrami), complex phase (Connection Laplacian), or 3-vector
 % dipole (Dirac family). Returns A = the per-member atoms [fieldrows x 1 x M], full
