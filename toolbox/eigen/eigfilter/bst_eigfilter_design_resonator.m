@@ -12,7 +12,7 @@ end
 if nargin < 1 || isempty(params); params = struct(); end
 if ~isfield(params,'f0') || isempty(params.f0); params.f0 = 10; end
 if ~isfield(params,'Q')  || isempty(params.Q);  params.Q  = 6;  end
-out = @(l,w) i_reson(l, w, params.f0, max(params.Q,eps));
+out = @(l,w) i_reson(l, w, max(params.f0,eps), max(params.Q,eps));   % f0>0: f0=0 makes H=0/0 (NaN) at DC
 end
 function G = i_reson(l, w, f0, Q)
     ws = i_signed(w);
