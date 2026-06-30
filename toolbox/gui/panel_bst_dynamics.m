@@ -83,48 +83,42 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('button', jMenuBar, [], '', {IconLoader.ICON_DELETE, java_scaled('dimension', 24, 20)}, ...
         'Close the Dynamics session (hide this panel + close its source figure)', @(h,e)bst_call(@OnCloseSession));
 
-    % --- split: band stack TREE (left) | flat per-window atom list (right) ---
-    jTree = java_create('javax.swing.JTree');
-    jTree.setRootVisible(0);  jTree.setShowsRootHandles(1);
-    jTree.getSelectionModel().setSelectionMode(javax.swing.tree.TreeSelectionModel.SINGLE_TREE_SELECTION);
-    jTree.setFont(Font('Monospaced', Font.PLAIN, fontSize));
-    rend = javax.swing.tree.DefaultTreeCellRenderer();   % band = data-list STACK icon; windows = leaf
-    rend.setClosedIcon(IconLoader.ICON_DATA_LIST);  rend.setOpenIcon(IconLoader.ICON_DATA_LIST);  rend.setLeafIcon(IconLoader.ICON_DATA);
-    jTree.setCellRenderer(rend);
-    java_setcb(jTree, 'ValueChangedCallback', @(h,e)TreeSel_Callback());
-    jScrollTree = JScrollPane(jTree);  jScrollTree.setBorder([]);
-
-    jListOccur = JList();
-    jListOccur.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    jListOccur.setCellRenderer(BstStringListRenderer(fontSize));
-    java_setcb(jListOccur, 'ValueChangedCallback', @(h,e)OccurSel_Callback());
-    jScrollOccur = JScrollPane(jListOccur);  jScrollOccur.setBorder([]);
-
-    jSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, jScrollTree, jScrollOccur);
-    jSplit.setResizeWeight(0.5);  jSplit.setDividerSize(java_scaled('value', 4));  jSplit.setBorder([]);
-    jSplit.setPreferredSize(java_scaled('dimension', 360, 420));
+    % --- atom list (filterbank): a BstClusterList of atoms (coloured dot + label), panel_scout style ---
+    jListAtoms = java_create('org.brainstorm.list.BstClusterList');
+    jListAtoms.setCellRenderer(java_create('org.brainstorm.list.BstClusterListRenderer', 'I', fontSize));
+    java_setcb(jListAtoms, 'ValueChangedCallback', @(h,e)bst_call(@AtomsListValueChanged_Callback,h,e));
+    jScrollList = JScrollPane(jListAtoms);  jScrollList.setBorder(java_scaled('titledborder',''));
+    jScrollList.setPreferredSize(java_scaled('dimension', 360, 300));
 
     % ===== MAIN (CENTER): atoms list (CENTER, dominant) + action toolbar (EAST) + navigator (SOUTH) =====
     BH = java_scaled('value', 22);
     jPanelMain = gui_component('Panel');
     jPanelMain.setBorder(BorderFactory.createEmptyBorder(0,7,7,7));
 
-    % vertical action toolbar (EAST), scout jToolbar2 style: Detect / Save / Show / Clear / Measure
+    % vertical action toolbar (EAST), panel_scout jToolbar2 style
+    TB_DIM = java_scaled('dimension', 25, 25);
     jToolbar2 = gui_component('Toolbar', jPanelMain, BorderLayout.EAST);
     jToolbar2.setOrientation(jToolbar2.VERTICAL);
     jToolbar2.setPreferredSize(java_scaled('dimension', 28, 20));
     jToolbar2.setBorder([]);
-    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_EVT_TYPE_ADD, 'Detect windows: run the band-power detector on the selected band (preview events; not saved)', @(h,e)bst_call(@OnDetect));
-    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_SAVE, 'Save: commit the staged detection to atoms, or pin the current source region as an atom', @(h,e)bst_call(@OnSave));
+    % --- filterbank actions ---
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_SCOUT_NEW, TB_DIM}, ...
+        '<HTML><B>Create atom</B>:<BR><BLOCKQUOTE> - Click to add a default (diffusion) atom to the filterbank<BR> - Edit its parameters in the Atom section below</BLOCKQUOTE>', @(h,e)bst_call(@OnCreateAtom));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_SAVE, TB_DIM}, 'Save the filterbank (atom table) to disk', @(h,e)bst_call(@OnSaveFilterbank));
     jToolbar2.addSeparator();
-    jShow = gui_component('ToolbarToggle', jToolbar2, [], '', IconLoader.ICON_SCOUT_ALL, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
+    jLocalize = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_SEL, TB_DIM}, 'Localize: click a cortex vertex to re-seed the selected atom', @(h,e)bst_call(@OnLocalize));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Threshold: set the level-set threshold for the optional Scout+Event export', @(h,e)bst_call(@OnThresholdMenu));
+    jToolbar2.addSeparator();
+    % --- legacy detection / differential maps (untouched this step) ---
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_EVT_TYPE_ADD, TB_DIM}, 'Detect windows: run the band-power detector on the selected band (preview events; not saved)', @(h,e)bst_call(@OnDetect));
+    jShow = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_ALL, TB_DIM}, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
     jShow.setSelected(true);
-    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_EVT_TYPE_DEL, 'Clear: discard the staged detection preview (no save)', @(h,e)bst_call(@OnClearDetection));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_EVT_TYPE_DEL, TB_DIM}, 'Clear: discard the staged detection preview (no save)', @(h,e)bst_call(@OnClearDetection));
     jToolbar2.addSeparator();
-    gui_component('ToolbarButton', jToolbar2, [], '', IconLoader.ICON_PROPERTIES, 'Measure: choose the differential map (None / Divergence / Curl / Potential / Stream)', @(h,e)bst_call(@()OnMeasureMenu(h)));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Measure: choose the differential map (None / Divergence / Curl / Potential / Stream)', @(h,e)bst_call(@()OnMeasureMenu(h)));
 
-    % atoms list = CENTER (primary, dominant)
-    jPanelMain.add(jSplit, BorderLayout.CENTER);
+    % atom list = CENTER (primary, dominant)
+    jPanelMain.add(jScrollList, BorderLayout.CENTER);
 
     % ATOM section (SOUTH): the atom tool -- pick a filter, set its contextual params, localize on the
     % cortex, threshold + store. A dynamics atom = a thresholded localized eigfilter filter (Scout+Event).
@@ -139,12 +133,9 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jAtom.add(jRowK);
     jAtomParams = gui_river([0 0], [0 2 0 2]);                  % contextual per-kernel sliders live here
     jAtom.add(jAtomParams);
-    jRowA = gui_river([0 0], [0 2 0 2]);
-    jLocalize = gui_component('toggle', jRowA, [], 'Localize', {Insets(0,0,0,0), Dimension(java_scaled('value',64),BH)}, 'Localize: ON = click a cortex vertex to seed the atom; OFF = clear the seed', @(h,e)bst_call(@OnLocalize));
-    gui_component('label', jRowA, [], '  Thr ');
-    jThresh = gui_component('text', jRowA, [], '0.5', {Dimension(java_scaled('value',40),BH)}, 'Level-set threshold (fraction of peak) for the stored Scout + Event', []);
-    jStore = gui_component('button', jRowA, [], 'Store', {Dimension(java_scaled('value',56),BH)}, 'Store: threshold the atom into a Scout + Event group (carrying its kernel generator)', @(h,e)bst_call(@OnStore)); %#ok<NASGU>
-    jAtom.add(jRowA);
+    jRowI = gui_river([0 0], [0 2 0 2]);                        % selected-atom readout (kernel . seed . params)
+    jAtomInfo = gui_component('label', jRowI, 'hfill', '');
+    jAtom.add(jRowI);
     jPanelMain.add(jAtom, BorderLayout.SOUTH);
     % initial sliders for the default kernel (diffusion) with placeholder bounds; SetTarget rebuilds
     % them with the real spectrum once a surface is linked.
@@ -152,8 +143,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     jPanelNew.add(jPanelMain, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
-        'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
-        'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jThresh',jThresh, ...
+        'jListAtoms',jListAtoms, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
+        'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jAtomInfo',jAtomInfo, ...
         'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems));
 end
 
@@ -787,6 +778,11 @@ function SyncSource() %#ok<DEFNU>
     gs = bst_geodesic_tool('GetState');
     if isempty(gs) || ~isfield(gs,'seed') || isempty(gs.seed), return; end
     st.atomSeed = double(gs.seed);
+    ia = i_field(st, 'curAtom', 0);
+    if (ia >= 1) && (ia <= numel(st.T.Groups))
+        st.T.Groups(ia).vertices = st.atomSeed;
+        ctrl.jAtomInfo.setText(i_atom_detail(st.T.Groups(ia)));
+    end
     setappdata(0, 'DynamicsTarget', st);
     i_atom_preview();
 end
@@ -1120,7 +1116,8 @@ end
 % window -> its atoms on the right). Top-level SIMPLE group (e.g. a recorded band-Function
 % group) = a stack with NO leaves; selecting it lists its atoms on the right.
 function BuildTree()
-    import javax.swing.tree.*;
+    UpdateAtomList();  return;   % the filterbank list replaced the tree; legacy body below is unreachable
+    import javax.swing.tree.* %#ok<UNRCH>
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
     if isempty(ctrl) || isempty(st), return; end
@@ -1447,12 +1444,13 @@ function OnKernelChange() %#ok<DEFNU>
     k = i_atom_current_kernel(ctrl);
     b = i_field(st, 'atomBounds', i_atom_default_bounds());
     panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, k, b, @()bst_call(@OnParamSettle));
+    i_atom_writeback();
     if ~isempty(st) && ~isempty(i_field(st,'atomSeed',[])), i_atom_preview(); end
 end
 
-% A slider drag settled -> re-realise the preview.
+% A slider drag settled -> write back to the selected atom + re-realise the preview.
 function OnParamSettle() %#ok<DEFNU>
-    i_atom_preview();
+    i_atom_writeback();  i_atom_preview();
 end
 
 % Arm click-to-seed on the cortex (the repurposed geodesic tool); OFF clears the seed + preview.
@@ -1512,24 +1510,107 @@ function i_atom_preview() %#ok<DEFNU>
     end
 end
 
-% Threshold the current atom into a stored Scout + Event group (carrying its kernel generator).
-function OnStore() %#ok<DEFNU>
-    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
-    seed = i_field(st, 'atomSeed', []);
-    if isempty(seed)
-        java_dialog('warning', 'Localize the atom first: toggle Localize and click a cortex vertex.', 'Atom tool');  return;
-    end
+%% ===== filterbank: create / list / select / save =====
+% + Create atom: append a default DIFFUSION filter atom (no threshold) on a default seed, select it.
+function OnCreateAtom() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end %#ok<ASGLU>
     st = i_atom_ensure_axes(st);  if isempty(i_field(st,'atomAx',[])), return; end
-    k    = i_atom_current_kernel(ctrl);
-    vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
+    ax = st.atomAx;  lmax = max(ax.Lambda{1}(:));  seed = ax.GlobalVertices{1}(1);
+    b  = i_field(st, 'atomBounds', i_atom_default_bounds());
+    S  = bst_eigfilter_controls('Sliders', 'diffusion', b);
+    vals = [0 0 0];  for i = 1:3, if ~isempty(S(i).def), vals(i) = S(i).def; end, end
+    kp = bst_eigfilter_controls('ToKernel', 'diffusion', vals, lmax);  kp.vals = vals;
+    G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1));
+    st.T = bst_dynamics('AddGroup', st.T, G);  setappdata(0,'DynamicsTarget', st);
+    UpdateAtomList();  SetSelectedAtom(numel(st.T.Groups));
+end
+
+% Rebuild the BstClusterList model from the atom table (one coloured row per atom).
+function UpdateAtomList() %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl) || ~isfield(ctrl,'jListAtoms'), return; end
+    st = getappdata(0, 'DynamicsTarget');
+    listModel = javax.swing.DefaultListModel();
+    pal = [31 119 180; 255 127 14; 44 160 44; 214 39 40; 148 103 189; 140 86 75; 227 119 194; 127 127 127] / 255;
+    if ~isempty(st) && ~isempty(st.T) && ~isempty(st.T.Groups)
+        for i = 1:numel(st.T.Groups)
+            G = st.T.Groups(i);  c = pal(mod(i-1, size(pal,1))+1, :);
+            listModel.addElement(org.brainstorm.list.BstListItem(char(G.KernelName), [], char(G.label), i, c(1), c(2), c(3)));
+        end
+    end
+    ctrl.jListAtoms.setModel(listModel);
+end
+
+% Select an atom programmatically (callback-suppressed, panel_scout idiom) -> load it.
+function SetSelectedAtom(iAtom) %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl), return; end
+    cb = java_getcb(ctrl.jListAtoms, 'ValueChangedCallback');
+    java_setcb(ctrl.jListAtoms, 'ValueChangedCallback', []);
+    ctrl.jListAtoms.setSelectedIndex(iAtom - 1);
+    java_setcb(ctrl.jListAtoms, 'ValueChangedCallback', cb);
+    st = getappdata(0,'DynamicsTarget');  if ~isempty(st), st.curAtom = iAtom; setappdata(0,'DynamicsTarget', st); end
+    i_select_atom_load(iAtom);
+end
+
+% User clicked an atom in the list -> load it.
+function AtomsListValueChanged_Callback(h, ev) %#ok<DEFNU,INUSL>
+    if ev.getValueIsAdjusting(), return; end
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    iSel = double(ctrl.jListAtoms.getSelectedIndex()) + 1;
+    if (iSel < 1) || (iSel > numel(st.T.Groups)), return; end
+    st.curAtom = iSel;  setappdata(0,'DynamicsTarget', st);
+    i_select_atom_load(iSel);
+end
+
+% Load the selected atom's generator into the Atom section (combobox + sliders + seed) and preview.
+function i_select_atom_load(iAtom)
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    if (iAtom < 1) || (iAtom > numel(st.T.Groups)), return; end
+    G  = st.T.Groups(iAtom);
+    st = i_atom_ensure_axes(st);
+    ik = find(strcmp(ctrl.atomKeys, G.KernelName), 1);
+    if ~isempty(ik), ctrl.jKernel.setSelectedIndex(ik - 1); end
+    b = i_field(st, 'atomBounds', i_atom_default_bounds());
+    panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, G.KernelName, b, @()bst_call(@OnParamSettle));
+    if isstruct(G.KernelParams) && isfield(G.KernelParams, 'vals')
+        panel_eigenfilter_design('SetAtomVals', ctrl.jAtomParams, G.KernelParams.vals);
+    end
+    st.atomSeed = G.vertices;  setappdata(0, 'DynamicsTarget', st);
+    ctrl.jAtomInfo.setText(i_atom_detail(G));
+    i_atom_preview();
+end
+
+% Persist the edited params back to the selected atom (+ refresh the readout).
+function i_atom_writeback()
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
+    st = i_atom_ensure_axes(st);
+    k = i_atom_current_kernel(ctrl);  vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
     lmax = max(st.atomAx.Lambda{1}(:));
-    kp   = bst_eigfilter_controls('ToKernel', k, vals, lmax);
-    thr  = str2double(char(ctrl.jThresh.getText()));
-    if isnan(thr) || (thr <= 0) || (thr >= 1), thr = 0.5; end
-    G    = bst_dynamics('AtomFromKernel', st.atomAx, k, kp, seed, thr);
-    st.T = bst_dynamics('AddGroup', st.T, G);
-    i_apply(st);
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
+    kp = bst_eigfilter_controls('ToKernel', k, vals, lmax);  kp.vals = vals;
+    st.T.Groups(ia).KernelName = k;  st.T.Groups(ia).KernelParams = kp;
+    setappdata(0, 'DynamicsTarget', st);
+    ctrl.jAtomInfo.setText(i_atom_detail(st.T.Groups(ia)));
+end
+
+% Save the filterbank (atom table) to disk.
+function OnSaveFilterbank() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st) || isempty(st.T), return; end
+    f = i_field(st, 'file', '');
+    if isempty(f)
+        f = java_dialog('save', 'Save filterbank', '', 'dynamics_filterbank.mat');
+        if isempty(f), return; end
+        st.file = f;  setappdata(0, 'DynamicsTarget', st);
+    end
+    bst_dynamics('Save', f, st.T);
+end
+
+% Set the level-set threshold (for the optional Scout+Event export; not the atom's identity).
+function OnThresholdMenu() %#ok<DEFNU>
+    [~, st] = i_cs();  if isempty(st), return; end
+    cur = i_field(st, 'atomThreshold', 0.5);
+    v = java_dialog('input', 'Level-set threshold (0..1) for the optional Scout+Event export:', 'Atom threshold', [], num2str(cur));
+    if isempty(v), return; end
+    t = str2double(v);  if ~isnan(t) && (t > 0) && (t < 1), st.atomThreshold = t; setappdata(0, 'DynamicsTarget', st); end
 end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
