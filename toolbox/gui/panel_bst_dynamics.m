@@ -86,7 +86,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
     jMenuAtoms.addSeparator();
-    gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
     % EAST close button: a glue pushes it to the right, then an 'x' that ends the whole session
     % (hide the panel + close the linked source figure), like the main GUI's close-all button.
     jMenuBar.add(javax.swing.Box.createHorizontalGlue());
@@ -610,63 +609,6 @@ function SyncSource() %#ok<DEFNU>
 end
 
 
-%% ===== SAVE CURSOR: commit the live 4-D cursor (st.nav) as ONE atom =====
-function OnSaveCursor() %#ok<DEFNU>
-    [ctrl, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
-    st.nav = bst_dynamics('Set', st.nav, 'time', 1, i_read_block(ctrl, 'time'));   % time from the global cursor (no widget)
-    lt = bst_dynamics('Get', st.nav, 'time');     lf = bst_dynamics('Get', st.nav, 'freq');
-    ls = bst_dynamics('Get', st.nav, 'source');   lk = bst_dynamics('Get', st.nav, 'scale'); %#ok<NASGU>
-    if ~isfinite(lt.center)
-        java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
-    end
-    band = st.curBand;  bandName = i_field(st, 'curBandName', '');
-    op   = i_field(st, 'curOp', 'none');
-    switch op
-        case 'Divergence', Func = 'divergence';
-        case 'Curl',       Func = 'curl';
-        case 'Potential',  Func = 'potential';
-        case 'Stream',     Func = 'stream';
-        otherwise,         Func = 'source';     % 'none' = the raw source map (no differential measured)
-    end
-    % measured descriptor at the cursor (operator scalar at the seed, if localized + cached + a
-    % differential is selected). In 'none' the atom records only its location (strength NaN).
-    strength = NaN;  charge = NaN;
-    if ~strcmpi(op,'none') && isfinite(ls.center) && ~isempty(st.hFig) && ishandle(st.hFig)
-        D = getappdata(st.hFig, 'DynamicsOverlay');
-        if ~isempty(D) && isfield(D,'Cache')
-            [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
-            if ~isempty(D.Cache) && isKey(D.Cache, iT)
-                sc = view_dynamics('PickScalar', D.Cache(iT), op);
-                if ls.center>=1 && ls.center<=numel(sc), strength = sc(ls.center);  charge = sign(strength); end
-            end
-        end
-    end
-    % find-or-create the (band, Function) group; append ONE occurrence
-    g = i_find_group(st.T, bandName, Func);
-    if g < 1
-        G = bst_dynamics('NewGroup', strtrim(sprintf('%s %s', i_disp_band(bandName, band), Func)));
-        G.type='simple';  G.band=band;  G.bandName=bandName;  G.Function=Func;
-        G.color=i_op_color(op);  G.SurfaceFile=st.T.SurfaceFile;  G.DataFile=st.T.DataFile;  G.ResultsFile=i_first_results(st.T);
-        st.T = bst_dynamics('AddGroup', st.T, G);  g = numel(st.T.Groups);
-    end
-    G = st.T.Groups(g);
-    G.times(1,end+1) = lt.center;   G.epochs(end+1) = 1;
-    if isfinite(ls.center)
-        v = double(ls.center);  G.vertices(end+1) = v;
-        if ~isempty(ls.pos), G.pos(end+1,:) = ls.pos; else, G.pos(end+1,:) = [NaN NaN NaN]; end
-        G.hemi(end+1) = 1 + (~isempty(ls.pos) && ls.pos(2)<0);
-    else
-        G.vertices(end+1) = NaN;  G.pos(end+1,:) = [NaN NaN NaN];  G.hemi(end+1) = NaN;
-    end
-    G.strength(end+1) = strength;   G.charge(end+1) = charge;   G.type='simple';
-    if ~isempty(band), G = bst_dynamics('Set', G, 'freq', 1, lf); end   % numeric freq index
-    st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
-    i_apply(st);
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Saved cursor atom (%s) at %.3f s', Func, lt.center));
-end
-
-
 %% ===== LOAD ATOM: fill the navigator blocks + st.nav from the selected saved atom =====
 function OnLoadAtom() %#ok<DEFNU>
     [ctrl, st] = i_cs();
@@ -708,131 +650,6 @@ function i_fill_block(ctrl, axis, loc)
 end
 
 
-%% ===== RECORD: shaped field's extrema at the cursor -> atoms =====
-% Reads the linked Helmholtz decomposition at the current time, detects extrema of the
-% scalar selected by the operator, and appends them to the (band, Function) group --
-% tagged with the panel's (time, band, scale, operator) coordinates. Auto-saves.
-function OnRecord() %#ok<DEFNU>
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || isempty(st.hFig) || ~ishandle(st.hFig), return; end
-    if strcmpi(i_field(st, 'curOp', 'none'), 'none')
-        java_dialog('warning', 'Choose a Measurement (Divergence / Curl / Potential / Stream) before recording extrema.', 'Record atoms');
-        return;
-    end
-    D = getappdata(st.hFig, 'DynamicsOverlay');
-    if isempty(D)
-        java_dialog('warning', 'Record needs the linked dynamics source view (open via a Dirac result).', 'Record atoms');
-        return;
-    end
-    view_dynamics('RefreshOverlay', st.hFig);                     % make sure the cursor frame is computed+cached
-    D = getappdata(st.hFig, 'DynamicsOverlay');
-    [TimeVec, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
-    if isempty(D.Cache) || ~isKey(D.Cache, iT)
-        java_dialog('warning', 'No decomposition at the current time.', 'Record atoms');  return;
-    end
-    Ht = D.Cache(iT);  tCur = TimeVec(iT);
-    % scalar field + Function from the current operator (all signed)
-    op   = i_field(st, 'curOp', 'Divergence');
-    Scal = view_dynamics('PickScalar', Ht, op);
-    switch op
-        case 'Divergence', Func = 'divergence';
-        case 'Curl',       Func = 'curl';
-        case 'Potential',  Func = 'potential';
-        case 'Stream',     Func = 'stream';
-        otherwise,         Func = 'divergence';
-    end
-    signed = true;
-    Surf = getappdata(st.hFig, 'DynamicsSurf');
-    if isempty(Surf), Surf = in_tess_bst(st.T.SurfaceFile, 0);  setappdata(st.hFig, 'DynamicsSurf', Surf); end
-    ex = bst_dynamics('Extrema', Scal, Surf.VertConn, i_peaks(ctrl), signed);
-    if isempty(ex.iVertex)
-        java_dialog('msgbox', 'No extrema in the current field.', 'Record atoms');  return;
-    end
-    v    = double(ex.iVertex(:)');
-    pos  = Surf.Vertices(v, :);
-    hemi = 1 + (Surf.Vertices(v,2) < 0);                          % SCS Y>0 = left
-    band = i_field(st, 'curBand', []);  bandName = i_field(st, 'curBandName', '');
-    % find-or-create the (band, Function) group, then append the cursor-time occurrences
-    g = i_find_group(st.T, bandName, Func);
-    if g < 1
-        G = bst_dynamics('NewGroup', strtrim(sprintf('%s %s', i_disp_band(bandName, band), Func)));
-        G.type='simple';  G.band=band;  G.bandName=bandName;  G.Function=Func;  G.scaleName=i_scale_name(st);
-        G.color = i_op_color(op);  G.SurfaceFile = st.T.SurfaceFile;  G.DataFile = st.T.DataFile;  G.ResultsFile = i_first_results(st.T);
-        st.T = bst_dynamics('AddGroup', st.T, G);  g = numel(st.T.Groups);
-    end
-    G = st.T.Groups(g);  nNew = numel(v);
-    G.times    = [G.times,    repmat(tCur,1,nNew)];   G.epochs   = [G.epochs,   ones(1,nNew)];
-    G.vertices = [G.vertices, v];                     G.pos      = [G.pos;      pos];
-    G.hemi     = [G.hemi,     hemi];                  G.strength = [G.strength, ex.value(:)'];
-    G.charge   = [G.charge,   ex.charge(:)'];         G.type     = 'simple';
-    if ~isempty(G.region), G.region(end+1:numel(G.vertices)) = {[]}; end
-    st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
-    i_apply(st);                                                  % redraw markers + rebuild tree (stores st)
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>  % auto-save
-    bst_progress('text', sprintf('Recorded %d %s atom(s) at %.3f s', nNew, Func, tCur));
-end
-
-%% ===== CAPTURE: the selected Scout's geodesic region -> the active (selected) atom =====
-% The active atom is the occurrence selected in the right-hand list. Snapshots the currently
-% selected Scout's vertices into that occurrence (region + seed), localizing a time-only marker.
-function OnCaptureRegion() %#ok<DEFNU>
-    [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || ~ishandle(st.hFig), return; end
-    if isempty(st.occMap)
-        java_dialog('warning', 'Select an atom in the list first.', 'Capture region');  return;
-    end
-    row = ctrl.jListOccur.getSelectedIndex() + 1;
-    if (row < 1) || (row > size(st.occMap,1))
-        java_dialog('warning', 'Select an atom in the list first.', 'Capture region');  return;
-    end
-    g = st.occMap(row,1);  o = st.occMap(row,2);
-    if (size(st.T.Groups(g).times,1) ~= 1)
-        java_dialog('warning', 'Select a single atom, not a time window.', 'Capture region');  return;
-    end
-    SurfaceFile = st.T.SurfaceFile;
-    if isempty(SurfaceFile) && ~isempty(st.T.Groups), SurfaceFile = st.T.Groups(g).SurfaceFile; end
-    % the geodesic region = the dynamics Region tool's current heat-disk (no scout)
-    gs = bst_geodesic_tool('GetState');
-    if isempty(gs) || isempty(gs.vertices)
-        java_dialog('warning', 'Seed a region with the Region tool first.', 'Capture region');  return;
-    end
-    if ~isempty(gs.SurfaceFile) && ~isempty(SurfaceFile) && ~file_compare(gs.SurfaceFile, SurfaceFile)
-        java_dialog('warning', 'The region is on a different surface than the atoms.', 'Capture region');  return;
-    end
-    seed = double(gs.seed);
-    pos  = gs.pos;
-    hemi = 1 + (pos(2) < 0);                                       % SCS Y>0 = left
-    st.T.Groups(g) = bst_dynamics('AttachRegion', st.T.Groups(g), o, gs.vertices, seed, pos, hemi);
-    i_apply(st);                                                   % redraw markers/regions + rebuild tree
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Captured %d-vertex region into "%s"', numel(gs.vertices), st.T.Groups(g).label));
-end
-
-% Region-tool toggle state (1 when pressed) -> bst_geodesic_tool('Toggle', state)
-function s = ctrl_region_state()
-    s = 0;
-    ctrl = bst_get('PanelControls', 'Dynamics');
-    if ~isempty(ctrl) && isfield(ctrl,'jRegionTool') && ~isempty(ctrl.jRegionTool)
-        s = double(ctrl.jRegionTool.isSelected());
-    end
-end
-
-%% ===== REGION TOOL toggle: ON = pick a region; OFF = clear the Source selection =====
-function OnRegionTool() %#ok<DEFNU>
-    [ctrl, st] = i_cs();
-    state = ctrl_region_state();
-    bst_geodesic_tool('Toggle', state);
-    if ~state                                            % turning OFF -> clear the Source selection
-        if ~isempty(ctrl) && isfield(ctrl,'jSrcC')
-            ctrl.jSrcC.setText('');  ctrl.jSrcW.setText('');
-        end
-        if ~isempty(st)
-            st.nav = bst_dynamics('Set', st.nav, 'source', 1, bst_dynamics('NewLoc','source'));   % unlocalized
-            setappdata(0, 'DynamicsTarget', st);
-        end
-    end
-end
-
 %% ===== SHOW-PHASES FILTER (display-only; never deletes atoms) =====
 function OnTogglePhase(ip) %#ok<DEFNU>
     [ctrl, st] = i_cs();
@@ -865,47 +682,8 @@ function t = i_phase_type(G)
     if ~isempty(tok), t = tok{1}; end
 end
 
-function n = i_peaks(ctrl)
-    n = 3;
-    if isfield(ctrl,'jPeaks') && ~isempty(ctrl.jPeaks)
-        x = str2double(char(ctrl.jPeaks.getText()));
-        if ~isnan(x) && (x >= 1), n = round(x); end
-    end
-end
 function val = i_field(st, name, default)
     if isfield(st, name) && ~isempty(st.(name)), val = st.(name); else, val = default; end
-end
-function g = i_find_group(T, bandName, Func)
-    g = 0;
-    for k = 1:numel(T.Groups)
-        G = T.Groups(k);
-        bn = G.bandName;  if isempty(bn), bn = ''; end
-        fn = G.Function;  if isempty(fn), fn = ''; end
-        qb = bandName;    if isempty(qb), qb = ''; end
-        if isempty(G.parent) && strcmp(bn, qb) && strcmp(fn, Func), g = k;  return; end
-    end
-end
-function s = i_disp_band(bandName, band)
-    if ~isempty(bandName),  s = bandName;
-    elseif ~isempty(band),  s = sprintf('%g-%g Hz', band(1), band(2));
-    else,                   s = 'broadband';  end
-end
-function s = i_scale_name(st)
-    sc = i_field(st, 'curScale', []);
-    if isempty(sc) || ~isstruct(sc) || ~isfield(sc,'on') || ~sc.on, s = 'none';  else, s = sc.name;  end
-end
-function c = i_op_color(op)
-    switch op
-        case 'Divergence', c = [0.95 0.55 0.10];   % sources / sinks  -> orange
-        case 'Curl',       c = [0.55 0.20 0.85];   % vorticity        -> purple
-        case 'Potential',  c = [0.90 0.75 0.10];   % source potential -> amber
-        case 'Stream',     c = [0.30 0.45 0.85];   % stream function  -> blue
-        otherwise,         c = [0.40 0.40 0.40];   % gray
-    end
-end
-function r = i_first_results(T)
-    r = '';
-    for k = 1:numel(T.Groups), if ~isempty(T.Groups(k).ResultsFile), r = T.Groups(k).ResultsFile;  return; end; end
 end
 function [rows, occMap] = i_group_atoms(T, g)
     rows = {};  occMap = zeros(0,3);
