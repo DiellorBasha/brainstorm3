@@ -94,8 +94,8 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',[0.04 yk lw 0.12],'HorizontalAlignment','left');
     hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Value',2,'Units','normalized','Position',[0.35 yk 0.61 0.13],'Callback',@KernelChanged);
     [hScale,hScaleV,hScaleL] = i_slider(hP,'Scale', ys(1), lw,sw,vw, scaleMinMM, scaleMaxMM, pScaleMM, @ParamChanged);
-    [hSpeed,hSpeedV] = i_slider(hP,'Speed', ys(2), lw,sw,vw, 0.1, 10,  pSpeed, @ParamChanged);
-    [hDecay,hDecayV] = i_slider(hP,'Decay', ys(3), lw,sw,vw, 0.05, 2,  pDecay, @ParamChanged);
+    [hSpeed,hSpeedV,hSpeedL] = i_slider(hP,'Speed', ys(2), lw,sw,vw, 0.1, 10,  pSpeed, @ParamChanged);
+    [hDecay,hDecayV,hDecayL] = i_slider(hP,'Decay', ys(3), lw,sw,vw, 0.05, 2,  pDecay, @ParamChanged);
     hFib  = uicontrol(hP,'Style','togglebutton','String','Connectome','Units','normalized','Position',[0.04 0.04 0.42 0.13], ...
                       'Callback',@OnToggleConnectome, 'TooltipString','Overlay the connectome fibers and colour them by the atom (endpoints anchored)');
     hSave = uicontrol(hP,'Style','pushbutton','String','Save','Units','normalized','Position',[0.80 0.04 0.16 0.13], ...
@@ -143,49 +143,72 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         SyncControls();  Regen();  i_reset_time();        % new kernel -> diffuse anew from t=0
     end
     function ParamChanged(~,~)
-        switch i_spatial_mode(kernel)
-            case 'scale', pScaleMM = get(hScale,'Value');  set(hScaleV,'String',sprintf('%.0f mm', pScaleMM));
-            case 'rate',  pRate    = get(hScale,'Value');  set(hScaleV,'String',sprintf('%.0f mm^2/s', pRate));
-        end
-        pSpeed=get(hSpeed,'Value'); pDecay=get(hDecay,'Value');
-        set(hSpeedV,'String',sprintf('%.2g',pSpeed)); set(hDecayV,'String',sprintf('%.2g',pDecay));
+        i_refresh_readout(hScale,hScaleV);  i_refresh_readout(hSpeed,hSpeedV);  i_refresh_readout(hDecay,hDecayV);
         Regen();
     end
+    function i_refresh_readout(hs, hv)
+        if strcmpi(get(hs,'Enable'),'on'), set(hv,'String',sprintf('%.3g', get(hs,'Value'))); end
+    end
     function SyncControls()
-        m = bst_eigfilter_kernel('info', kernel);
-        isDyn = isfield(m,'domain') && ~isempty(m.domain);
-        isSep = ~isfield(m,'separable') || m.separable;
-        set([hSpeed hSpeedV], 'Enable', i_en(isDyn && ~isSep));
-        set([hDecay hDecayV], 'Enable', i_en(strcmpi(kernel,'dampedwave')));
-        ApplySpatial();
+        i_config_sliders(kernel);
         Status();
     end
-    function ApplySpatial()
-        % The first slider morphs to the kernel's TRUE spatial knob: a static length (Scale, mm) for
-        % static kernels, a diffusion RATE (mm^2/s) for the separable-dynamic diffusion kernel, and is
-        % disabled for the wave family (whose rate is the Speed slider; their spatial content is the seed delta).
-        switch i_spatial_mode(kernel)
-            case 'scale'
-                set(hScaleL,'String','Scale');  i_setslider(hScale, scaleMinMM, scaleMaxMM, pScaleMM);
-                set([hScale hScaleV],'Enable','on');  set(hScaleV,'String',sprintf('%.0f mm', pScaleMM));
-            case 'rate'
-                set(hScaleL,'String','Rate');   i_setslider(hScale, rateMinMM2, rateMaxMM2, pRate);
-                set([hScale hScaleV],'Enable','on');  set(hScaleV,'String',sprintf('%.0f mm^2/s', pRate));
-            case 'none'
-                set(hScaleL,'String','Scale');  set([hScale hScaleV],'Enable','off');  set(hScaleV,'String','--');
+    function i_config_sliders(k)
+        % Per-kernel labels/units/ranges for the three sliders; values read live by i_phys2kernel.
+        % Each row: {label, lo, hi, default, fmt} or [] to disable.
+        sc = {scaleMinMM, scaleMaxMM};
+        switch lower(k)
+            case 'diffusion'
+                i_setrow(hScale,hScaleL,hScaleV,'Rate (mm^2/s)',rateMinMM2,rateMaxMM2,pRate,'%.0f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case {'heat','mexhat','diffgauss','flat','ideal','inverse_heat','log','matern','power','tikhonov'}
+                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case 'wave'
+                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
+                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case 'kleingordon'
+                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
+                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case 'dampedwave'
+                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
+                i_setrow(hDecay,hDecayL,hDecayV,'Decay (s)',0.05,2,pDecay,'%.2g');
+            case 'gabor'
+                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'Freq (Hz)',0,50,10,'%.1f');
+                i_setrow(hDecay,hDecayL,hDecayV,'BW (Hz)',0.5,20,2,'%.1f');
+            case 'travwave'
+                i_setrow(hScale,hScaleL,hScaleV,'Speed (m/s)',0.05,3,1,'%.2g');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'RidgeW (Hz)',0.5,20,2,'%.1f');
+                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case 'resonator'
+                i_setrow(hScale,hScaleL,hScaleV,'Freq (Hz)',0,50,10,'%.1f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'Q',1,30,6,'%.1f');
+                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            case 'stmatern'
+                i_setrow(hScale,hScaleL,hScaleV,'Corr (mm)',sc{1},sc{2},pScaleMM,'%.0f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,'nu',0.5,4,1.5,'%.1f');
+                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+            otherwise
+                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
+                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+        end
+    end
+    function i_setrow(hs, hl, hv, label, lo, hi, val, fmt)
+        if isempty(label)
+            set([hs hv], 'Enable','off');  set(hl,'String','');  set(hv,'String','--');
+        else
+            set(hl,'String',label);  i_setslider(hs, lo, hi, val);
+            set([hs hv],'Enable','on');  set(hv,'String',sprintf(fmt, val));
         end
     end
     function Status()
-        m = bst_eigfilter_kernel('info', kernel);  isSep = ~isfield(m,'separable') || m.separable;
-        set(hLabel,'String',sprintf('[%s] %s @ vtx %d%s | %s | norm: %s | arrows=time', ...
-            state, kernel, seedVtx, i_en2b(~isSep,pSpeed), i_spatial_str(), normMode));
-    end
-    function s = i_spatial_str()
-        switch i_spatial_mode(kernel)
-            case 'scale', s = sprintf('scale %.0f mm (cortex %.0f-%.0f)', pScaleMM, scaleMinMM, scaleMaxMM);
-            case 'rate',  s = sprintf('rate %.0f mm^2/s (spread ~sqrt(rate*t))', pRate);
-            case 'none',  s = sprintf('spatial = seed delta (%d modes)', nModes);
-        end
+        s1 = get(hScale,'Value');  l1 = get(hScaleL,'String');
+        set(hLabel,'String',sprintf('[%s] %s @ vtx %d | %s=%.3g | norm: %s | arrows=time', ...
+            state, kernel, seedVtx, l1, s1, normMode));
     end
     function [W, isSigned] = i_normalize(W)
         % Scale the atom field to a UNIT-MASS DENSITY: divide each time frame by its mass integral
@@ -320,18 +343,18 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         try, panel_time('SetCurrentTime', ax.tlag(1)); catch, end
     end
     function kp = i_phys2kernel()
-        kp = struct('lmax', lmax);
+        kp = struct('lmax', lmax);  s1=get(hScale,'Value'); s2=get(hSpeed,'Value'); s3=get(hDecay,'Value');
         switch lower(kernel)
-            case {'wave','dampedwave','kleingordon'}
-                kp.alpha = pSpeed * sqrt(lmax) / 2;                    % c (m/s) -> alpha
-                if strcmpi(kernel,'dampedwave'), kp.beta = 1/max(pDecay,eps); end
-                if strcmpi(kernel,'kleingordon'), kp.mu = 0.1*lmax; end
-            case 'diffusion'
-                kp.tau = max((pRate/1e6) * lmax, eps);                 % pRate=kappa (mm^2/s) -> m^2/s (/1e6); tau*sc(=1/lmax)=kappa_m
-            case 'heat'
-                lamS = (2*pi/(pScaleMM/1000))^2; kp.t = log(2)/max(lamS,eps);
-            case 'mexhat'
-                lamS = (2*pi/(pScaleMM/1000))^2; kp.t = 1/max(lamS,eps);
+            case 'wave',        kp.alpha = s2 * sqrt(lmax) / 2;
+            case 'kleingordon', kp.alpha = s2 * sqrt(lmax) / 2;  kp.mu = 0.1*lmax;
+            case 'dampedwave',  kp.alpha = s2 * sqrt(lmax) / 2;  kp.beta = 1/max(s3,eps);
+            case 'diffusion',   kp.tau   = max((s1/1e6) * lmax, eps);
+            case 'heat',        lamS = (2*pi/(s1/1000))^2;  kp.t = log(2)/max(lamS,eps);
+            case 'mexhat',      lamS = (2*pi/(s1/1000))^2;  kp.t = 1/max(lamS,eps);
+            case 'gabor',       kp.k0 = 2*pi/max(s1/1000,eps);  kp.f0 = s2;  kp.sf = max(s3,eps);
+            case 'travwave',    kp.c  = s1;  kp.width = max(s2,eps);
+            case 'resonator',   kp.f0 = s1;  kp.Q = max(s2,eps);
+            case 'stmatern',    kp.kappa = 2*pi/max(s1/1000,eps);  kp.nu = max(s2,eps);
         end
     end
     function SaveAtom(~,~)
@@ -370,17 +393,6 @@ function [hS,hV,hL] = i_slider(p, name, y, lw, sw, vw, mn, mx, v0, cb)
     hL = uicontrol(p,'Style','text','String',name,'Units','normalized','Position',[0.04 y lw 0.12],'HorizontalAlignment','left');
     hS = uicontrol(p,'Style','slider','Min',mn,'Max',mx,'Value',max(min(v0,mx),mn),'Units','normalized','Position',[0.35 y+0.01 sw 0.10],'Callback',cb);
     hV = uicontrol(p,'Style','text','String',num2str(round(v0,2)),'Units','normalized','Position',[0.80 y vw 0.12],'HorizontalAlignment','left');
-end
-function md = i_spatial_mode(k)
-    % Which spatial knob a kernel actually exposes: 'scale' (static length), 'rate' (separable-dynamic
-    % diffusivity), or 'none' (non-separable dynamic -> the spatial rate is the Speed slider).
-    meta = bst_eigfilter_kernel('info', k);
-    isDyn = isfield(meta,'domain') && ~isempty(meta.domain);
-    isSep = ~isfield(meta,'separable') || meta.separable;
-    if ~isDyn,    md = 'scale';   % heat, mexhat
-    elseif isSep, md = 'rate';    % diffusion
-    else,         md = 'none';    % wave, dampedwave, kleingordon
-    end
 end
 function i_setslider(h, mn, mx, v)
     % Re-range a slider safely (avoids transient Min>Value>Max validation errors when the new range
