@@ -102,7 +102,85 @@ function params = ReadParams(jParams, Lambda) %#ok<DEFNU>
     end
 end
 
+%% ===== atom tool: physical-units sliders driven by bst_eigfilter_controls =====
+% The atom designer + panel share one param spec (bst_eigfilter_controls). These render that spec
+% (physical units: mm / Hz / m·s / nu — NOT mode index) as JSliders, for ALL kernels, and read the
+% three slot values back as [s1 s2 s3] for bst_eigfilter_controls('ToKernel', kernel, vals, lmax).
+
+function [keys, displays] = AtomKernels() %#ok<DEFNU>
+% All eigfilter kernels, ordered (diffusion, then static, ts, js), with display names.
+    keys = bst_eigfilter_kernel('list');
+    rank = zeros(numel(keys), 1);  displays = cell(1, numel(keys));
+    for i = 1:numel(keys)
+        try, m = bst_eigfilter_kernel('info', keys{i}); catch, m = struct('display',keys{i},'domain','static'); end
+        if isfield(m,'display') && ~isempty(m.display), displays{i} = m.display; else, displays{i} = keys{i}; end
+        dom = ''; if isfield(m,'domain'), dom = m.domain; end
+        switch lower(dom), case 'ts', rank(i) = 2; case 'js', rank(i) = 3; otherwise, rank(i) = 1; end
+    end
+    rank(strcmp(keys(:),'diffusion')) = 0;                 % diffusion first (the designer default)
+    [~, ord] = sortrows([rank, (1:numel(keys))']);
+    keys = keys(ord);  displays = displays(ord);
+end
+
+function BuildAtomSliders(jParams, kernel, bounds, onSettle) %#ok<DEFNU>
+% Render kernel's bst_eigfilter_controls('Sliders') spec as physical-units JSliders (0..1000 -> [lo,hi]).
+    S = bst_eigfilter_controls('Sliders', kernel, bounds);
+    jParams.removeAll();
+    for i = 1:numel(S)
+        if isempty(S(i).label), continue; end              % disabled slot -> no row
+        rng = max(S(i).hi - S(i).lo, eps);
+        pos = round(1000 * (S(i).def - S(i).lo) / rng);
+        [js, jTitle] = i_labeled_slider(jParams, sprintf(['%s: ' S(i).fmt], S(i).label, S(i).def), ...
+                                        'lo', 'hi', 0, 1000, max(0, min(1000, pos)));
+        jParams.putClientProperty(sprintf('atomslot_%d', i), js);
+        jParams.putClientProperty(sprintf('atomttl_%d', i),  jTitle);
+        jParams.putClientProperty(sprintf('atomlo_%d', i),   S(i).lo);
+        jParams.putClientProperty(sprintf('atomhi_%d', i),   S(i).hi);
+        jParams.putClientProperty(sprintf('atomfmt_%d', i),  S(i).fmt);
+        jParams.putClientProperty(sprintf('atomlbl_%d', i),  S(i).label);
+        java_setcb(js, 'StateChangedCallback', @(h,e) i_atom_slider_changed(jParams, i, h, onSettle));
+    end
+    jParams.revalidate(); jParams.repaint();
+end
+
+function vals = ReadAtomVals(jParams) %#ok<DEFNU>
+% Read the three slots as physical values [s1 s2 s3]; disabled slots read 0.
+    vals = [0 0 0];
+    for i = 1:3
+        js = jParams.getClientProperty(sprintf('atomslot_%d', i));
+        if isempty(js), continue; end
+        lo = double(jParams.getClientProperty(sprintf('atomlo_%d', i)));
+        hi = double(jParams.getClientProperty(sprintf('atomhi_%d', i)));
+        vals(i) = lo + (hi - lo) * double(js.getValue()) / 1000;
+    end
+end
+
+function SetAtomVals(jParams, vals) %#ok<DEFNU>
+% Set the active slots to physical values (clamped); used when loading a stored atom's generator.
+    for i = 1:min(3, numel(vals))
+        js = jParams.getClientProperty(sprintf('atomslot_%d', i));
+        if isempty(js), continue; end
+        lo = double(jParams.getClientProperty(sprintf('atomlo_%d', i)));
+        hi = double(jParams.getClientProperty(sprintf('atomhi_%d', i)));
+        js.setValue(max(0, min(1000, round(1000 * (vals(i) - lo) / max(hi - lo, eps)))));
+        i_atom_slider_changed(jParams, i, js, []);
+    end
+end
+
 %% ===== internal =====
+function i_atom_slider_changed(jParams, slot, js, onSettle)
+    lo  = double(jParams.getClientProperty(sprintf('atomlo_%d', slot)));
+    hi  = double(jParams.getClientProperty(sprintf('atomhi_%d', slot)));
+    val = lo + (hi - lo) * double(js.getValue()) / 1000;
+    jt  = jParams.getClientProperty(sprintf('atomttl_%d', slot));
+    if ~isempty(jt)
+        lbl = char(jParams.getClientProperty(sprintf('atomlbl_%d', slot)));
+        fmt = char(jParams.getClientProperty(sprintf('atomfmt_%d', slot)));
+        jt.setText(sprintf(['%s: ' fmt], lbl, val));
+    end
+    if (nargin >= 4) && ~isempty(onSettle) && ~js.getValueIsAdjusting(), onSettle(); end
+end
+
 function i_slider_changed(jParams, name, Lambda, js, onSettle)
     jt = jParams.getClientProperty(['title_' name]);
     if ~isempty(jt)
