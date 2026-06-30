@@ -395,3 +395,17 @@ function s = i_state(extent)
     else,                   s = 'window';
     end
 end
+
+
+%% ===== LEVELSET: derive the hard indicators (Scout / Event) from a wavelet field (moved from bst_atom) =====
+function LS = Levelset(W, gv, thr, iRef) %#ok<DEFNU>
+    % A Scout is a level set of the CORTICAL wavelet (at the peak-energy time iRef); an Event is a level
+    % set of the TEMPORAL wavelet (energy over time). thr = fraction of the per-axis max (default 0.5).
+    if (nargin < 3) || isempty(thr), thr = 0.5; end
+    e = sum(W.^2, 1);
+    if (nargin < 4) || isempty(iRef), [~, iRef] = max(e); end
+    wRef = abs(W(:, iRef));
+    LS.scoutVertices = gv(wRef >= thr * max(wRef));     % cortical level set -> Scout (global vertices)
+    LS.eventSamples  = find(e   >= thr * max(e));        % temporal level set -> Event (sample indices)
+    LS.iRef          = iRef;
+end

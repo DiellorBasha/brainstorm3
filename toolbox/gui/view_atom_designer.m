@@ -18,7 +18,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 %         hFig = view_atom_designer(SurfaceFile, 'Laplace-Beltrami')  % geometry-only
 %         hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 %
-% SEE ALSO: bst_atom, bst_eigfilter_kernel, tess_eigen, view_surface_data, view_manifold
+% SEE ALSO: bst_eigen('Axes'), bst_eigenfilter('Atom'), bst_dynamics, bst_eigfilter_kernel, view_surface_data
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -36,10 +36,11 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     % --- surface geometry ---
     sCx = in_tess_bst(SurfaceFile);  V = sCx.Vertices;  nV = size(V,1);
 
-    % --- eigenbasis (cached) + physical-scale calibration; (re)built by i_build_basis on operator change ---
+    % --- eigenbasis + canonical axes (bst_eigen('Axes')) + physical-scale calibration; (re)built by i_build_basis ---
     mm = @(l) 2*pi./sqrt(max(l,eps))*1000;                     % eigenvalue -> physical scale (mm)
+    nFrames = 100;                                             % standard 1 s @ 100 Hz time axis (ax.nT/tlag from bst_eigen)
     [lmax, lminPos, scaleMinMM, scaleMaxMM, rateMinMM2, rateMaxMM2] = deal(0);   % shared with i_build_basis
-    ax = struct();  i_build_basis(variant);                     % sets ax/lmax/lminPos/scaleMinMM/scaleMaxMM + rate bounds
+    ax = struct();  i_build_basis(variant);                    % ax = bst_eigen('Axes', ...) + scale/rate bounds
 
     % --- registry: one FLAT kernel list, dynamic + static group headers ---
     allK = bst_eigfilter_kernel('list');  spatialK = {}; dynK = {};
@@ -61,7 +62,6 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     pDecay   = 0.5;                                 % decay time (s), damped only
     normMode = '';                                  % active colormap normalization (set by i_normalize)
     showFib  = false;  hFibers = [];  fibPts = [];  fibEndV = [];   % connectome fiber overlay (lazy-loaded)
-    nFrames  = 100;  ax.nT = nFrames;  ax.tlag = (0:nFrames-1)/100;   % standard 1 s @ 100 Hz time vector
     % default seed: vertex nearest the centroid of the first eigenbasis support
     if (nargin >= 4) && ~isempty(seed0)
         seedVtx = seed0;
@@ -115,16 +115,14 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 
     % ===== nested callbacks =====
     function i_build_basis(newVar)
-        % (Re)build the cortex eigenbasis for the chosen operator and refresh the physical-scale bounds.
-        % Updates ax basis fields in place (preserving the time axis ax.nT/ax.tlag) so it works at init
-        % (ax = empty struct) and on live operator switches alike.
+        % (Re)build the canonical axes (eigenbasis x time x temporal-frequency) for the chosen operator via
+        % bst_eigen('Axes'), then refresh the physical-scale bounds. Works at init and on live operator switches.
         variant = newVar;
         bst_progress('start', 'Atom designer', sprintf('Building/loading %s eigenbasis...', variant));
-        E  = tess_eigen(SurfaceFile, variant, 'nModes', nModes);   % cache + reuse the eigen_ file
-        Op = in_bst_operator(E.OperatorFile);
+        ax = bst_eigen('Axes', struct('SurfaceFile',SurfaceFile, 'Variant',variant, ...
+                       'nModes',nModes, 'TimeWindow',[0 (nFrames-1)/100], 'SampleRate',100));
         bst_progress('stop');
-        ax.Phi = E.Phi;  ax.Lambda = E.Lambda;  ax.Mass = Op.Mass;  ax.GlobalVertices = E.GlobalVertices;
-        lamAll = E.Lambda{1}(:); if numel(E.Lambda) > 1 && ~isempty(E.Lambda{2}), lamAll = [lamAll; E.Lambda{2}(:)]; end
+        lamAll = ax.Lambda{1}(:); if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
         lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
         scaleMinMM = mm(lmax);  scaleMaxMM = mm(lminPos);          % finest .. coarsest cortical scale
         rateMinMM2 = scaleMinMM^2;  rateMaxMM2 = scaleMaxMM^2;     % diffusion rate bounds (mm^2/s) = scale^2
@@ -341,7 +339,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         state='save';  Status();
         T=bst_dynamics('New', sprintf('atom %s @vtx%d', kernel, seedVtx)); T.SurfaceFile=SurfaceFile;
         G=bst_dynamics('NewGroup','atom'); G.vertices=seedVtx; G.pos=V(seedVtx,:);
-        LS=bst_atom('Levelset', W(ax.GlobalVertices{1},:), ax.GlobalVertices{1}, 0.5);
+        LS=bst_dynamics('Levelset', W(ax.GlobalVertices{1},:), ax.GlobalVertices{1}, 0.5);
         G.region={LS.scoutVertices(:)'}; G.times=[ax.tlag(LS.eventSamples(1)); ax.tlag(LS.eventSamples(end))];
         T=bst_dynamics('AddGroup',T,G);
         outDir=bst_fileparts(file_fullpath(sSubj.FileName));
@@ -356,9 +354,8 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 end
 
 % ===== helpers (local) =====
-function W = i_eval_atom(s, ax, kernel, kp, V, nV)
-    G = bst_dynamics('NewGroup','atom');  G.vertices = s;  G.pos = V(s,:);
-    [Wloc, gv] = bst_atom('Evaluate', G, 1, ax, kernel, kp);
+function W = i_eval_atom(s, ax, kernel, kp, V, nV) %#ok<INUSL>
+    [Wloc, gv] = bst_eigenfilter('Atom', ax, kernel, kp, s);   % V unused now; signature kept for callers
     W = zeros(nV, ax.nT);  W(gv,:) = Wloc;
 end
 function i_call(fcn,h,ev)
