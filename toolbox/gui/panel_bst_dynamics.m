@@ -1611,6 +1611,34 @@ function b = i_atom_bounds(ax)
     b = struct('scaleMinMM',sMin, 'scaleMaxMM',sMax, 'rateMinMM2',sMin^2, 'rateMaxMM2',sMax^2);
 end
 
+%% ===== Apply: filter the REAL source through the selected atom (Preview mode) =====
+% Filter a surface source field F through the kernel's g(lambda) on the operator's eigenbasis.
+function Ffilt = i_atom_filter_field(F, ax, variant, kernel, kp) %#ok<DEFNU>
+    EigenMat    = struct();  EigenMat.Phi = ax.Phi;  EigenMat.Lambda = ax.Lambda;  EigenMat.Variant = variant;
+    EigenMat.GlobalVertices = ax.GlobalVertices;
+    if isfield(ax,'GlobalFaces'), EigenMat.GlobalFaces = ax.GlobalFaces; end
+    OperatorMat = struct();  OperatorMat.Mass = ax.Mass;
+    [Ffilt, ~, isError] = bst_eigenfilter('Analysis', F, EigenMat, OperatorMat, kernel, kp);
+    if isError, Ffilt = []; end
+end
+% Sample indices of a `secs`-long window from the cursor (round(secs*Fs) samples, clamped).
+function iWin = i_cursor_window_core(tv, cursor, secs)
+    iWin = [];
+    if numel(tv) < 2, return; end
+    Fs = 1 / median(diff(tv));  nF = max(1, round(secs * Fs));
+    [~, i0] = min(abs(tv - cursor));
+    iWin = i0 : min(i0 + nF - 1, numel(tv));
+end
+function iWin = i_cursor_window_test(tv, cursor, secs) %#ok<DEFNU>
+    iWin = i_cursor_window_core(tv, cursor, secs);
+end
+function iWin = i_cursor_window(srcDS, srcResult, secs) %#ok<DEFNU>
+    global GlobalData;
+    tv  = bst_memory('GetTimeVector', srcDS, srcResult);
+    cur = GlobalData.UserTimeWindow.CurrentTime;  if isempty(cur), cur = tv(1); end
+    iWin = i_cursor_window_core(tv, cur, secs);
+end
+
 %% ===== filterbank: create / list / select / save =====
 % + Create atom: append a default DIFFUSION filter atom (no threshold) on a default seed, select it.
 function OnCreateAtom() %#ok<DEFNU>
