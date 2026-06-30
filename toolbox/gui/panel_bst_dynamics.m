@@ -118,6 +118,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jToolbar2.addSeparator();
     jLocalize = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_SEL, TB_DIM}, 'Localize: click a cortex vertex to re-seed the selected atom', @(h,e)bst_call(@OnLocalize));
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Threshold: set the level-set threshold for the optional Scout+Event export', @(h,e)bst_call(@OnThresholdMenu));
+    jApply = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_TS_DISPLAY, TB_DIM}, 'Apply: filter the REAL source through the selected atom over a 4 s window (Preview); OFF = impulse response (Design)', @(h,e)bst_call(@OnApply));
     jToolbar2.addSeparator();
     % --- legacy detection / differential maps (untouched this step) ---
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_EVT_TYPE_ADD, TB_DIM}, 'Detect windows: run the band-power detector on the selected band (preview events; not saved)', @(h,e)bst_call(@OnDetect));
@@ -155,7 +156,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jListAtoms',jListAtoms, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
         'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jAtomInfo',jAtomInfo, ...
-        'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
+        'jApply',jApply, 'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
         'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems));
 end
 
@@ -1578,8 +1579,20 @@ function blk = i_seed_block(ax, seed)
     end
 end
 
-% Read the controls + seed, realise on the atom's operator, and paint the live preview.
+% Live preview dispatcher: Apply OFF -> impulse response (Design); Apply ON -> filtered real source (Preview).
+% Every existing call site (param edit, operator change, atom select, seed) routes through here, so the
+% displayed field always matches the current mode.
 function i_atom_preview() %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    if ~isempty(ctrl) && isfield(ctrl,'jApply') && ~isempty(ctrl.jApply) && ctrl.jApply.isSelected()
+        i_atom_apply();
+    else
+        i_atom_preview_impulse();
+    end
+end
+
+% Read the controls + seed, realise on the atom's operator, and paint the impulse-response preview (Design).
+function i_atom_preview_impulse()
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     seed = i_field(st, 'atomSeed', []);  if isempty(seed), return; end
     variant = i_atom_op(st);
@@ -1612,14 +1625,28 @@ function b = i_atom_bounds(ax)
 end
 
 %% ===== Apply: filter the REAL source through the selected atom (Preview mode) =====
-% Filter a surface source field F through the kernel's g(lambda) on the operator's eigenbasis.
+% Filter a scalar surface source field F[nV x nT] through the atom kernel on the operator's
+% eigenbasis. Domain-aware: a static spatial kernel g(lambda) uses bst_eigenfilter('Analysis')
+% (pure spatial filter); a dynamic ts/js kernel g(lambda,t|omega) uses the joint time-vertex
+% transform bst_eigenwavelet('JTVAnalysis') (spatial AND temporal filtering -- the eigenwavelet).
+% Scalar bases only; vector/Dirac/Tangent dynamic apply is a follow-up (caller guards).
 function Ffilt = i_atom_filter_field(F, ax, variant, kernel, kp) %#ok<DEFNU>
-    EigenMat    = struct();  EigenMat.Phi = ax.Phi;  EigenMat.Lambda = ax.Lambda;  EigenMat.Variant = variant;
-    EigenMat.GlobalVertices = ax.GlobalVertices;
-    if isfield(ax,'GlobalFaces'), EigenMat.GlobalFaces = ax.GlobalFaces; end
-    OperatorMat = struct();  OperatorMat.Mass = ax.Mass;
-    [Ffilt, ~, isError] = bst_eigenfilter('Analysis', F, EigenMat, OperatorMat, kernel, kp);
-    if isError, Ffilt = []; end
+    Ffilt = [];
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'})), return; end
+    meta = bst_eigfilter_kernel('info', kernel);
+    dom  = '';  if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+    if isempty(dom) || strcmpi(dom, 'static')                       % static g(lambda): pure spatial filter
+        EigenMat    = struct();  EigenMat.Phi = ax.Phi;  EigenMat.Lambda = ax.Lambda;  EigenMat.Variant = variant;
+        EigenMat.GlobalVertices = ax.GlobalVertices;
+        if isfield(ax,'GlobalFaces'), EigenMat.GlobalFaces = ax.GlobalFaces; end
+        OperatorMat = struct();  OperatorMat.Mass = ax.Mass;
+        [Ffilt, ~, isError] = bst_eigenfilter('Analysis', F, EigenMat, OperatorMat, kernel, kp);
+        if isError, Ffilt = []; end
+    else                                                           % dynamic ts/js: joint time-vertex filter
+        kernels = { struct('name', kernel, 'params', kp) };
+        [W, ~, isError] = bst_eigenwavelet('JTVAnalysis', F, ax, kernels);
+        if isError || isempty(W), Ffilt = []; else, Ffilt = W(:, :, 1); end
+    end
 end
 % Sample indices of a `secs`-long window from the cursor (round(secs*Fs) samples, clamped).
 function iWin = i_cursor_window_core(tv, cursor, secs)
@@ -1637,6 +1664,73 @@ function iWin = i_cursor_window(srcDS, srcResult, secs) %#ok<DEFNU>
     tv  = bst_memory('GetTimeVector', srcDS, srcResult);
     cur = GlobalData.UserTimeWindow.CurrentTime;  if isempty(cur), cur = tv(1); end
     iWin = i_cursor_window_core(tv, cur, secs);
+end
+
+% Apply toggle: ON -> Preview (filtered real source); OFF -> Design (impulse response). i_atom_preview
+% dispatches on the toggle, so both branches just re-run the preview.
+function OnApply() %#ok<DEFNU>
+    i_atom_preview();
+end
+
+% Preview: reconstruct the real source over a 4 s window at the cursor, filter it through the selected
+% atom's operator with bst_eigenfilter('Analysis'), and paint the per-vertex magnitude on the cortex.
+function i_atom_apply() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcDS') || ~isfield(D,'srcResult') || isempty(D.srcResult)
+        ctrl.jAtomInfo.setText('Apply: no real source linked (Design only)');  return;
+    end
+    seed = i_field(st, 'atomSeed', []);  if isempty(seed), ctrl.jAtomInfo.setText('Apply: place a seed first'); return; end
+    variant = i_atom_op(st);
+    ax = i_atom_axes(st, variant);  if isempty(ax), return; end
+    lmax   = max(ax.Lambda{1}(:));
+    kernel = i_atom_current_kernel(ctrl);
+    vals   = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
+    kp     = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
+    nV     = i_overlay_nv(ax);
+    % --- reconstruct the windowed real source (imaging kernel x recording, via bst_memory) ---
+    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
+    if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no recording window'); return; end
+    bst_progress('start', 'Atom', 'Filtering the real source...');
+    F = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
+    % --- reduce the reconstructed field to the operator's expected row layout ---
+    % The joint time-vertex filter (dynamic atoms) is scalar-only for now; vector/Dirac/Tangent
+    % dynamic real-source Preview is a follow-up. Scalar operators act on the source magnitude.
+    if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
+        Fr = i_vec2scalar(F, nV);                                   % scalar operator: per-vertex magnitude
+    else
+        bst_progress('stop');
+        ctrl.jAtomInfo.setText(sprintf('%s: real-source Preview is scalar-only for now (use Geometric/Connectomic)', variant));
+        return;
+    end
+    % --- filter through the atom, reduce to a paintable per-vertex magnitude ---
+    Ffilt = i_atom_filter_field(Fr, ax, variant, kernel, kp);
+    bst_progress('stop');
+    if isempty(Ffilt), ctrl.jAtomInfo.setText(sprintf('%s: filter not applicable to this source', variant)); return; end
+    Ffilt = i_vec2scalar(Ffilt, nV);
+    if size(Ffilt,1) ~= nV, ctrl.jAtomInfo.setText('Apply: source/operator shape mismatch'); return; end
+    pk = max(abs(Ffilt(:)));  if pk > 0, Ffilt = Ffilt / pk; end
+    if ~isempty(st.hFig) && ishandle(st.hFig)
+        view_dynamics('SetFilteredField', st.hFig, Ffilt, (1:nV)', iWin, false);
+    end
+    ctrl.jAtomInfo.setText(sprintf('%s | %s  [Preview: filtered source, %d-sample window]', variant, kernel, numel(iWin)));
+end
+
+% Reduce a real/complex/vector field [k*nV x nT] to a per-vertex magnitude [nV x nT] (scalar passes through).
+function s = i_vec2scalar(F, nV)
+    if ~isreal(F), F = abs(F); end
+    if size(F,1) == nV, s = F; return; end
+    if mod(size(F,1), nV) == 0
+        nc = size(F,1) / nV;  s = reshape(sqrt(sum(reshape(F, nc, nV, []).^2, 1)), nV, []);
+    else
+        s = F;                                                     % unexpected shape -> caller guards
+    end
+end
+
+% Surface vertex count from the operator's eigenbasis support (global indices span the full surface).
+function nV = i_overlay_nv(ax)
+    nV = 0;
+    for b = 1:numel(ax.GlobalVertices), nV = max(nV, max(double(ax.GlobalVertices{b}(:)))); end
 end
 
 %% ===== filterbank: create / list / select / save =====

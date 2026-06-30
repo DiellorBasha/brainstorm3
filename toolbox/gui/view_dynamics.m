@@ -62,6 +62,10 @@ function varargout = view_dynamics( varargin )
         SetAtomField(varargin{2:end});
         return;
     end
+    if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'SetFilteredField')
+        SetFilteredField(varargin{2:end});
+        return;
+    end
     if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'ClearAtomField')
         ClearAtomField(varargin{2});
         return;
@@ -103,11 +107,8 @@ function varargout = view_dynamics( varargin )
     % follow the global time cursor. Fall back to a bare surface when the table has no
     % source/recording provenance.
     if ~isempty(SrcResult)
-        hFig = i_open_source_figure(SrcResult);
+        hFig = i_open_source_figure(SrcResult);   % clean cortex; no raw recording timeseries (Design)
         if isempty(hFig), return; end
-        if ~isempty(DataFile)
-            try, view_timeseries(DataFile); catch, end %#ok<CTCH>
-        end
     else
         hFig = view_surface(SurfaceFile);
     end
@@ -271,7 +272,20 @@ end
 function SetAtomField(hFig, W, gv, isSigned)
     if isempty(hFig) || ~ishandle(hFig), return; end
     D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
-    D.AtomField  = W;  D.AtomGV = gv(:);  D.AtomSigned = logical(isSigned);  D.Op = 'atom';
+    D.AtomField  = W;  D.AtomGV = gv(:);  D.AtomSigned = logical(isSigned);  D.Op = 'atom';  D.AtomWin = [];
+    setappdata(hFig, 'DynamicsOverlay', D);
+    if isSigned, bst_colormaps('AddColormapToFigure', hFig, 'stat2');
+    else,        bst_colormaps('AddColormapToFigure', hFig, 'source'); end
+    i_dynamics_overlay(hFig);
+end
+
+% Preview: paint the filtered real source Ffilt[nV x nWin] over the recording window `win` (sample
+% indices). Same scatter-paint as SetAtomField; `win` lets the overlay map the global cursor to the
+% right window column so the filtered map scrubs with time.
+function SetFilteredField(hFig, W, gv, win, isSigned)
+    if isempty(hFig) || ~ishandle(hFig), return; end
+    D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    D.AtomField  = W;  D.AtomGV = gv(:);  D.AtomSigned = logical(isSigned);  D.Op = 'atom';  D.AtomWin = win(:)';
     setappdata(hFig, 'DynamicsOverlay', D);
     if isSigned, bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     else,        bst_colormaps('AddColormapToFigure', hFig, 'source'); end
@@ -323,24 +337,27 @@ function hFig = i_open_source_figure(SrcResult)
     Cov  = tess_operators(SurfaceFile, 'Covariant');           % find-or-create
     Surf = in_tess_bst(SurfaceFile, 0);  nV = size(Surf.Vertices, 1);
     bst_progress('stop');
+    % Design view = a CLEAN cortex. We open with view_surface_data (it loads the source result for
+    % Apply AND builds the proper colorbar/data scaffolding the overlay paint relies on), then BLANK
+    % the displayed source so nothing of the real map shows. The only field ever painted is the
+    % atom's impulse response (Design) or the filtered real source (Apply). No raw recording
+    % timeseries is opened (Apply later shows the filtered sensor view instead).
     [hFig, iDSf] = view_surface_data(SurfaceFile, SrcResult, [], 'NewFigure');
     if isempty(hFig), return; end
     iTess = i_find_tess(hFig);
-    % full field shown by default (the Data threshold slider drives the overlay magnitude)
     TI = getappdata(hFig,'Surface');
-    if iTess <= numel(TI), TI(iTess).DataThreshold = 0; setappdata(hFig,'Surface',TI); end
-    % Default state = 'none': show the native source map (RMS-norm colormap) + the raw source
-    % vector quivers. The differential operators are opt-in via the Measure menu; the 'stat2'
-    % diverging colormap is registered lazily on first differential pick (i_dynamics_overlay).
-    D = struct('Cov',Cov, 'Op','none', ...
+    if iTess <= numel(TI)
+        TI(iTess).DataThreshold = 0;
+        TI(iTess).Data = zeros(size(TI(iTess).Data,1), 1);   % flat -> the real source is not shown
+        setappdata(hFig,'Surface',TI);
+    end
+    D = struct('Cov',Cov, 'Op','none', 'AtomField',[], 'AtomGV',[], 'AtomSigned',false, 'AtomWin',[], ...
                'Cache',containers.Map('KeyType','double','ValueType','any'), ...
                'srcDS',iDSf, 'srcResult',iResult, 'iTess',iTess, 'nV',nV);
     setappdata(hFig, 'DynamicsOverlay', D);
     setappdata(hFig, 'CustomOverlayFcn', @(h) i_dynamics_overlay(h));   % fires per frame
-    % Turn the native source-vector quivers ON once, so they show in the default state. After
-    % this the toggle is the user's (figure_3d) concern -- the overlay never touches it again.
-    try, figure_3d('SetShowSourceVectors', hFig, iTess, 1); catch, end %#ok<CTCH>
-    i_dynamics_overlay(hFig);                                          % paint the first frame
+    try, figure_3d('SetShowSourceVectors', hFig, iTess, 0); catch, end %#ok<CTCH>  % no raw quivers in Design
+    panel_surface('UpdateSurfaceColormap', hFig);                                  % repaint the blanked field
 end
 
 
@@ -355,6 +372,9 @@ function i_dynamics_overlay(hFig)
         TessInfo = getappdata(hFig, 'Surface');
         if isempty(TessInfo) || (D.iTess > numel(TessInfo)) || ~ishandle(TessInfo(D.iTess).hPatch), return; end
         [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+        if isfield(D,'AtomWin') && ~isempty(D.AtomWin)            % Preview: map global cursor -> window column
+            iw = find(D.AtomWin == iT, 1);  if isempty(iw), iw = 1; end;  iT = iw;
+        end
         TessInfo(D.iTess).Data         = i_atom_frame_scalar(D.AtomField, D.AtomGV, iT, D.nV);
         TessInfo(D.iTess).DataMinMax   = [min(D.AtomField(:)), max(D.AtomField(:))];
         if D.AtomSigned, TessInfo(D.iTess).ColormapType = 'stat2'; else, TessInfo(D.iTess).ColormapType = 'source'; end
