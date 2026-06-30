@@ -131,23 +131,36 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
             state, kernel, seedVtx, normMode));
     end
     function [W, isSigned] = i_normalize(W)
-        % Scale the atom field to a UNIT-MASS DENSITY: divide each time frame by its mass integral
-        % (sum_i area_i * W_i) so the field integrates to 1 over the cortex -> the value reads as a
-        % probability density (the exact heat-kernel interpretation). Only well-defined for one-signed,
-        % mass-conserving kernels (heat/diffusion); for zero-mean / oscillatory kernels (mexhat, waves)
-        % the integral collapses to ~0, so we fall back to peak-normalization instead.
+        % Pick the sign-class -> normalization + colormap. Honour the kernel's DECLARED class first so
+        % the colormap is STABLE per kernel (a band-pass WAVELET like gabor/mexhat is always signed ->
+        % diverging; a low-pass / prior like heat/matern is always one-signed -> density). Only fall back
+        % to the empirical mass test when the kernel declares neither (the wave family). This prevents
+        % e.g. gabor flipping to the sequential 'hot' map when its band slides onto near-DC modes at
+        % large scale (where the field happens to be mass-positive but it is still a wavelet).
+        cls  = i_kernel_signclass(kernel);               % 'signed' | 'onesigned' | '' (indeterminate)
         gv   = ax.GlobalVertices{1};
         mvec = full(sum(ax.Mass{1}, 2));                 % lumped vertex areas on the eigenbasis support
         Wg   = W(gv, :);
         s    = mvec.' * Wg;                              % [1 x nT] signed mass integral per frame
         l1   = mvec.' * abs(Wg);                         % [1 x nT] total absolute mass per frame
-        r    = abs(s) ./ max(l1, eps);                   % "one-signedness" in [0,1]: 1=positive, 0=zero-mean
-        if min(r) > 0.1                                  % mass-conserving -> probability density
-            W = W ./ s;                                  % per-frame unit integral (broadcast over columns)
-            normMode = 'density (unit mass, integral=1)';  isSigned = false;
-        else                                             % density undefined -> relative amplitude
+        empOneSigned = isempty(cls) && (min(abs(s)./max(l1,eps)) > 0.1);
+        if strcmp(cls,'onesigned') || empOneSigned       % mass-conserving -> probability density
+            sden = s;  sden(abs(sden) < eps) = 1;        % guard frames with ~zero mass
+            W = W ./ sden;  normMode = 'density (unit mass)';  isSigned = false;
+        else                                             % wavelet / signed -> relative amplitude
             pk = max(abs(W(:)));  if pk > 0, W = W / pk; end
-            normMode = 'peak (density n/a for this kernel)';  isSigned = true;
+            normMode = 'peak';  isSigned = true;
+        end
+    end
+    function c = i_kernel_signclass(k)
+        % A band-pass kernel is a wavelet (zero-mean -> signed); a priorAdmissible low-pass is one-signed.
+        c = '';
+        try
+            m = bst_eigfilter_kernel('info', k);
+            if isfield(m,'bandpass') && m.bandpass,                c = 'signed';
+            elseif isfield(m,'priorAdmissible') && m.priorAdmissible, c = 'onesigned';
+            end
+        catch %#ok<CTCH>
         end
     end
     function Regen(), if ~isempty(seedVtx), Generate(); end, end
