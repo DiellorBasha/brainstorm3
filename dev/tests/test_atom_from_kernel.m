@@ -7,7 +7,10 @@ kp = struct('lmax',max(Lam),'tau',0.3);
 G = bst_dynamics('AtomFromKernel', ax, 'diffusion', kp, 13, 0.5);
 assert(G.vertices==13 && strcmp(G.KernelName,'diffusion') && G.Threshold==0.5, 'generator fields');
 assert(~isempty(G.region{1}) && numel(G.times)==2 && G.times(2)>=G.times(1), 'Scout + Event populated');
+Gd = bst_dynamics('AtomFromKernel', ax, 'diffusion', kp, 13);   % thr omitted -> default
+assert(Gd.Threshold==0.5, 'default threshold is 0.5');
 % threshold monotonicity: higher threshold -> Scout is a subset
 G9 = bst_dynamics('AtomFromKernel', ax, 'diffusion', kp, 13, 0.9);
 assert(all(ismember(G9.region{1}, G.region{1})), 'higher threshold -> subset Scout');
+assert(G9.Threshold==0.9, 'caller threshold honored (not overwritten)');
 disp('OK');

@@ -415,7 +415,7 @@ end
 function G = AtomFromKernel(ax, kernelName, kernelParams, seed, thr) %#ok<DEFNU>
     % Realise an eigfilter atom from its generator and threshold it into a populated atom group:
     % Scout = spatial level set (region), Event = temporal level set (times). Atom = thresholded filter.
-    if (nargin < 6) || isempty(thr), thr = 0.5; end
+    if (nargin < 5) || isempty(thr), thr = 0.5; end
     [W, gv] = bst_eigenfilter('Atom', ax, kernelName, kernelParams, seed);
     LS = Levelset(W, gv, thr);
     G = NewGroup(sprintf('%s @vtx%d', kernelName, seed));
