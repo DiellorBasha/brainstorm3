@@ -1407,6 +1407,29 @@ function [W, isSigned] = i_atom_normalize(W, Mass) %#ok<DEFNU>
     end
 end
 
+%% ===== filterbank: an atom IS a filter (generator), not a thresholded marker =====
+% Build a generator atomgroup: kernel + params + seed, with Threshold/region(Scout)/times(Event) UNSET.
+function G = i_default_atom(kernelName, kp, seed, surfaceFile, label) %#ok<DEFNU>
+    G = bst_dynamics('NewGroup', label);
+    G.KernelName   = kernelName;
+    G.KernelParams = kp;
+    G.vertices     = seed;
+    G.SurfaceFile  = surfaceFile;
+end
+% One-line summary of an atom's generator for the Atom-section readout.
+function s = i_atom_detail(G) %#ok<DEFNU>
+    seed = 0;  if ~isempty(G.vertices), seed = G.vertices(1); end
+    s = sprintf('%s . vtx %d', G.KernelName, seed);
+    if isstruct(G.KernelParams)
+        f = fieldnames(G.KernelParams);
+        for i = 1:numel(f)
+            if strcmpi(f{i}, 'lmax'), continue; end
+            v = G.KernelParams.(f{i});
+            if isnumeric(v) && isscalar(v), s = sprintf('%s . %s=%.3g', s, f{i}, v); end
+        end
+    end
+end
+
 %% ===== atom tool: filter selector + contextual params + localize + store =====
 function b = i_atom_default_bounds()
     b = struct('scaleMinMM',5, 'scaleMaxMM',120, 'rateMinMM2',25, 'rateMaxMM2',14400);
