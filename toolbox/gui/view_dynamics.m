@@ -52,6 +52,21 @@ function varargout = view_dynamics( varargin )
         return;
     end
 
+    % --- atom-field preview verbs (paint a realised W[nGv x nT] through the overlay) ---
+    % AtomFrameScalar is pure (for tests): scatter frame iT of W onto a full-surface vector.
+    if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'AtomFrameScalar')
+        varargout{1} = i_atom_frame_scalar(varargin{2}, varargin{3}, varargin{4}, varargin{5});
+        return;
+    end
+    if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'SetAtomField')
+        SetAtomField(varargin{2:end});
+        return;
+    end
+    if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'ClearAtomField')
+        ClearAtomField(varargin{2});
+        return;
+    end
+
     % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
     SrcResult = '';
     if (nargin >= 1) && ischar(varargin{1}) && strcmp(varargin{1}, 'FromResult')
@@ -250,6 +265,44 @@ function scal = i_pick_scalar(Ht, Op)
 end
 
 
+%% ===== atom-field preview: paint a realised W[nGv x nT] through the overlay =====
+% The panel's live preview. W is the realised atom field on the eigenbasis support gv (global
+% vertex indices), already normalized; isSigned picks the colormap (peak/diverging vs density/seq).
+function SetAtomField(hFig, W, gv, isSigned)
+    if isempty(hFig) || ~ishandle(hFig), return; end
+    D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    D.AtomField  = W;  D.AtomGV = gv(:);  D.AtomSigned = logical(isSigned);  D.Op = 'atom';
+    setappdata(hFig, 'DynamicsOverlay', D);
+    if isSigned, bst_colormaps('AddColormapToFigure', hFig, 'stat2');
+    else,        bst_colormaps('AddColormapToFigure', hFig, 'source'); end
+    i_dynamics_overlay(hFig);
+end
+
+% Drop the atom field and restore the native source paint (the 'none' state).
+function ClearAtomField(hFig)
+    if isempty(hFig) || ~ishandle(hFig), return; end
+    D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    D.Op = 'none';  D.AtomField = [];  D.AtomGV = [];
+    setappdata(hFig, 'DynamicsOverlay', D);
+    TessInfo = getappdata(hFig, 'Surface');
+    if ~isempty(TessInfo) && (D.iTess <= numel(TessInfo))
+        TessInfo(D.iTess).ColormapType = 'source';
+        setappdata(hFig, 'Surface', TessInfo);
+    end
+    bst_colormaps('AddColormapToFigure', hFig, 'source');
+    panel_surface('UpdateSurfaceData', hFig, D.iTess);
+    panel_surface('UpdateSurfaceColormap', hFig);
+end
+
+% Scatter frame iT of W (rows aligned with gv) onto a full-surface [nV x 1] vector (index-clamped).
+function scal = i_atom_frame_scalar(W, gv, iT, nV)
+    if isempty(iT) || iT < 1, iT = 1; end
+    iT = min(iT, size(W, 2));
+    scal = zeros(nV, 1);
+    scal(gv) = W(:, iT);
+end
+
+
 %% ===== open a figure_3d SOURCE figure on an unconstrained result + install the overlay =====
 function hFig = i_open_source_figure(SrcResult)
     global GlobalData;
@@ -295,6 +348,20 @@ end
 function i_dynamics_overlay(hFig)
     if isempty(hFig) || ~ishandle(hFig), return; end
     D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    % atom-field mode: paint the precomputed realised atom W(:,iT) (the panel's live preview).
+    % W is already normalized (density or peak) by the caller; D.AtomSigned picks the colormap.
+    if strcmpi(D.Op, 'atom')
+        if isempty(D.AtomField), return; end
+        TessInfo = getappdata(hFig, 'Surface');
+        if isempty(TessInfo) || (D.iTess > numel(TessInfo)) || ~ishandle(TessInfo(D.iTess).hPatch), return; end
+        [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+        TessInfo(D.iTess).Data         = i_atom_frame_scalar(D.AtomField, D.AtomGV, iT, D.nV);
+        TessInfo(D.iTess).DataMinMax   = [min(D.AtomField(:)), max(D.AtomField(:))];
+        if D.AtomSigned, TessInfo(D.iTess).ColormapType = 'stat2'; else, TessInfo(D.iTess).ColormapType = 'source'; end
+        setappdata(hFig, 'Surface', TessInfo);
+        panel_surface('UpdateSurfaceColormap', hFig);
+        return;
+    end
     % 'none' = no differential overlay: leave whatever the native pipeline painted (the RMS-norm
     % source scalar + 'source' colormap + raw source-vector quivers). Nothing to do.
     if strcmpi(D.Op, 'none'), return; end
