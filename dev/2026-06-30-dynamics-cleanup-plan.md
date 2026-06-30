@@ -4,7 +4,9 @@
 
 **Goal:** Prune three generations of dead/retired code from `toolbox/gui/panel_bst_dynamics.m` and collapse the duplicated magnitude-reduction logic into one helper, leaving a clean filterbank portal (plus the differential Measure overlay) with identical behavior.
 
-**Architecture:** Single-file, behavior-preserving refactor. Delete by stratum (unreachable → refphase → record/capture), prune the session-state struct (repointing the one retained reader from `curGroup` to the live `curAtom`), then consolidate three magnitude-reduction sites into `i_paintable_scalar`. Each task is verified by `checkcode` + targeted `grep` cross-checks; the final task is an MCP-driven live smoke-test of the panel.
+**Architecture:** Single-file, behavior-preserving refactor. Delete in dependency order so each task is self-contained — **refphase → record/capture → navigator-last** (the navigator task owns the four functions `i_focus_time`/`i_rec_figure`/`i_driving`/`i_read_block` that the earlier clusters also call, since by then all their callers are gone). Then prune the session-state struct (repointing the one retained reader from `curGroup` to the live `curAtom`) and consolidate three magnitude-reduction sites into `i_paintable_scalar`. Each task is verified by `checkcode` + targeted `grep` cross-checks; the final task is an MCP-driven live smoke-test of the panel.
+
+**Note on `NotifySelection`:** it is a public hook still called by `figure_spectrum.m` and `figure_timeseries.m` (external files, out of scope to edit). It is therefore **not deleted** — its body (which referenced now-deleted sync helpers) is reduced to a no-op stub, preserving the external contract.
 
 **Tech Stack:** MATLAB (Brainstorm fork). Verification via the brainstorm-dev MATLAB MCP (`check_matlab_code` for M-Lint, `evaluate_matlab_code` / `run_matlab_file` for live checks) and `git` + `grep` from bash.
 
@@ -23,78 +25,7 @@
 
 ---
 
-### Task 1: Delete stratum-1 unreachable code (tree / navigator / PSD-overlay)
-
-**Files:**
-- Modify: `toolbox/gui/panel_bst_dynamics.m`
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces: `BuildTree()` reduced to a thin wrapper `function BuildTree(); UpdateAtomList(); end` (still called by `SetTarget` and `i_apply`).
-
-- [ ] **Step 1: Delete the unreachable subfunctions**
-
-Delete these subfunctions in full from `panel_bst_dynamics.m`:
-
-Tree / occurrence list:
-- `TreeSel_Callback`, `OccurSel_Callback`, `i_window_atoms`, `i_group_atoms`
-- `BuildTree` — do **not** delete the function; replace its entire body with a single call so it becomes:
-  ```matlab
-  function BuildTree()
-      UpdateAtomList();
-  end
-  ```
-
-4-axis navigator:
-- `i_axis_block`, `i_read_block`, `OnAxisChange`, `OnFreqPreset`, `i_drive`, `i_freq_preset`, `i_freq_name`, `i_fill_block`, `OnLoadAtom`, `i_band_match`, `i_bands`
-
-Frequency / PSD overlay + time/freq sync:
-- `NotifySelection`, `i_rec_figure`, `i_owns_rec`, `i_owns_spec`, `i_ensure_psd`, `i_fix_spec_xlim`, `i_find_psd_file`, `i_compute_psd`, `i_freq_overlay`, `i_freq_overlay_clear`, `i_sync_freq`, `i_focus_time`, `i_sync_time`, `i_driving`
-
-- [ ] **Step 2: Run M-Lint on the file**
-
-Call the MCP tool `check_matlab_code` on `toolbox/gui/panel_bst_dynamics.m`.
-Expected: no "undefined function or variable" referencing any deleted name; no errors. (Pre-existing `%#ok` style notices are fine.)
-
-- [ ] **Step 3: Grep cross-check — deleted symbols have zero references**
-
-Run:
-```bash
-cd /Users/diellorbasha/workspace/research/code/brainstorm3
-for fn in TreeSel_Callback OccurSel_Callback i_window_atoms i_group_atoms \
-  i_axis_block i_read_block OnAxisChange OnFreqPreset i_drive i_freq_preset \
-  i_freq_name i_fill_block OnLoadAtom i_band_match i_bands NotifySelection \
-  i_rec_figure i_owns_rec i_owns_spec i_ensure_psd i_fix_spec_xlim \
-  i_find_psd_file i_compute_psd i_freq_overlay i_freq_overlay_clear i_sync_freq \
-  i_focus_time i_sync_time i_driving; do
-    n=$(grep -c "\b$fn\b" toolbox/gui/panel_bst_dynamics.m)
-    if [ "$n" -ne 0 ]; then echo "STILL REFERENCED: $fn ($n)"; fi
-done
-echo "done"
-```
-Expected output: `done` with **no** "STILL REFERENCED" lines.
-
-- [ ] **Step 4: Grep cross-check — no external callers of the deleted symbols**
-
-Run:
-```bash
-grep -rln "NotifySelection" toolbox/ | grep -v panel_bst_dynamics.m
-```
-Expected: no output (the only `NotifySelection` caller was `figure_timeseries`/`figure_spectrum` via the retired sync — confirm none remain; if any appear, they reference the deleted verb and must be handled — STOP and report).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add toolbox/gui/panel_bst_dynamics.m
-git commit -m "refactor(dynamics): delete unreachable tree/navigator/PSD code
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
-```
-
----
-
-### Task 2: Delete refphase detection + its toolbar buttons
+### Task 1: Delete refphase detection + its toolbar buttons
 
 **Files:**
 - Modify: `toolbox/gui/panel_bst_dynamics.m`
@@ -102,6 +33,8 @@ Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
 **Interfaces:**
 - Consumes: nothing.
 - Produces: toolbar with the **Detect** and **Clear** buttons removed; **Measure** and **Show-all** buttons retained.
+
+**Note:** the deleted `OnDetect` calls `i_focus_time` (and the navigator chain calls `i_rec_figure`/`i_driving`/`i_read_block`). Those four functions are **NOT** deleted here — they are owned by Task 3 (navigator-last), where their last callers disappear. Deleting only the refphase functions in this task leaves no dangling references because the four shared functions still exist.
 
 - [ ] **Step 1: Delete the refphase subfunctions**
 
@@ -120,7 +53,7 @@ Keep the `jShow` (Show-all) toggle line between them. After removal, collapse an
 
 - [ ] **Step 3: Run M-Lint**
 
-Call `check_matlab_code` on the file. Expected: no undefined-reference errors.
+Call `check_matlab_code` on the file. Expected: no undefined-reference errors. (`i_focus_time` etc. are still defined, so calls to them from any not-yet-deleted code are fine.)
 
 - [ ] **Step 4: Grep cross-check**
 
@@ -133,7 +66,7 @@ for fn in OnDetect OnSaveDetection OnClearDetection i_detect_events i_remove_ban
 done
 echo "done"
 ```
-Expected: `done`, no "STILL REFERENCED". (Note: `\bOnSave\b` must not match `OnSaveDetection`/`OnSaveFilterbank`/`OnSaveCursor` — the `\b` word boundaries handle this; `OnSaveFilterbank` is retained and is a different token.)
+Expected: `done`, no "STILL REFERENCED". (Note: `\bOnSave\b` must not match `OnSaveDetection`/`OnSaveFilterbank`/`OnSaveCursor` — the `\b` word boundaries handle this; `OnSaveFilterbank` and `OnSaveCursor` are different tokens and are not deleted in this task.)
 
 - [ ] **Step 5: Commit**
 
@@ -147,7 +80,7 @@ Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
 
 ---
 
-### Task 3: Delete record/capture + its menu item + orphaned helpers
+### Task 2: Delete record/capture + its menu item + orphaned helpers
 
 **Files:**
 - Modify: `toolbox/gui/panel_bst_dynamics.m`
@@ -155,6 +88,8 @@ Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
 **Interfaces:**
 - Consumes: nothing.
 - Produces: Atoms menu with **Record at cursor** removed. `SyncSource` (the Localize-tool feedback called by `bst_geodesic_tool.m:168`) is **retained**.
+
+**Note:** the deleted `OnSaveCursor` calls `i_read_block('time')`. `i_read_block` is **NOT** deleted here — it is owned by Task 3 (its other caller, `OnAxisChange`, is in the navigator cluster). Deleting only the record/capture functions leaves no dangling reference because `i_read_block` still exists.
 
 - [ ] **Step 1: Delete the record/capture subfunctions**
 
@@ -197,6 +132,93 @@ Expected: no "STILL REFERENCED"; `SyncSource` count ≥ 1; the `bst_geodesic_too
 ```bash
 git add toolbox/gui/panel_bst_dynamics.m
 git commit -m "refactor(dynamics): remove record/capture (keep SyncSource localize hook)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
+```
+
+---
+
+### Task 3: Delete the unreachable navigator / tree / PSD-overlay cluster (navigator-last)
+
+**Files:**
+- Modify: `toolbox/gui/panel_bst_dynamics.m`
+
+**Interfaces:**
+- Consumes: refphase (Task 1) and record/capture (Task 2) already deleted — so `OnDetect`/`OnSaveCursor` no longer call the shared functions.
+- Produces: `BuildTree()` reduced to a thin wrapper `function BuildTree(); UpdateAtomList(); end` (still called by `SetTarget` and `i_apply`); `NotifySelection` reduced to a no-op stub (retained for its external callers).
+
+- [ ] **Step 1: Delete the navigator / tree / PSD subfunctions**
+
+Delete these subfunctions in full from `panel_bst_dynamics.m`:
+
+Tree / occurrence list:
+- `TreeSel_Callback`, `OccurSel_Callback`, `i_window_atoms`, `i_group_atoms`
+
+4-axis navigator (includes the four shared functions whose other callers were removed in Tasks 1-2):
+- `i_axis_block`, `i_read_block`, `OnAxisChange`, `OnFreqPreset`, `i_drive`, `i_freq_preset`, `i_freq_name`, `i_fill_block`, `OnLoadAtom`, `i_band_match`, `i_bands`
+
+Frequency / PSD overlay + time/freq sync:
+- `i_rec_figure`, `i_owns_rec`, `i_owns_spec`, `i_ensure_psd`, `i_fix_spec_xlim`, `i_find_psd_file`, `i_compute_psd`, `i_freq_overlay`, `i_freq_overlay_clear`, `i_sync_freq`, `i_focus_time`, `i_sync_time`, `i_driving`
+
+- [ ] **Step 2: Reduce `BuildTree` to a wrapper**
+
+`BuildTree` is called by retained code (`SetTarget`, `i_apply`). Do **not** delete it; replace its entire body so it becomes exactly:
+```matlab
+function BuildTree()
+    UpdateAtomList();
+end
+```
+
+- [ ] **Step 3: Reduce `NotifySelection` to a no-op stub**
+
+`NotifySelection` is a public hook still called by `figure_spectrum.m` and `figure_timeseries.m` (out-of-scope files). Do **not** delete it. Replace its entire body (which references the now-deleted `i_owns_spec`/`i_owns_rec`/`i_sync_freq`/`i_sync_time`/`i_driving`) so it becomes exactly:
+```matlab
+function NotifySelection(hFig, axis, range) %#ok<DEFNU,INUSD>
+    % Retired no-op. The freq/time selection-sync was removed with the Navigator
+    % strip; figure_spectrum / figure_timeseries still call this hook, so the entry
+    % point is retained as a no-op to preserve their contract.
+end
+```
+
+- [ ] **Step 4: Run M-Lint on the file**
+
+Call the MCP tool `check_matlab_code` on `toolbox/gui/panel_bst_dynamics.m`.
+Expected: no "undefined function or variable" referencing any deleted name; no errors. (Pre-existing `%#ok` style notices are fine.)
+
+- [ ] **Step 5: Grep cross-check — deleted symbols have zero references**
+
+Run:
+```bash
+cd /Users/diellorbasha/workspace/research/code/brainstorm3
+for fn in TreeSel_Callback OccurSel_Callback i_window_atoms i_group_atoms \
+  i_axis_block i_read_block OnAxisChange OnFreqPreset i_drive i_freq_preset \
+  i_freq_name i_fill_block OnLoadAtom i_band_match i_bands \
+  i_rec_figure i_owns_rec i_owns_spec i_ensure_psd i_fix_spec_xlim \
+  i_find_psd_file i_compute_psd i_freq_overlay i_freq_overlay_clear i_sync_freq \
+  i_focus_time i_sync_time i_driving; do
+    n=$(grep -c "\b$fn\b" toolbox/gui/panel_bst_dynamics.m)
+    if [ "$n" -ne 0 ]; then echo "STILL REFERENCED: $fn ($n)"; fi
+done
+echo "--- NotifySelection RETAINED as a stub (expect 1 def + its external callers) ---"
+grep -c "\bNotifySelection\b" toolbox/gui/panel_bst_dynamics.m
+echo "done"
+```
+Expected output: no "STILL REFERENCED" lines; `NotifySelection` count = 1 (its definition only — its former internal call has been removed with the body); `done`.
+
+- [ ] **Step 6: Grep cross-check — `NotifySelection` external callers still resolve**
+
+Run:
+```bash
+grep -rln "NotifySelection" toolbox/ | grep -v panel_bst_dynamics.m
+```
+Expected: `figure_spectrum.m` and `figure_timeseries.m` appear (their `panel_bst_dynamics('NotifySelection', ...)` calls now hit the retained no-op stub — this is correct, not a defect).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add toolbox/gui/panel_bst_dynamics.m
+git commit -m "refactor(dynamics): delete unreachable navigator/tree/PSD; stub NotifySelection
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01EXBb3MmD4g8QcFi8NCCByL"
