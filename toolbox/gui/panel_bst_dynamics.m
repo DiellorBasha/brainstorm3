@@ -62,6 +62,16 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuAtoms, [], 'Rename group', IconLoader.ICON_EDIT,            [], @(h,e)bst_call(@AtomRenameGroup));
     gui_component('MenuItem', jMenuAtoms, [], 'Delete group', IconLoader.ICON_EVT_TYPE_DEL,    [], @(h,e)bst_call(@AtomDeleteGroup));
     gui_component('MenuItem', jMenuAtoms, [], 'Set color',    IconLoader.ICON_COLOR_SELECTION, [], @(h,e)bst_call(@AtomSetColor));
+    % Set operator: per-atom eigenbasis (mirrors the Scout panel's "Set function")
+    jMenuOp = gui_component('Menu', jMenuAtoms, [], 'Set operator', IconLoader.ICON_PROPERTIES, [], []); %#ok<NASGU>
+    bgOp = javax.swing.ButtonGroup();
+    opDefs = {'Geometric','Laplace-Beltrami'; 'Connectomic','LB-Connectome'; 'Tangent (connection Laplacian)','Connection Laplacian'; 'Dirac','Dirac'};
+    jOpItems = javaArray('javax.swing.JRadioButtonMenuItem', size(opDefs,1));
+    for io = 1:size(opDefs,1)
+        opv = opDefs{io,2};
+        jit = gui_component('radiomenuitem', jMenuOp, [], opDefs{io,1}, [], [], @(h,e)bst_call(@()OnSetOperator(opv)));
+        bgOp.add(jit);  jOpItems(io) = jit;
+    end
     jMenuAtoms.addSeparator();
     jMenuPhases = gui_component('Menu', jMenuAtoms, [], 'Show phases', IconLoader.ICON_EVT_TYPE, [], []);
     phaseNames  = {'peak','trough','rising','falling'};
@@ -145,6 +155,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jListAtoms',jListAtoms, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
         'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jAtomInfo',jAtomInfo, ...
+        'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
         'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems));
 end
 
@@ -1492,7 +1503,8 @@ end
 function OnKernelChange() %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(ctrl), return; end
     k = i_atom_current_kernel(ctrl);
-    b = i_field(st, 'atomBounds', i_atom_default_bounds());
+    ax = []; if ~isempty(st), ax = i_atom_axes(st, i_atom_op(st)); end
+    if ~isempty(ax), b = i_atom_bounds(ax); else, b = i_atom_default_bounds(); end
     panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, k, b, @()bst_call(@OnParamSettle));
     i_atom_writeback();
     if ~isempty(st) && ~isempty(i_field(st,'atomSeed',[])), i_atom_preview(); end
@@ -1534,43 +1546,82 @@ function st = i_atom_ensure_axes(st)
     setappdata(0, 'DynamicsTarget', st);
 end
 
-% Realise the atom field for (kernel, slider values, seed) and normalize it for display.
-function [W, gv, isSigned] = i_atom_realise(st, kernel, vals, seed)
-    ax   = st.atomAx;
+% Realise the atom field on its operator's eigenbasis; reduce vector/complex bases to magnitude.
+function [W, gv, isSigned] = i_atom_realise(st, kernel, vals, seed, variant)
+    if (nargin < 5) || isempty(variant), variant = 'Laplace-Beltrami'; end
+    W = [];  gv = [];  isSigned = false;
+    ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     lmax = max(ax.Lambda{1}(:));
     kp   = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
-    [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed);
+    try
+        [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed);
+    catch %#ok<CTCH>
+        W = [];  gv = [];  return;                                  % operator not realisable -> caller guards
+    end
+    nGv = numel(gv);
+    if ~isreal(W), W = abs(W); end                                  % complex tangent (Connection Laplacian) -> magnitude
+    if (size(W,1) > nGv) && (mod(size(W,1), nGv) == 0)              % vector/quaternion basis (Dirac k=4) -> per-vertex magnitude
+        nc = size(W,1) / nGv;
+        W  = reshape(sqrt(sum(reshape(W, nc, nGv, []).^2, 1)), nGv, []);
+    end
+    if size(W,1) ~= nGv, W = [];  return; end                       % unexpected shape -> not paintable (guarded)
+    if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))   % scalar basis: density/peak by kernel class
+        [W, isSigned] = i_atom_normalize(W, ax.Mass{i_seed_block(ax, seed)});
+    else                                                            % magnitude: peak-normalized, sequential
+        pk = max(abs(W(:)));  if pk > 0, W = W / pk; end;  isSigned = false;
+    end
+end
+function blk = i_seed_block(ax, seed)
     blk = 1;
     for bI = 1:numel(ax.GlobalVertices)
         if any(ax.GlobalVertices{bI} == seed), blk = bI; break; end
     end
-    [W, isSigned] = i_atom_normalize(W, ax.Mass{blk});
 end
 
-% Read the controls + seed, realise, and paint the live preview through the overlay.
+% Read the controls + seed, realise on the atom's operator, and paint the live preview.
 function i_atom_preview() %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     seed = i_field(st, 'atomSeed', []);  if isempty(seed), return; end
-    st = i_atom_ensure_axes(st);  if isempty(i_field(st,'atomAx',[])), return; end
+    variant = i_atom_op(st);
     k    = i_atom_current_kernel(ctrl);
     vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
-    [W, gv, isSigned] = i_atom_realise(st, k, vals, seed);
+    [W, gv, isSigned] = i_atom_realise(st, k, vals, seed, variant);
+    if isempty(W)                                                   % operator not realisable -> guard
+        ctrl.jAtomInfo.setText(sprintf('%s: not realisable for this atom', variant));
+        if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('ClearAtomField', st.hFig); end
+        return;
+    end
     if ~isempty(st.hFig) && ishandle(st.hFig)
         view_dynamics('SetAtomField', st.hFig, W, gv, isSigned);
     end
+end
+% The selected atom's operator (Variant), default Laplace-Beltrami.
+function v = i_atom_op(st)
+    v = 'Laplace-Beltrami';
+    ia = i_field(st, 'curAtom', 0);
+    if (ia >= 1) && (ia <= numel(st.T.Groups)) && isfield(st.T.Groups(ia),'Operator') && ~isempty(st.T.Groups(ia).Operator)
+        v = st.T.Groups(ia).Operator;
+    end
+end
+% Physical-scale bounds from an axes' spectrum (for the contextual sliders).
+function b = i_atom_bounds(ax)
+    lamAll = ax.Lambda{1}(:);  if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
+    lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
+    mm = @(l) 2*pi ./ sqrt(l) * 1000;  sMin = mm(lmax);  sMax = mm(lminPos);
+    b = struct('scaleMinMM',sMin, 'scaleMaxMM',sMax, 'rateMinMM2',sMin^2, 'rateMaxMM2',sMax^2);
 end
 
 %% ===== filterbank: create / list / select / save =====
 % + Create atom: append a default DIFFUSION filter atom (no threshold) on a default seed, select it.
 function OnCreateAtom() %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end %#ok<ASGLU>
-    st = i_atom_ensure_axes(st);  if isempty(i_field(st,'atomAx',[])), return; end
-    ax = st.atomAx;  lmax = max(ax.Lambda{1}(:));  seed = ax.GlobalVertices{1}(1);
-    b  = i_field(st, 'atomBounds', i_atom_default_bounds());
-    S  = bst_eigfilter_controls('Sliders', 'diffusion', b);
+    op = i_launch_operator(st);                                     % default = the launch source's operator
+    ax = i_atom_axes(st, op);  if isempty(ax), return; end
+    lmax = max(ax.Lambda{1}(:));  seed = ax.GlobalVertices{1}(1);
+    S  = bst_eigfilter_controls('Sliders', 'diffusion', i_atom_bounds(ax));
     vals = [0 0 0];  for i = 1:3, if ~isempty(S(i).def), vals(i) = S(i).def; end, end
     kp = bst_eigfilter_controls('ToKernel', 'diffusion', vals, lmax);  kp.vals = vals;
-    G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1));
+    G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1), op);
     st.T = bst_dynamics('AddGroup', st.T, G);  setappdata(0,'DynamicsTarget', st);
     UpdateAtomList();  SetSelectedAtom(numel(st.T.Groups));
 end
@@ -1616,14 +1667,16 @@ function i_select_atom_load(iAtom)
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     if (iAtom < 1) || (iAtom > numel(st.T.Groups)), return; end
     G  = st.T.Groups(iAtom);
-    st = i_atom_ensure_axes(st);
+    op = 'Laplace-Beltrami';  if isfield(G,'Operator') && ~isempty(G.Operator), op = G.Operator; end
+    ax = i_atom_axes(st, op);
     ik = find(strcmp(ctrl.atomKeys, G.KernelName), 1);
     if ~isempty(ik), ctrl.jKernel.setSelectedIndex(ik - 1); end
-    b = i_field(st, 'atomBounds', i_atom_default_bounds());
+    if ~isempty(ax), b = i_atom_bounds(ax); else, b = i_atom_default_bounds(); end
     panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, G.KernelName, b, @()bst_call(@OnParamSettle));
     if isstruct(G.KernelParams) && isfield(G.KernelParams, 'vals')
         panel_eigenfilter_design('SetAtomVals', ctrl.jAtomParams, G.KernelParams.vals);
     end
+    i_select_op_radio(op);                                         % check the matching operator radio
     st.atomSeed = G.vertices;  setappdata(0, 'DynamicsTarget', st);
     ctrl.jAtomInfo.setText(i_atom_detail(G));
     i_atom_preview();
@@ -1633,9 +1686,9 @@ end
 function i_atom_writeback()
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
-    st = i_atom_ensure_axes(st);
+    ax = i_atom_axes(st, i_atom_op(st));  if isempty(ax), return; end
     k = i_atom_current_kernel(ctrl);  vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
-    lmax = max(st.atomAx.Lambda{1}(:));
+    lmax = max(ax.Lambda{1}(:));
     kp = bst_eigfilter_controls('ToKernel', k, vals, lmax);  kp.vals = vals;
     st.T.Groups(ia).KernelName = k;  st.T.Groups(ia).KernelParams = kp;
     setappdata(0, 'DynamicsTarget', st);
@@ -1661,6 +1714,21 @@ function OnThresholdMenu() %#ok<DEFNU>
     v = java_dialog('input', 'Level-set threshold (0..1) for the optional Scout+Event export:', 'Atom threshold', [], num2str(cur));
     if isempty(v), return; end
     t = str2double(v);  if ~isnan(t) && (t > 0) && (t < 1), st.atomThreshold = t; setappdata(0, 'DynamicsTarget', st); end
+end
+
+% Set the selected atom's operator (eigenbasis), rebuild + re-preview on that basis.
+function OnSetOperator(variant) %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end %#ok<ASGLU>
+    ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
+    st.T.Groups(ia).Operator = variant;  setappdata(0, 'DynamicsTarget', st);
+    i_select_op_radio(variant);
+    i_select_atom_load(ia);                                        % reload sliders/bounds on the new basis + preview
+end
+% Check the operator radio matching the variant.
+function i_select_op_radio(variant)
+    ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl) || ~isfield(ctrl,'jOpItems'), return; end
+    k = find(strcmp(ctrl.opVariants, variant), 1);
+    if ~isempty(k), ctrl.jOpItems(k).setSelected(1); end
 end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
