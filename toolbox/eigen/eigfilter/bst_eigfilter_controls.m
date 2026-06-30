@@ -15,7 +15,7 @@ end
 function S = i_sliders(k, b)
     e   = i_row('',[],[],[],'');
     scD = round((b.scaleMinMM + b.scaleMaxMM)/2);               % spectrum-derived defaults
-    rtD = round(((b.scaleMinMM + b.scaleMaxMM)/2)^2);
+    rtD = round(scD^2);                                        % == prior designer pRate=round(pScaleMM^2)
     sc  = i_row('Scale (mm)', b.scaleMinMM, b.scaleMaxMM, scD, '%.0f');
     switch k
         case 'diffusion',   S = [i_row('Rate (mm^2/s)', b.rateMinMM2, b.rateMaxMM2, rtD, '%.0f'), e, e];
