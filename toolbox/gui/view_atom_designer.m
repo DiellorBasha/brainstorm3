@@ -42,24 +42,9 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     [lmax, lminPos, scaleMinMM, scaleMaxMM, rateMinMM2, rateMaxMM2] = deal(0);   % shared with i_build_basis
     ax = struct();  i_build_basis(variant);                    % ax = bst_eigen('Axes', ...) + scale/rate bounds
 
-    % --- registry: one FLAT kernel list, dynamic + static group headers ---
-    allK = bst_eigfilter_kernel('list');  spatialK = {}; dynK = {};
-    for ii = 1:numel(allK)
-        try m = bst_eigfilter_kernel('info', allK{ii}); catch, continue; end
-        if isfield(m,'domain') && ~isempty(m.domain), dynK{end+1}=allK{ii}; else, spatialK{end+1}=allK{ii}; end %#ok<AGROW>
-    end
-    pref = {'diffusion','dampedwave','wave','kleingordon'};
-    dynK = [pref(ismember(pref,dynK)), setdiff(dynK, pref, 'stable')];
-    DH = '──── dynamic ────';  SH = '──── static ────';
-    kList = [{DH}, dynK, {SH}, spatialK];  iDH = 1;  iSH = numel(dynK) + 2;
-
-    % --- state (closure-shared) ---
+    % --- state (closure-shared) --- (the kernel list lives in the docked panel: panel_eigenfilter_design('AtomKernels'))
     state    = 'design';
-    kernel   = 'diffusion';  lastKIdx = 2;          % default = first dynamic kernel (diffusion)
-    pScaleMM = round((scaleMinMM+scaleMaxMM)/2);   % spatial scale (mm), STATIC kernels (heat/mexhat)
-    pRate    = round(pScaleMM^2);                   % diffusion rate kappa (mm^2/s); blur reaches ~pScaleMM by t=1s
-    pSpeed   = 1.0;                                 % wave speed c (m/s), non-separable only
-    pDecay   = 0.5;                                 % decay time (s), damped only
+    kernel   = 'diffusion';                          % default kernel (the panel's Filter combobox selects it)
     normMode = '';                                  % active colormap normalization (set by i_normalize)
     showFib  = false;  hFibers = [];  fibPts = [];  fibEndV = [];   % connectome fiber overlay (lazy-loaded)
     % default seed: vertex nearest the centroid of the first eigenbasis support
@@ -83,26 +68,17 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     iRes   = bst_memory('GetResultInDataSet', iDS, resFile);
     TI     = getappdata(hFig, 'Surface');  iTess = find(~cellfun('isempty', {TI.SurfaceFile}), 1);
 
-    % --- top-right filter-design panel: operator + kernel + sliders, compactly spaced ---
-    hP = uipanel('Parent',hFig, 'Title','Filter design', 'Units','normalized', 'Position',[0.70 0.62 0.295 0.36], ...
-                 'FontUnits','points','FontSize',bst_get('FigFont'));
-    yo = 0.84; yk = 0.68; ys = [0.52 0.38 0.24];  lw=0.30; sw=0.42; vw=0.16;
-    uicontrol(hP,'Style','text','String','Operator','Units','normalized','Position',[0.04 yo lw 0.12],'HorizontalAlignment','left');
-    hOper = uicontrol(hP,'Style','popupmenu','String',{'connectomic','geometric'},'Value',1+strcmpi(variant,'Laplace-Beltrami'), ...
-                      'Units','normalized','Position',[0.35 yo 0.61 0.13],'Callback',@OperatorChanged, ...
-                      'TooltipString','Eigenbasis operator: connectomic = LB+connectome, geometric = Laplace-Beltrami');
-    uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',[0.04 yk lw 0.12],'HorizontalAlignment','left');
-    hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Value',2,'Units','normalized','Position',[0.35 yk 0.61 0.13],'Callback',@KernelChanged);
-    [hScale,hScaleV,hScaleL] = i_slider(hP,'Scale', ys(1), lw,sw,vw, scaleMinMM, scaleMaxMM, pScaleMM, @ParamChanged);
-    [hSpeed,hSpeedV,hSpeedL] = i_slider(hP,'Speed', ys(2), lw,sw,vw, 0.1, 10,  pSpeed, @ParamChanged);
-    [hDecay,hDecayV,hDecayL] = i_slider(hP,'Decay', ys(3), lw,sw,vw, 0.05, 2,  pDecay, @ParamChanged);
-    hFib  = uicontrol(hP,'Style','togglebutton','String','Connectome','Units','normalized','Position',[0.04 0.04 0.42 0.13], ...
-                      'Callback',@OnToggleConnectome, 'TooltipString','Overlay the connectome fibers and colour them by the atom (endpoints anchored)');
-    hSave = uicontrol(hP,'Style','pushbutton','String','Save','Units','normalized','Position',[0.80 0.04 0.16 0.13], ...
-                      'Callback',@SaveAtom, 'TooltipString','Save atom -> Scout + Event');
-    hLabel = uicontrol(hFig,'Style','text','String','', 'Units','Pixels','Position',[8 6 820 18], ...
-        'HorizontalAlignment','left','FontUnits','points','FontSize',bst_get('FigFont'));
-    SyncControls();
+    % --- design controls live in a DOCKED panel (panel_atom_designer), NOT on the figure ---
+    cb = struct('Kernel',   @()bst_call(@KernelChanged), ...
+                'Operator', @()bst_call(@OperatorChanged), ...
+                'Param',    @()bst_call(@ParamChanged), ...
+                'Fibers',   @(s)bst_call(@()OnToggleConnectome(s)), ...
+                'Save',     @()bst_call(@SaveAtom));
+    try, gui_hide('AtomDesigner'); catch, end %#ok<CTCH>
+    bstPanelDes = panel_atom_designer('CreatePanel');
+    gui_show(bstPanelDes, 'BrainstormTab', 'tools');
+    panel_atom_designer('Configure', cb, i_bounds(), kernel, variant);
+    Status();
 
     % --- vertex picking: use figure_3d's native WaveletDesignerPick hook (select3d-based via
     %     panel_coordinates('SelectPoint'): occlusion-correct, with native click/drag separation) rather
@@ -127,53 +103,32 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         scaleMinMM = mm(lmax);  scaleMaxMM = mm(lminPos);          % finest .. coarsest cortical scale
         rateMinMM2 = scaleMinMM^2;  rateMaxMM2 = scaleMaxMM^2;     % diffusion rate bounds (mm^2/s) = scale^2
     end
-    function OperatorChanged(src,~)
-        vmap = {'LB-Connectome','Laplace-Beltrami'};               % 1=connectomic, 2=geometric
-        i_build_basis(vmap{get(src,'Value')});
-        pScaleMM = min(max(pScaleMM, scaleMinMM), scaleMaxMM);     % clamp params to the new spectrum
-        pRate    = min(max(pRate,    rateMinMM2), rateMaxMM2);
+    function b = i_bounds()
+        b = struct('scaleMinMM',scaleMinMM, 'scaleMaxMM',scaleMaxMM, 'rateMinMM2',rateMinMM2, 'rateMaxMM2',rateMaxMM2);
+    end
+    function OperatorChanged()
+        newVar = panel_atom_designer('CurrentOperator');
+        if strcmpi(newVar, variant), return; end                   % unchanged (e.g. the configure-time callback)
+        variant = newVar;
+        i_build_basis(variant);
         gv = ax.GlobalVertices{1};                                 % keep the seed if still supported, else recenter
         if ~ismember(seedVtx, gv), [~,j] = min(sum((V(gv,:)-mean(V(gv,:),1)).^2,2)); seedVtx = gv(j); end
-        SyncControls();  Regen();  i_reset_time();                 % new basis -> diffuse anew from t=0
+        panel_atom_designer('RebuildSliders', kernel, i_bounds());  % new spectrum -> refresh slider ranges
+        Regen();  i_reset_time();                                  % new basis -> diffuse anew from t=0
     end
-    function KernelChanged(src,~)
-        idx = get(src,'Value');
-        if idx==iDH || idx==iSH, set(src,'Value',lastKIdx); return; end
-        lastKIdx = idx;  opt = get(src,'String');  kernel = opt{idx};
-        SyncControls();  Regen();  i_reset_time();        % new kernel -> diffuse anew from t=0
+    function KernelChanged()
+        newK = panel_atom_designer('CurrentKernel');
+        if strcmp(newK, kernel), return; end                       % unchanged (e.g. the configure-time callback)
+        kernel = newK;
+        panel_atom_designer('RebuildSliders', kernel, i_bounds());  % contextual params for the new kernel
+        Regen();  i_reset_time();                                  % new kernel -> diffuse anew from t=0
     end
-    function ParamChanged(~,~)
-        i_refresh_readout(hScale,hScaleV);  i_refresh_readout(hSpeed,hSpeedV);  i_refresh_readout(hDecay,hDecayV);
-        Regen();
-    end
-    function i_refresh_readout(hs, hv)
-        if strcmpi(get(hs,'Enable'),'on'), set(hv,'String',sprintf('%.3g', get(hs,'Value'))); end
-    end
-    function SyncControls()
-        i_config_sliders(kernel);
-        Status();
-    end
-    function i_config_sliders(k)
-        % Per-kernel slider config comes from the shared control spec (designer + panel single source).
-        b = struct('scaleMinMM',scaleMinMM, 'scaleMaxMM',scaleMaxMM, 'rateMinMM2',rateMinMM2, 'rateMaxMM2',rateMaxMM2);
-        S = bst_eigfilter_controls('Sliders', k, b);
-        H = {hScale,hScaleL,hScaleV; hSpeed,hSpeedL,hSpeedV; hDecay,hDecayL,hDecayV};
-        for ii = 1:3
-            i_setrow(H{ii,1}, H{ii,2}, H{ii,3}, S(ii).label, S(ii).lo, S(ii).hi, S(ii).def, S(ii).fmt);
-        end
-    end
-    function i_setrow(hs, hl, hv, label, lo, hi, val, fmt)
-        if isempty(label)
-            set([hs hv], 'Enable','off');  set(hl,'String','');  set(hv,'String','--');
-        else
-            set(hl,'String',label);  i_setslider(hs, lo, hi, val);
-            set([hs hv],'Enable','on');  set(hv,'String',sprintf(fmt, val));
-        end
+    function ParamChanged()
+        Regen();                                                   % panel sliders update their own readouts
     end
     function Status()
-        s1 = get(hScale,'Value');  l1 = get(hScaleL,'String');
-        set(hLabel,'String',sprintf('[%s] %s @ vtx %d | %s=%.3g | norm: %s | arrows=time', ...
-            state, kernel, seedVtx, l1, s1, normMode));
+        panel_atom_designer('SetStatus', sprintf('[%s] %s @ vtx %d | norm: %s | arrows=time', ...
+            state, kernel, seedVtx, normMode));
     end
     function [W, isSigned] = i_normalize(W)
         % Scale the atom field to a UNIT-MASS DENSITY: divide each time frame by its mass integral
@@ -207,14 +162,14 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
             if showFib, i_recolor_fibers(); end                          % keep the fiber overlay in sync with the atom
             Status();
         catch ME
-            set(hLabel,'String',['Could not propagate: ' regexprep(ME.message,'\s+',' ')]);
+            panel_atom_designer('SetStatus',['Could not propagate: ' regexprep(ME.message,'\s+',' ')]);
         end
     end
-    function OnToggleConnectome(src,~)
-        showFib = logical(get(src,'Value'));
+    function OnToggleConnectome(stateOn)
+        showFib = logical(stateOn);
         if showFib
             if isempty(fibPts), i_load_fibers(); end
-            if isempty(fibPts), set(src,'Value',0); showFib = false; return; end   % nothing to show
+            if isempty(fibPts), showFib = false; return; end   % nothing to show
             [~, hFibers] = figure_3d('PlotFibers', hFig, fibPts, repmat([.5 .5 .5], size(fibPts,1), 1));
             setappdata(hFig, 'AtomFiberRecolor', @i_recolor_fibers);    % recolor on every time frame (bst_figures hook)
             i_recolor_fibers();
@@ -237,7 +192,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
             end
             if ~isempty(kd), ff = sDef.Surface(kd).FileName;  isDef = true; end
         end
-        if isempty(ff), set(hLabel,'String','[connectome] no fibers on this subject or the default anatomy.'); return; end
+        if isempty(ff), panel_atom_designer('SetStatus','[connectome] no fibers on this subject or the default anatomy.'); return; end
         FibMat = load(file_fullpath(ff), 'Points');  P = double(FibMat.Points);   % [nF x nP x 3]
         cap = 5000;  nF = size(P,1);
         if nF > cap, P = P(sort(randperm(nF, cap)),:,:); end                       % stay under PlotFibers' cap
@@ -259,7 +214,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
                 cT = mean(e,1);  sT = sqrt(mean(sum((e-cT).^2,2)));
                 cS = mean(V,1);  sS = sqrt(mean(sum((V-cS).^2,2)));
                 P  = reshape((Pf - cT) * (sS/max(sT,eps)) + cS, sz);
-                set(hLabel,'String','[connectome] no MNI transform; coarse similarity alignment used.');
+                panel_atom_designer('SetStatus','[connectome] no MNI transform; coarse similarity alignment used.');
             end
         end
         fibPts  = P;
@@ -308,10 +263,10 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         try, panel_time('SetCurrentTime', ax.tlag(1)); catch, end
     end
     function kp = i_phys2kernel()
-        kp = bst_eigfilter_controls('ToKernel', kernel, [get(hScale,'Value'), get(hSpeed,'Value'), get(hDecay,'Value')], lmax);
+        kp = bst_eigfilter_controls('ToKernel', kernel, panel_atom_designer('ReadVals'), lmax);
     end
     function SaveAtom(~,~)
-        if isempty(W), set(hLabel,'String','[design] nothing to save - drop an atom first.'); return; end
+        if isempty(W), panel_atom_designer('SetStatus','[design] nothing to save - drop an atom first.'); return; end
         state='save';  Status();
         T=bst_dynamics('New', sprintf('atom %s @vtx%d', kernel, seedVtx)); T.SurfaceFile=SurfaceFile;
         G=bst_dynamics('NewGroup','atom'); G.vertices=seedVtx; G.pos=V(seedVtx,:);
@@ -321,9 +276,10 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         outDir=bst_fileparts(file_fullpath(sSubj.FileName));
         of=file_unique(bst_fullfile(outDir,'dynamics_atom.mat')); bst_dynamics('Save', of, T);
         state='design';
-        set(hLabel,'String',sprintf('[saved] atom -> %s (Scout %d vtx, Event %.2f-%.2fs)', file_short(of), numel(LS.scoutVertices), G.times(1), G.times(2)));
+        panel_atom_designer('SetStatus',sprintf('[saved] atom -> %s (Scout %d vtx, Event %.2f-%.2fs)', file_short(of), numel(LS.scoutVertices), G.times(1), G.times(2)));
     end
     function OnClose(h,ev)
+        try, gui_hide('AtomDesigner'); catch, end %#ok<CTCH>          % undock the design panel
         try, i_call(origClose,h,ev); catch, if ishandle(hFig), delete(hFig); end, end
         try, file_delete(file_fullpath(resFile), 1); db_reload_studies(iStudyG); catch, end   % remove the working file
     end
@@ -342,16 +298,3 @@ function i_call(fcn,h,ev)
 end
 function s = i_en(tf),  if tf, s='on'; else, s='off'; end, end
 function s = i_en2b(show,c), if show, s=sprintf(' | speed %.2g m/s', c); else, s=''; end, end
-function [hS,hV,hL] = i_slider(p, name, y, lw, sw, vw, mn, mx, v0, cb)
-    hL = uicontrol(p,'Style','text','String',name,'Units','normalized','Position',[0.04 y lw 0.12],'HorizontalAlignment','left');
-    hS = uicontrol(p,'Style','slider','Min',mn,'Max',mx,'Value',max(min(v0,mx),mn),'Units','normalized','Position',[0.35 y+0.01 sw 0.10],'Callback',cb);
-    hV = uicontrol(p,'Style','text','String',num2str(round(v0,2)),'Units','normalized','Position',[0.80 y vw 0.12],'HorizontalAlignment','left');
-end
-function i_setslider(h, mn, mx, v)
-    % Re-range a slider safely (avoids transient Min>Value>Max validation errors when the new range
-    % does not contain the current Value): widen to admit the current value, set the value, then tighten.
-    v = max(min(v,mx),mn);  cur = get(h,'Value');
-    set(h, 'Min', min(mn,cur), 'Max', max(mx,cur));
-    set(h, 'Value', v);
-    set(h, 'Min', mn, 'Max', mx);
-end
