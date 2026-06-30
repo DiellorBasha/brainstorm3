@@ -108,18 +108,41 @@ end
 % three slot values back as [s1 s2 s3] for bst_eigfilter_controls('ToKernel', kernel, vals, lmax).
 
 function [keys, displays] = AtomKernels() %#ok<DEFNU>
-% All eigfilter kernels, ordered (diffusion, then static, ts, js), with display names.
+% All eigfilter kernels (flat), ordered (diffusion, then static, ts, js), with clean display names.
     keys = bst_eigfilter_kernel('list');
     rank = zeros(numel(keys), 1);  displays = cell(1, numel(keys));
     for i = 1:numel(keys)
         try, m = bst_eigfilter_kernel('info', keys{i}); catch, m = struct('display',keys{i},'domain','static'); end
-        if isfield(m,'display') && ~isempty(m.display), displays{i} = m.display; else, displays{i} = keys{i}; end
+        displays{i} = i_clean_display(keys{i}, m);
         dom = ''; if isfield(m,'domain'), dom = m.domain; end
         switch lower(dom), case 'ts', rank(i) = 2; case 'js', rank(i) = 3; otherwise, rank(i) = 1; end
     end
     rank(strcmp(keys(:),'diffusion')) = 0;                 % diffusion first (the designer default)
     [~, ord] = sortrows([rank, (1:numel(keys))']);
     keys = keys(ord);  displays = displays(ord);
+end
+
+function [keys, displays] = AtomKernelsGrouped() %#ok<DEFNU>
+% Kernel list for a combobox WITH non-selectable group headers: "Dynamic" (ts/js) then "Static".
+% keys has '' at the two header rows; displays carries the headers + clean names (no "(...)" suffix).
+    allK = bst_eigfilter_kernel('list');
+    dynK = {}; dynD = {}; statK = {}; statD = {};
+    for i = 1:numel(allK)
+        try, m = bst_eigfilter_kernel('info', allK{i}); catch, m = struct(); end
+        d   = i_clean_display(allK{i}, m);
+        dom = ''; if isfield(m,'domain'), dom = m.domain; end
+        if any(strcmpi(dom, {'ts','js'})), dynK{end+1}=allK{i};  dynD{end+1}=d; %#ok<AGROW>
+        else,                              statK{end+1}=allK{i}; statD{end+1}=d; end %#ok<AGROW>
+    end
+    id = find(strcmp(dynK,'diffusion'), 1);                % diffusion first within Dynamic
+    if ~isempty(id), o = [id, setdiff(1:numel(dynK), id)]; dynK = dynK(o); dynD = dynD(o); end
+    keys     = [{''},                  dynK, {''},                 statK];
+    displays = [{'──── Dynamic ────'}, dynD, {'──── Static ────'}, statD];
+end
+
+function d = i_clean_display(key, m)
+    d = key;  if isfield(m,'display') && ~isempty(m.display), d = m.display; end
+    d = strtrim(regexprep(d, '\s*\(.*', ''));              % drop the "(...)" descriptor suffix
 end
 
 function BuildAtomSliders(jParams, kernel, bounds, onSettle) %#ok<DEFNU>

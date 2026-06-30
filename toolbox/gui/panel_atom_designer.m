@@ -44,9 +44,10 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     panelName = 'AtomDesigner';
     import java.awt.*;
     import javax.swing.*;
-    [atomKeys, atomDisp] = panel_eigenfilter_design('AtomKernels');
+    [atomKeys, atomDisp] = panel_eigenfilter_design('AtomKernelsGrouped');
     BUTTON_WIDTH   = java_scaled('value', 56);
     DEFAULT_HEIGHT = java_scaled('value', 22);
+    OP_WIDTH       = java_scaled('value', 90);
 
     % options stack: one bordered sub-panel per group, pinned to the top (panel_surface convention)
     jPanelOptions = gui_component('Panel');
@@ -55,9 +56,14 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     % ===== FILTER DESIGN: operator + filter + contextual parameter sliders =====
     jDes = gui_river([1,1], [1,8,1,4], 'Filter design');
+        % Operator: mutually-exclusive toggle buttons (Connectomic | Geometric)
         gui_component('label', jDes, 'br', 'Operator:');
-        jOperator = gui_component('combobox', jDes, 'tab hfill', [], {{'connectomic','geometric'}}, [], [], []);
-        java_setcb(jOperator, 'ActionPerformedCallback', @(h,e) bst_call(@OnOperatorCb));
+        jbgOp = ButtonGroup();
+        jConn = gui_component('toggle', jDes, 'tab', 'Connectomic', [], 'LB + connectome eigenbasis',  @(h,e) bst_call(@OnOperatorCb));
+        jGeom = gui_component('toggle', jDes, '',    'Geometric',   [], 'Laplace-Beltrami eigenbasis', @(h,e) bst_call(@OnOperatorCb));
+        jConn.setPreferredSize(Dimension(OP_WIDTH, DEFAULT_HEIGHT));  jGeom.setPreferredSize(Dimension(OP_WIDTH, DEFAULT_HEIGHT));
+        jbgOp.add(jConn);  jbgOp.add(jGeom);
+        % Filter: grouped combobox (Dynamic / Static headers; headers are not selectable)
         gui_component('label', jDes, 'br', 'Filter:');
         jKernel = gui_component('combobox', jDes, 'tab hfill', [], {atomDisp}, [], [], []);
         java_setcb(jKernel, 'ActionPerformedCallback', @(h,e) bst_call(@OnKernelCb));
@@ -73,14 +79,18 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         jSave.setPreferredSize(Dimension(BUTTON_WIDTH, DEFAULT_HEIGHT));
     jPanelOptions.add(jAct);
 
-    % ===== STATUS (contained in a bordered box) =====
+    % ===== STATUS (contained, line-wrapping text area) =====
     jStat = gui_river([1,1], [1,8,1,4], 'Status');
-        jStatus = gui_component('label', jStat, 'br hfill', '');
+        jStatus = JTextArea(2, 1);
+        jStatus.setEditable(0);  jStatus.setLineWrap(1);  jStatus.setWrapStyleWord(1);
+        jStatus.setFont(Font('SansSerif', Font.PLAIN, java_scaled('value', 11)));
+        jStatus.setBorder(BorderFactory.createEmptyBorder());
+        jStat.add('hfill', jStatus);
     jPanelOptions.add(jStat);
 
     jPanelNew = gui_component('Panel');
     jPanelNew.add(jPanelOptions, BorderLayout.NORTH);
-    ctrl = struct('jOperator',jOperator, 'jKernel',jKernel, 'jParams',jParams, ...
+    ctrl = struct('jConn',jConn, 'jGeom',jGeom, 'jKernel',jKernel, 'jParams',jParams, ...
                   'jFibers',jFibers, 'jStatus',jStatus, 'atomKeys',{atomKeys});
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
@@ -90,9 +100,10 @@ end
 function Configure(cb, bounds, kernel0, variant0) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
     setappdata(0, 'AtomDesignerCB', cb);
-    ctrl.jOperator.setSelectedIndex(strcmpi(variant0, 'Laplace-Beltrami'));   % connectomic=0, geometric=1
-    iK = find(strcmp(ctrl.atomKeys, kernel0), 1);  if isempty(iK), iK = 1; end
+    if strcmpi(variant0, 'Laplace-Beltrami'), ctrl.jGeom.setSelected(1); else, ctrl.jConn.setSelected(1); end
+    iK = find(strcmp(ctrl.atomKeys, kernel0), 1);  if isempty(iK), iK = i_first_kernel_idx(ctrl.atomKeys); end
     ctrl.jKernel.setSelectedIndex(iK - 1);
+    setappdata(0, 'AtomDesignerKIdx', iK);
     panel_eigenfilter_design('BuildAtomSliders', ctrl.jParams, kernel0, bounds, @()bst_call(@OnParamSettle));
 end
 
@@ -104,17 +115,25 @@ function vals = ReadVals() %#ok<DEFNU>
 end
 
 function k = CurrentKernel() %#ok<DEFNU>
-    ctrl = bst_get('PanelControls', 'AtomDesigner');
-    if isempty(ctrl), k = ''; return; end
-    idx = max(1, min(numel(ctrl.atomKeys), double(ctrl.jKernel.getSelectedIndex()) + 1));
-    k = ctrl.atomKeys{idx};
+    k = '';
+    ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
+    idx = double(ctrl.jKernel.getSelectedIndex()) + 1;
+    if (idx >= 1) && (idx <= numel(ctrl.atomKeys)) && ~isempty(ctrl.atomKeys{idx})
+        k = ctrl.atomKeys{idx};
+    else                                                                     % header row selected -> last valid
+        last = getappdata(0, 'AtomDesignerKIdx');
+        if ~isempty(last) && (last <= numel(ctrl.atomKeys)), k = ctrl.atomKeys{last}; end
+    end
 end
 
 function v = CurrentOperator() %#ok<DEFNU>
-    v = 'Laplace-Beltrami';
+    v = 'Laplace-Beltrami';                                                  % geometric
     ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
-    vmap = {'LB-Connectome','Laplace-Beltrami'};                              % connectomic=1, geometric=2
-    v = vmap{max(1, min(2, double(ctrl.jOperator.getSelectedIndex()) + 1))};
+    if ctrl.jConn.isSelected(), v = 'LB-Connectome'; end                     % connectomic
+end
+
+function ix = i_first_kernel_idx(atomKeys)
+    ix = find(~cellfun('isempty', atomKeys), 1);  if isempty(ix), ix = 1; end
 end
 
 function RebuildSliders(kernel, bounds) %#ok<DEFNU>
@@ -133,6 +152,15 @@ function OnOperatorCb()
     if ~isempty(cb) && isfield(cb,'Operator'), cb.Operator(); end
 end
 function OnKernelCb()
+    ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
+    idx = double(ctrl.jKernel.getSelectedIndex()) + 1;
+    if (idx < 1) || (idx > numel(ctrl.atomKeys)) || isempty(ctrl.atomKeys{idx})   % header row -> revert, don't fire
+        last = getappdata(0, 'AtomDesignerKIdx');
+        if isempty(last), last = i_first_kernel_idx(ctrl.atomKeys); end
+        ctrl.jKernel.setSelectedIndex(last - 1);
+        return;
+    end
+    setappdata(0, 'AtomDesignerKIdx', idx);
     cb = getappdata(0, 'AtomDesignerCB');
     if ~isempty(cb) && isfield(cb,'Kernel'), cb.Kernel(); end
 end
