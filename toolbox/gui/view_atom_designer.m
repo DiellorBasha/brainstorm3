@@ -68,7 +68,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     else
         gv1 = ax.GlobalVertices{1};  [~,j] = min(sum((V(gv1,:) - mean(V(gv1,:),1)).^2, 2));  seedVtx = gv1(j);
     end
-    W = i_eval_atom(seedVtx, ax, kernel, i_phys2kernel(), V, nV);
+    W = i_eval_atom(seedVtx, ax, kernel, struct('lmax',lmax), V, nV);   % init frame from kernel defaults (sliders not built yet); Generate() recomputes with the slider params at the end
 
     % --- working results file -> display through the managed SOURCE overlay (native colormap/bar/stepper) ---
     [sSubj] = bst_get('SurfaceFile', SurfaceFile);
