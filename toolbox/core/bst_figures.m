@@ -958,6 +958,10 @@ function FireCurrentTimeChanged(ForceTime)
                     figure_topo('CurrentTimeChangedCallback', iDS, iFig);
                 case '3DViz'
                     panel_surface('UpdateSurfaceData', sFig.hFigure);
+                    % Generic per-frame hook (e.g. atom designer: recolor the connectome fibers in lockstep)
+                    if isappdata(sFig.hFigure, 'AtomFiberRecolor')
+                        try, feval(getappdata(sFig.hFigure, 'AtomFiberRecolor')); catch, end %#ok<CTCH>
+                    end
                     if gui_brainstorm('isTabVisible', 'Dipoles')
                         panel_dipoles('CurrentTimeChangedCallback', sFig.hFigure);
                     end

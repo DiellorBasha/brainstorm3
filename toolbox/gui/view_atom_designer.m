@@ -35,18 +35,11 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 
     % --- surface geometry ---
     sCx = in_tess_bst(SurfaceFile);  V = sCx.Vertices;  nV = size(V,1);
-    meanEdge = i_mean_edge(V, sCx.Faces);
 
-    % --- eigenbasis (cached) + physical-scale calibration ---
-    bst_progress('start', 'Atom designer', sprintf('Building/loading %s eigenbasis...', variant));
-    E  = tess_eigen(SurfaceFile, variant, 'nModes', nModes);   % cache + reuse the eigen_ file
-    Op = in_bst_operator(E.OperatorFile);
-    bst_progress('stop');
-    ax = struct('Phi',{E.Phi}, 'Lambda',{E.Lambda}, 'Mass',{Op.Mass}, 'GlobalVertices',{E.GlobalVertices});
-    lamAll = E.Lambda{1}(:); if numel(E.Lambda) > 1 && ~isempty(E.Lambda{2}), lamAll = [lamAll; E.Lambda{2}(:)]; end
-    lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
-    mm   = @(l) 2*pi./sqrt(max(l,eps))*1000;                   % eigenvalue -> physical scale (mm)
-    scaleMinMM = mm(lmax);  scaleMaxMM = mm(lminPos);          % finest .. coarsest cortical scale
+    % --- eigenbasis (cached) + physical-scale calibration; (re)built by i_build_basis on operator change ---
+    mm = @(l) 2*pi./sqrt(max(l,eps))*1000;                     % eigenvalue -> physical scale (mm)
+    [lmax, lminPos, scaleMinMM, scaleMaxMM, rateMinMM2, rateMaxMM2] = deal(0);   % shared with i_build_basis
+    ax = struct();  i_build_basis(variant);                     % sets ax/lmax/lminPos/scaleMinMM/scaleMaxMM + rate bounds
 
     % --- registry: one FLAT kernel list, dynamic + static group headers ---
     allK = bst_eigfilter_kernel('list');  spatialK = {}; dynK = {};
@@ -54,17 +47,20 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         try m = bst_eigfilter_kernel('info', allK{ii}); catch, continue; end
         if isfield(m,'domain') && ~isempty(m.domain), dynK{end+1}=allK{ii}; else, spatialK{end+1}=allK{ii}; end %#ok<AGROW>
     end
-    pref = {'dampedwave','wave','kleingordon','diffusion'};
+    pref = {'diffusion','dampedwave','wave','kleingordon'};
     dynK = [pref(ismember(pref,dynK)), setdiff(dynK, pref, 'stable')];
     DH = '──── dynamic ────';  SH = '──── static ────';
     kList = [{DH}, dynK, {SH}, spatialK];  iDH = 1;  iSH = numel(dynK) + 2;
 
     % --- state (closure-shared) ---
     state    = 'design';
-    kernel   = 'dampedwave';  lastKIdx = 2;
-    pScaleMM = round((scaleMinMM+scaleMaxMM)/2);   % spatial scale (mm)
+    kernel   = 'diffusion';  lastKIdx = 2;          % default = first dynamic kernel (diffusion)
+    pScaleMM = round((scaleMinMM+scaleMaxMM)/2);   % spatial scale (mm), STATIC kernels (heat/mexhat)
+    pRate    = round(pScaleMM^2);                   % diffusion rate kappa (mm^2/s); blur reaches ~pScaleMM by t=1s
     pSpeed   = 1.0;                                 % wave speed c (m/s), non-separable only
     pDecay   = 0.5;                                 % decay time (s), damped only
+    normMode = '';                                  % active colormap normalization (set by i_normalize)
+    showFib  = false;  hFibers = [];  fibPts = [];  fibEndV = [];   % connectome fiber overlay (lazy-loaded)
     nFrames  = 100;  ax.nT = nFrames;  ax.tlag = (0:nFrames-1)/100;   % standard 1 s @ 100 Hz time vector
     % default seed: vertex nearest the centroid of the first eigenbasis support
     if (nargin >= 4) && ~isempty(seed0)
@@ -84,40 +80,77 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     [hFig, iDS] = view_surface_data(SurfaceFile, resFile);
     if isempty(hFig), bst_error('Could not open the source display.', 'Atom designer', 0); return; end
     set(hFig, 'Name', ['Atom designer: ' SurfaceFile]);
-    hAxes  = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');
     iRes   = bst_memory('GetResultInDataSet', iDS, resFile);
     TI     = getappdata(hFig, 'Surface');  iTess = find(~cellfun('isempty', {TI.SurfaceFile}), 1);
 
-    % --- top-right filter-design panel: kernel + sliders, compactly spaced ---
-    hP = uipanel('Parent',hFig, 'Title','Filter design', 'Units','normalized', 'Position',[0.70 0.68 0.295 0.30], ...
+    % --- top-right filter-design panel: operator + kernel + sliders, compactly spaced ---
+    hP = uipanel('Parent',hFig, 'Title','Filter design', 'Units','normalized', 'Position',[0.70 0.62 0.295 0.36], ...
                  'FontUnits','points','FontSize',bst_get('FigFont'));
-    yk = 0.80; ys = [0.60 0.43 0.26];  lw=0.30; sw=0.42; vw=0.16;
-    uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',[0.04 yk lw 0.13],'HorizontalAlignment','left');
-    hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Value',2,'Units','normalized','Position',[0.35 yk 0.61 0.14],'Callback',@KernelChanged);
-    [hScale,hScaleV] = i_slider(hP,'Scale', ys(1), lw,sw,vw, scaleMinMM, scaleMaxMM, pScaleMM, @ParamChanged);
+    yo = 0.84; yk = 0.68; ys = [0.52 0.38 0.24];  lw=0.30; sw=0.42; vw=0.16;
+    uicontrol(hP,'Style','text','String','Operator','Units','normalized','Position',[0.04 yo lw 0.12],'HorizontalAlignment','left');
+    hOper = uicontrol(hP,'Style','popupmenu','String',{'connectomic','geometric'},'Value',1+strcmpi(variant,'Laplace-Beltrami'), ...
+                      'Units','normalized','Position',[0.35 yo 0.61 0.13],'Callback',@OperatorChanged, ...
+                      'TooltipString','Eigenbasis operator: connectomic = LB+connectome, geometric = Laplace-Beltrami');
+    uicontrol(hP,'Style','text','String','Kernel','Units','normalized','Position',[0.04 yk lw 0.12],'HorizontalAlignment','left');
+    hKern = uicontrol(hP,'Style','popupmenu','String',kList,'Value',2,'Units','normalized','Position',[0.35 yk 0.61 0.13],'Callback',@KernelChanged);
+    [hScale,hScaleV,hScaleL] = i_slider(hP,'Scale', ys(1), lw,sw,vw, scaleMinMM, scaleMaxMM, pScaleMM, @ParamChanged);
     [hSpeed,hSpeedV] = i_slider(hP,'Speed', ys(2), lw,sw,vw, 0.1, 10,  pSpeed, @ParamChanged);
     [hDecay,hDecayV] = i_slider(hP,'Decay', ys(3), lw,sw,vw, 0.05, 2,  pDecay, @ParamChanged);
-    hSave = uicontrol(hP,'Style','pushbutton','String','Save','Units','normalized','Position',[0.80 0.04 0.16 0.14], ...
+    hFib  = uicontrol(hP,'Style','togglebutton','String','Connectome','Units','normalized','Position',[0.04 0.04 0.42 0.13], ...
+                      'Callback',@OnToggleConnectome, 'TooltipString','Overlay the connectome fibers and colour them by the atom (endpoints anchored)');
+    hSave = uicontrol(hP,'Style','pushbutton','String','Save','Units','normalized','Position',[0.80 0.04 0.16 0.13], ...
                       'Callback',@SaveAtom, 'TooltipString','Save atom -> Scout + Event');
     hLabel = uicontrol(hFig,'Style','text','String','', 'Units','Pixels','Position',[8 6 820 18], ...
         'HorizontalAlignment','left','FontUnits','points','FontSize',bst_get('FigFont'));
     SyncControls();
 
-    % --- chain figure_3d handlers: keep camera, context menu AND the native time stepper (no KeyPress override) ---
-    origDown = get(hFig,'WindowButtonDownFcn');  origUp = get(hFig,'WindowButtonUpFcn');  origClose = get(hFig,'CloseRequestFcn');
-    downXY = [];
-    set(hFig, 'WindowButtonDownFcn', @OnDown, 'WindowButtonUpFcn', @OnUp, 'CloseRequestFcn', @OnClose);
+    % --- vertex picking: use figure_3d's native WaveletDesignerPick hook (select3d-based via
+    %     panel_coordinates('SelectPoint'): occlusion-correct, with native click/drag separation) rather
+    %     than overriding the mouse callbacks. Camera, colormap context menu and the native time stepper
+    %     are all preserved untouched. Only the close handler is chained (to remove the working file). ---
+    setappdata(hFig, 'WaveletDesignerPick', @i_seed);
+    origClose = get(hFig,'CloseRequestFcn');
+    set(hFig, 'CloseRequestFcn', @OnClose);
+    Generate();                                  % normalize the initial frame + set the kernel-matched colormap
 
     % ===== nested callbacks =====
+    function i_build_basis(newVar)
+        % (Re)build the cortex eigenbasis for the chosen operator and refresh the physical-scale bounds.
+        % Updates ax basis fields in place (preserving the time axis ax.nT/ax.tlag) so it works at init
+        % (ax = empty struct) and on live operator switches alike.
+        variant = newVar;
+        bst_progress('start', 'Atom designer', sprintf('Building/loading %s eigenbasis...', variant));
+        E  = tess_eigen(SurfaceFile, variant, 'nModes', nModes);   % cache + reuse the eigen_ file
+        Op = in_bst_operator(E.OperatorFile);
+        bst_progress('stop');
+        ax.Phi = E.Phi;  ax.Lambda = E.Lambda;  ax.Mass = Op.Mass;  ax.GlobalVertices = E.GlobalVertices;
+        lamAll = E.Lambda{1}(:); if numel(E.Lambda) > 1 && ~isempty(E.Lambda{2}), lamAll = [lamAll; E.Lambda{2}(:)]; end
+        lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
+        scaleMinMM = mm(lmax);  scaleMaxMM = mm(lminPos);          % finest .. coarsest cortical scale
+        rateMinMM2 = scaleMinMM^2;  rateMaxMM2 = scaleMaxMM^2;     % diffusion rate bounds (mm^2/s) = scale^2
+    end
+    function OperatorChanged(src,~)
+        vmap = {'LB-Connectome','Laplace-Beltrami'};               % 1=connectomic, 2=geometric
+        i_build_basis(vmap{get(src,'Value')});
+        pScaleMM = min(max(pScaleMM, scaleMinMM), scaleMaxMM);     % clamp params to the new spectrum
+        pRate    = min(max(pRate,    rateMinMM2), rateMaxMM2);
+        gv = ax.GlobalVertices{1};                                 % keep the seed if still supported, else recenter
+        if ~ismember(seedVtx, gv), [~,j] = min(sum((V(gv,:)-mean(V(gv,:),1)).^2,2)); seedVtx = gv(j); end
+        SyncControls();  Regen();  i_reset_time();                 % new basis -> diffuse anew from t=0
+    end
     function KernelChanged(src,~)
         idx = get(src,'Value');
         if idx==iDH || idx==iSH, set(src,'Value',lastKIdx); return; end
         lastKIdx = idx;  opt = get(src,'String');  kernel = opt{idx};
-        SyncControls();  Regen();
+        SyncControls();  Regen();  i_reset_time();        % new kernel -> diffuse anew from t=0
     end
     function ParamChanged(~,~)
-        pScaleMM=get(hScale,'Value'); pSpeed=get(hSpeed,'Value'); pDecay=get(hDecay,'Value');
-        set(hScaleV,'String',num2str(round(pScaleMM))); set(hSpeedV,'String',sprintf('%.2g',pSpeed)); set(hDecayV,'String',sprintf('%.2g',pDecay));
+        switch i_spatial_mode(kernel)
+            case 'scale', pScaleMM = get(hScale,'Value');  set(hScaleV,'String',sprintf('%.0f mm', pScaleMM));
+            case 'rate',  pRate    = get(hScale,'Value');  set(hScaleV,'String',sprintf('%.0f mm^2/s', pRate));
+        end
+        pSpeed=get(hSpeed,'Value'); pDecay=get(hDecay,'Value');
+        set(hSpeedV,'String',sprintf('%.2g',pSpeed)); set(hDecayV,'String',sprintf('%.2g',pDecay));
         Regen();
     end
     function SyncControls()
@@ -126,40 +159,167 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         isSep = ~isfield(m,'separable') || m.separable;
         set([hSpeed hSpeedV], 'Enable', i_en(isDyn && ~isSep));
         set([hDecay hDecayV], 'Enable', i_en(strcmpi(kernel,'dampedwave')));
+        ApplySpatial();
         Status();
+    end
+    function ApplySpatial()
+        % The first slider morphs to the kernel's TRUE spatial knob: a static length (Scale, mm) for
+        % static kernels, a diffusion RATE (mm^2/s) for the separable-dynamic diffusion kernel, and is
+        % disabled for the wave family (whose rate is the Speed slider; their spatial content is the seed delta).
+        switch i_spatial_mode(kernel)
+            case 'scale'
+                set(hScaleL,'String','Scale');  i_setslider(hScale, scaleMinMM, scaleMaxMM, pScaleMM);
+                set([hScale hScaleV],'Enable','on');  set(hScaleV,'String',sprintf('%.0f mm', pScaleMM));
+            case 'rate'
+                set(hScaleL,'String','Rate');   i_setslider(hScale, rateMinMM2, rateMaxMM2, pRate);
+                set([hScale hScaleV],'Enable','on');  set(hScaleV,'String',sprintf('%.0f mm^2/s', pRate));
+            case 'none'
+                set(hScaleL,'String','Scale');  set([hScale hScaleV],'Enable','off');  set(hScaleV,'String','--');
+        end
     end
     function Status()
         m = bst_eigfilter_kernel('info', kernel);  isSep = ~isfield(m,'separable') || m.separable;
-        set(hLabel,'String',sprintf('[%s] %s @ vtx %d%s | scale %.0f mm (cortex %.0f-%.0f) | right-click=colormap, arrows=time', ...
-            state, kernel, seedVtx, i_en2b(~isSep,pSpeed), pScaleMM, scaleMinMM, scaleMaxMM));
+        set(hLabel,'String',sprintf('[%s] %s @ vtx %d%s | %s | norm: %s | arrows=time', ...
+            state, kernel, seedVtx, i_en2b(~isSep,pSpeed), i_spatial_str(), normMode));
+    end
+    function s = i_spatial_str()
+        switch i_spatial_mode(kernel)
+            case 'scale', s = sprintf('scale %.0f mm (cortex %.0f-%.0f)', pScaleMM, scaleMinMM, scaleMaxMM);
+            case 'rate',  s = sprintf('rate %.0f mm^2/s (spread ~sqrt(rate*t))', pRate);
+            case 'none',  s = sprintf('spatial = seed delta (%d modes)', nModes);
+        end
+    end
+    function [W, isSigned] = i_normalize(W)
+        % Scale the atom field to a UNIT-MASS DENSITY: divide each time frame by its mass integral
+        % (sum_i area_i * W_i) so the field integrates to 1 over the cortex -> the value reads as a
+        % probability density (the exact heat-kernel interpretation). Only well-defined for one-signed,
+        % mass-conserving kernels (heat/diffusion); for zero-mean / oscillatory kernels (mexhat, waves)
+        % the integral collapses to ~0, so we fall back to peak-normalization instead.
+        gv   = ax.GlobalVertices{1};
+        mvec = full(sum(ax.Mass{1}, 2));                 % lumped vertex areas on the eigenbasis support
+        Wg   = W(gv, :);
+        s    = mvec.' * Wg;                              % [1 x nT] signed mass integral per frame
+        l1   = mvec.' * abs(Wg);                         % [1 x nT] total absolute mass per frame
+        r    = abs(s) ./ max(l1, eps);                   % "one-signedness" in [0,1]: 1=positive, 0=zero-mean
+        if min(r) > 0.1                                  % mass-conserving -> probability density
+            W = W ./ s;                                  % per-frame unit integral (broadcast over columns)
+            normMode = 'density (unit mass, integral=1)';  isSigned = false;
+        else                                             % density undefined -> relative amplitude
+            pk = max(abs(W(:)));  if pk > 0, W = W / pk; end
+            normMode = 'peak (density n/a for this kernel)';  isSigned = true;
+        end
     end
     function Regen(), if ~isempty(seedVtx), Generate(); end, end
     function Generate()
         try
             W = i_eval_atom(seedVtx, ax, kernel, i_phys2kernel(), V, nV);
+            [W, isSigned] = i_normalize(W);                              % one-signed (density) vs signed (peak)
+            if isSigned, i_set_cmap('stat2'); else, i_set_cmap('source'); end   % diverging-symmetric vs sequential
             GlobalData.DataSet(iDS).Results(iRes).ImageGridAmp = W;       % in-place update, no file I/O
             T2 = getappdata(hFig,'Surface');  T2(iTess).DataMinMax = [min(W(:)) max(W(:))];  setappdata(hFig,'Surface',T2);
             panel_surface('UpdateSurfaceData', hFig, iTess);  panel_surface('UpdateSurfaceColormap', hFig);
+            if showFib, i_recolor_fibers(); end                          % keep the fiber overlay in sync with the atom
             Status();
         catch ME
             set(hLabel,'String',['Could not propagate: ' regexprep(ME.message,'\s+',' ')]);
         end
     end
-    function OnDown(h,ev), downXY = get(hFig,'CurrentPoint'); i_call(origDown,h,ev); end
-    function OnUp(h,ev)
-        i_call(origUp,h,ev);
-        if strcmpi(state,'design') && strcmpi(get(hFig,'SelectionType'),'normal') && ~isempty(downXY)
-            if norm(get(hFig,'CurrentPoint')-downXY) < 4               % click, not a drag
-                [v,hit] = PickVertex();  if hit, seedVtx=v; Generate(); end
-            end
+    function OnToggleConnectome(src,~)
+        showFib = logical(get(src,'Value'));
+        if showFib
+            if isempty(fibPts), i_load_fibers(); end
+            if isempty(fibPts), set(src,'Value',0); showFib = false; return; end   % nothing to show
+            [~, hFibers] = figure_3d('PlotFibers', hFig, fibPts, repmat([.5 .5 .5], size(fibPts,1), 1));
+            setappdata(hFig, 'AtomFiberRecolor', @i_recolor_fibers);    % recolor on every time frame (bst_figures hook)
+            i_recolor_fibers();
+        else
+            if ~isempty(hFibers), try, delete(hFibers); catch, end, end %#ok<CTCH>
+            hFibers = [];
+            if isappdata(hFig,'AtomFiberRecolor'), rmappdata(hFig,'AtomFiberRecolor'); end
         end
     end
-    function [v,hit] = PickVertex()
-        cp=get(hAxes,'CurrentPoint'); o=cp(1,:); d=cp(2,:)-cp(1,:); d=d/max(norm(d),eps);
-        w=V-o; t=w*d'; proj=o+t.*d; dist=sqrt(sum((V-proj).^2,2));
-        near=find(dist < 2*meanEdge);
-        if isempty(near), v=[]; hit=false; return; end
-        [~,j]=min(t(near)); v=near(j); hit=true;                        % front-most grazed vertex
+    function i_load_fibers()
+        % Locate a Fibers surface (subject's own, else the default-anatomy HCP-1065) and load the full
+        % streamlines. The subject cortex and the template fibers live in DIFFERENT SCS (different brain),
+        % so the raw template cloud is mis-scaled/-placed; we similarity-align it to this cortex (below).
+        ff = '';  isDef = false;  k = find(strcmpi({sSubj.Surface.SurfaceType},'Fibers'), 1);
+        if ~isempty(k), ff = sSubj.Surface(k).FileName;
+        else
+            sDef = bst_get('Subject', 0);  kd = [];
+            if ~isempty(sDef) && isfield(sDef,'Surface') && ~isempty(sDef.Surface)
+                kd = find(strcmpi({sDef.Surface.SurfaceType},'Fibers'), 1);
+            end
+            if ~isempty(kd), ff = sDef.Surface(kd).FileName;  isDef = true; end
+        end
+        if isempty(ff), set(hLabel,'String','[connectome] no fibers on this subject or the default anatomy.'); return; end
+        FibMat = load(file_fullpath(ff), 'Points');  P = double(FibMat.Points);   % [nF x nP x 3]
+        cap = 5000;  nF = size(P,1);
+        if nF > cap, P = P(sort(randperm(nF, cap)),:,:); end                       % stay under PlotFibers' cap
+        if isDef
+            % The HCP-1065 fibers live in the default-anatomy (ICBM152) SCS. Bring them to THIS subject's SCS
+            % THROUGH MNI: default-SCS -> MNI -> subject-SCS via cs_convert (a true 3D transform using each
+            % MRI's MNI normalisation, so white-matter interiors map correctly, not just the endpoints).
+            sz = size(P);  Pf = reshape(P, [], 3);  Psub = [];
+            try
+                sMriDef  = in_mri_bst(sDef.Anatomy(sDef.iAnatomy).FileName);
+                sMriSubj = in_mri_bst(sSubj.Anatomy(sSubj.iAnatomy).FileName);
+                Psub = cs_convert(sMriSubj, 'mni', 'scs', cs_convert(sMriDef, 'scs', 'mni', Pf, 1), 1);
+            catch, end %#ok<CTCH>
+            if ~isempty(Psub) && (mean(isnan(Psub(:))) < 0.5)
+                P = reshape(Psub, sz);  P = P(~any(any(isnan(P),3),2), :, :);      % drop any out-of-FOV fibers
+            else
+                % no MNI normalisation available -> coarse centroid+scale alignment of the endpoint cloud
+                e  = [squeeze(P(:,1,:)); squeeze(P(:,end,:))];
+                cT = mean(e,1);  sT = sqrt(mean(sum((e-cT).^2,2)));
+                cS = mean(V,1);  sS = sqrt(mean(sum((V-cS).^2,2)));
+                P  = reshape((Pf - cT) * (sS/max(sT,eps)) + cS, sz);
+                set(hLabel,'String','[connectome] no MNI transform; coarse similarity alignment used.');
+            end
+        end
+        fibPts  = P;
+        fibEndV = [dsearchn(V, squeeze(P(:,1,:))), dsearchn(V, squeeze(P(:,end,:)))];   % endpoint -> nearest vertex
+    end
+    function i_recolor_fibers()
+        % Colour each fiber by the atom: kernel value at its two endpoint vertices, interpolated along the
+        % streamline, mapped through the active overlay colormap + CLim. Recolours in place (no re-plot).
+        if ~showFib || isempty(hFibers) || isempty(fibPts) || ~ishandle(hFig), return; end
+        try
+            iT   = i_current_frame();
+            Wcur = GlobalData.DataSet(iDS).Results(iRes).ImageGridAmp(:, iT);   % [nV x 1] atom at this frame
+            nP   = size(fibPts, 2);  tt = linspace(0, 1, nP);
+            S    = Wcur(fibEndV(:,1)) * (1-tt) + Wcur(fibEndV(:,2)) * tt;       % [nF x nP] endpoint interpolation
+            figure_3d('ColorFibers', hFibers, i_scalar2rgb(S));
+        catch, end %#ok<CTCH>
+    end
+    function iT = i_current_frame()
+        ct = GlobalData.UserTimeWindow.CurrentTime;  if isempty(ct), ct = ax.tlag(1); end
+        [~, iT] = min(abs(ax.tlag - ct));  iT = max(1, min(iT, ax.nT));
+    end
+    function RGB = i_scalar2rgb(S)
+        TIc   = getappdata(hFig, 'Surface');  sCmap = bst_colormaps('GetColormap', TIc(iTess).ColormapType);
+        CMap  = sCmap.CMap;  N = size(CMap, 1);
+        hAx   = findobj(hFig, '-depth', 1, 'Tag', 'Axes3D');  cl = get(hAx, 'CLim');
+        if sCmap.isAbsoluteValues, S = abs(S); end                          % source: |value|; stat2: signed
+        idx   = round((S - cl(1)) / max(cl(2)-cl(1), eps) * (N-1)) + 1;  idx = max(1, min(idx, N));
+        RGB   = reshape(CMap(idx(:), :), size(S,1), size(S,2), 3);
+    end
+    function i_set_cmap(cmapType)
+        % Match the colorbar to the kernel's sign-class: 'source' (sequential, absolute) for one-signed
+        % fields (diffusion/heat), 'stat2' (diverging cmap_mandrill, signed -> auto 0-centred symmetric range)
+        % for sign-changing fields (waves/mexhat). Switches the overlay's type only; the user's global
+        % 'source' colormap is never modified. No-op when already on the right type (so it never flickers).
+        TIc = getappdata(hFig, 'Surface');
+        if isempty(TIc) || (iTess > numel(TIc)) || strcmpi(TIc(iTess).ColormapType, cmapType), return; end
+        TIc(iTess).ColormapType = cmapType;  setappdata(hFig, 'Surface', TIc);
+        other = 'source'; if strcmpi(cmapType,'source'), other = 'stat2'; end
+        try, bst_colormaps('AddColormapToFigure', hFig, cmapType);  bst_colormaps('RemoveColormapFromFigure', hFig, other); catch, end
+    end
+    function i_seed(vi)                          % figure_3d native pick callback: clicked cortical vertex -> seed
+        if ~strcmpi(state,'design') || isempty(vi), return; end
+        seedVtx = vi;  Generate();  i_reset_time();       % new seed -> diffuse anew from t=0
+    end
+    function i_reset_time()                       % rewind the global time cursor to the start of the atom (t=0)
+        try, panel_time('SetCurrentTime', ax.tlag(1)); catch, end
     end
     function kp = i_phys2kernel()
         kp = struct('lmax', lmax);
@@ -169,7 +329,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
                 if strcmpi(kernel,'dampedwave'), kp.beta = 1/max(pDecay,eps); end
                 if strcmpi(kernel,'kleingordon'), kp.mu = 0.1*lmax; end
             case 'diffusion'
-                kp.tau = max((pScaleMM/1000)^2 * lmax, eps);
+                kp.tau = max((pRate/1e6) * lmax, eps);                 % pRate=kappa (mm^2/s) -> m^2/s (/1e6); tau*sc(=1/lmax)=kappa_m
             case 'heat'
                 lamS = (2*pi/(pScaleMM/1000))^2; kp.t = log(2)/max(lamS,eps);
             case 'mexhat'
@@ -209,11 +369,27 @@ function i_call(fcn,h,ev)
 end
 function s = i_en(tf),  if tf, s='on'; else, s='off'; end, end
 function s = i_en2b(show,c), if show, s=sprintf(' | speed %.2g m/s', c); else, s=''; end, end
-function [hS,hV] = i_slider(p, name, y, lw, sw, vw, mn, mx, v0, cb)
-    uicontrol(p,'Style','text','String',name,'Units','normalized','Position',[0.04 y lw 0.12],'HorizontalAlignment','left');
+function [hS,hV,hL] = i_slider(p, name, y, lw, sw, vw, mn, mx, v0, cb)
+    hL = uicontrol(p,'Style','text','String',name,'Units','normalized','Position',[0.04 y lw 0.12],'HorizontalAlignment','left');
     hS = uicontrol(p,'Style','slider','Min',mn,'Max',mx,'Value',max(min(v0,mx),mn),'Units','normalized','Position',[0.35 y+0.01 sw 0.10],'Callback',cb);
     hV = uicontrol(p,'Style','text','String',num2str(round(v0,2)),'Units','normalized','Position',[0.80 y vw 0.12],'HorizontalAlignment','left');
 end
-function L = i_mean_edge(V,F)
-    e=[F(:,[1 2]);F(:,[2 3]);F(:,[3 1])]; L=mean(sqrt(sum((V(e(:,1),:)-V(e(:,2),:)).^2,2)));
+function md = i_spatial_mode(k)
+    % Which spatial knob a kernel actually exposes: 'scale' (static length), 'rate' (separable-dynamic
+    % diffusivity), or 'none' (non-separable dynamic -> the spatial rate is the Speed slider).
+    meta = bst_eigfilter_kernel('info', k);
+    isDyn = isfield(meta,'domain') && ~isempty(meta.domain);
+    isSep = ~isfield(meta,'separable') || meta.separable;
+    if ~isDyn,    md = 'scale';   % heat, mexhat
+    elseif isSep, md = 'rate';    % diffusion
+    else,         md = 'none';    % wave, dampedwave, kleingordon
+    end
+end
+function i_setslider(h, mn, mx, v)
+    % Re-range a slider safely (avoids transient Min>Value>Max validation errors when the new range
+    % does not contain the current Value): widen to admit the current value, set the value, then tighten.
+    v = max(min(v,mx),mn);  cur = get(h,'Value');
+    set(h, 'Min', min(mn,cur), 'Max', max(mx,cur));
+    set(h, 'Value', v);
+    set(h, 'Min', mn, 'Max', mx);
 end

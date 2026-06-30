@@ -1193,6 +1193,11 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuEigen, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac', 'Interactive', 1));
                 end
 
+                % === ATOM DESIGNER (cortex only) ===
+                if strcmpi(nodeType, 'cortex') && ~bst_get('ReadOnly')
+                    gui_component('MenuItem', jPopup, [], 'Design atom...', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@view_atom_designer, filenameRelative));
+                end
+
                 % === SET SURFACE TYPE ===
                 if ~bst_get('ReadOnly') && (length(bstNodes) == 1)
                     jItemSetSurfType = gui_component('Menu', jPopup, [], 'Set surface type', IconLoader.ICON_SURFACE, [], []);
