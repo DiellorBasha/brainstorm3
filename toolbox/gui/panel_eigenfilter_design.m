@@ -123,25 +123,36 @@ function [keys, displays] = AtomKernels() %#ok<DEFNU>
 end
 
 function BuildAtomSliders(jParams, kernel, bounds, onSettle) %#ok<DEFNU>
-% Render kernel's bst_eigfilter_controls('Sliders') spec as physical-units JSliders (0..1000 -> [lo,hi]).
+% Render kernel's bst_eigfilter_controls('Sliders') spec as physical-units slider rows (0..1000 -> [lo,hi]),
+% to the panel_surface convention: [ title-label | sized slider (tab hfill) | right-aligned value readout ].
+    import javax.swing.*;
+    import java.awt.*;
+    LABEL_WIDTH    = java_scaled('value', 52);
+    SLIDER_WIDTH   = java_scaled('value', 20);
+    DEFAULT_HEIGHT = java_scaled('value', 22);
     S = bst_eigfilter_controls('Sliders', kernel, bounds);
     jParams.removeAll();
     for i = 1:3                                                 % clear stale slot handles (removeAll keeps client properties)
         jParams.putClientProperty(sprintf('atomslot_%d', i), []);
     end
     for i = 1:numel(S)
-        if isempty(S(i).label), continue; end              % disabled slot -> no row
+        if isempty(S(i).label), continue; end                  % disabled slot -> no row
         rng = max(S(i).hi - S(i).lo, eps);
-        pos = round(1000 * (S(i).def - S(i).lo) / rng);
-        [js, jTitle] = i_labeled_slider(jParams, sprintf(['%s: ' S(i).fmt], S(i).label, S(i).def), ...
-                                        'lo', 'hi', 0, 1000, max(0, min(1000, pos)));
+        pos = max(0, min(1000, round(1000 * (S(i).def - S(i).lo) / rng)));
+        gui_component('label', jParams, 'br', [S(i).label ':']);
+        js = JSlider(0, 1000, pos);
+        js.setPreferredSize(Dimension(SLIDER_WIDTH, DEFAULT_HEIGHT));
+        jParams.add('tab hfill', js);
+        jv = gui_component('label', jParams, [], sprintf(S(i).fmt, S(i).def), {JLabel.RIGHT, Dimension(LABEL_WIDTH, DEFAULT_HEIGHT)});
         jParams.putClientProperty(sprintf('atomslot_%d', i), js);
-        jParams.putClientProperty(sprintf('atomttl_%d', i),  jTitle);
-        jParams.putClientProperty(sprintf('atomlo_%d', i),   S(i).lo);
-        jParams.putClientProperty(sprintf('atomhi_%d', i),   S(i).hi);
-        jParams.putClientProperty(sprintf('atomfmt_%d', i),  S(i).fmt);
-        jParams.putClientProperty(sprintf('atomlbl_%d', i),  S(i).label);
-        java_setcb(js, 'StateChangedCallback', @(h,e) i_atom_slider_changed(jParams, i, h, onSettle));
+        jParams.putClientProperty(sprintf('atomval_%d',  i), jv);
+        jParams.putClientProperty(sprintf('atomlo_%d',   i), S(i).lo);
+        jParams.putClientProperty(sprintf('atomhi_%d',   i), S(i).hi);
+        jParams.putClientProperty(sprintf('atomfmt_%d',  i), S(i).fmt);
+        java_setcb(js, 'StateChangedCallback', @(h,e) i_atom_slider_preview(jParams, i, h));   % live value readout
+        if ~isempty(onSettle)
+            java_setcb(js, 'MouseReleasedCallback', @(h,e) onSettle(), 'KeyPressedCallback', @(h,e) onSettle());  % settle -> recompute
+        end
     end
     jParams.revalidate(); jParams.repaint();
 end
@@ -166,22 +177,18 @@ function SetAtomVals(jParams, vals) %#ok<DEFNU>
         lo = double(jParams.getClientProperty(sprintf('atomlo_%d', i)));
         hi = double(jParams.getClientProperty(sprintf('atomhi_%d', i)));
         js.setValue(max(0, min(1000, round(1000 * (vals(i) - lo) / max(hi - lo, eps)))));
-        i_atom_slider_changed(jParams, i, js, []);
+        i_atom_slider_preview(jParams, i, js);
     end
 end
 
 %% ===== internal =====
-function i_atom_slider_changed(jParams, slot, js, onSettle)
+function i_atom_slider_preview(jParams, slot, js)
+    % Live value readout: update the row's right-aligned value label as the slider moves.
     lo  = double(jParams.getClientProperty(sprintf('atomlo_%d', slot)));
     hi  = double(jParams.getClientProperty(sprintf('atomhi_%d', slot)));
-    val = lo + (hi - lo) * double(js.getValue()) / 1000;
-    jt  = jParams.getClientProperty(sprintf('atomttl_%d', slot));
-    if ~isempty(jt)
-        lbl = char(jParams.getClientProperty(sprintf('atomlbl_%d', slot)));
-        fmt = char(jParams.getClientProperty(sprintf('atomfmt_%d', slot)));
-        jt.setText(sprintf(['%s: ' fmt], lbl, val));
-    end
-    if (nargin >= 4) && ~isempty(onSettle) && ~js.getValueIsAdjusting(), onSettle(); end
+    fmt = char(jParams.getClientProperty(sprintf('atomfmt_%d', slot)));
+    jv  = jParams.getClientProperty(sprintf('atomval_%d', slot));
+    if ~isempty(jv), jv.setText(sprintf(fmt, lo + (hi - lo) * double(js.getValue()) / 1000)); end
 end
 
 function i_slider_changed(jParams, name, Lambda, js, onSettle)

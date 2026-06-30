@@ -42,31 +42,44 @@ end
 
 function bstPanelNew = CreatePanel() %#ok<DEFNU>
     panelName = 'AtomDesigner';
+    import java.awt.*;
+    import javax.swing.*;
     [atomKeys, atomDisp] = panel_eigenfilter_design('AtomKernels');
+    BUTTON_WIDTH   = java_scaled('value', 56);
+    DEFAULT_HEIGHT = java_scaled('value', 22);
 
-    jPanelNew = gui_river([5,5], [10,15,12,10]);
+    % options stack: one bordered sub-panel per group, pinned to the top (panel_surface convention)
+    jPanelOptions = gui_component('Panel');
+    jPanelOptions.setLayout(BoxLayout(jPanelOptions, BoxLayout.Y_AXIS));
+    jPanelOptions.setBorder(BorderFactory.createEmptyBorder(7,7,7,7));
 
-    % --- Filter design: operator + kernel + contextual params ---
-    jDes = gui_river([2,2], [0,10,12,10], 'Filter design');
-        gui_component('label', jDes, '', 'Operator: ', [], [], [], []);
+    % ===== FILTER DESIGN: operator + filter + contextual parameter sliders =====
+    jDes = gui_river([1,1], [1,8,1,4], 'Filter design');
+        gui_component('label', jDes, 'br', 'Operator:');
         jOperator = gui_component('combobox', jDes, 'tab hfill', [], {{'connectomic','geometric'}}, [], [], []);
-        java_setcb(jOperator, 'ActionPerformedCallback', @(hh,ee) bst_call(@OnOperatorCb));
-        gui_component('label', jDes, 'br', 'Filter: ', [], [], [], []);
+        java_setcb(jOperator, 'ActionPerformedCallback', @(h,e) bst_call(@OnOperatorCb));
+        gui_component('label', jDes, 'br', 'Filter:');
         jKernel = gui_component('combobox', jDes, 'tab hfill', [], {atomDisp}, [], [], []);
-        java_setcb(jKernel, 'ActionPerformedCallback', @(hh,ee) bst_call(@OnKernelCb));
-        jParams = gui_river([2,2], [0,2,0,2]);
+        java_setcb(jKernel, 'ActionPerformedCallback', @(h,e) bst_call(@OnKernelCb));
+        jParams = gui_river([1,1], [2,0,0,0]);                 % contextual sliders (own rows; removeAll-safe)
         jDes.add('br hfill', jParams);
-    jPanelNew.add('br hfill', jDes);
+    jPanelOptions.add(jDes);
 
-    % --- actions: connectome overlay + save ---
-    jAct = gui_river([2,2], [0,10,8,10]);
-        jFibers = gui_component('toggle', jAct, '', 'Connectome', [], 'Overlay the connectome fibers, coloured by the atom', @(hh,ee) bst_call(@OnConnectomeCb));
-        gui_component('button', jAct, 'tab right', 'Save', [], 'Save atom -> Scout + Event', @(hh,ee) bst_call(@OnSaveCb));
-    jPanelNew.add('br hfill', jAct);
+    % ===== ACTIONS: connectome overlay + save (explicitly sized -> side by side) =====
+    jAct = gui_river([1,1], [1,8,1,4]);
+        jFibers = gui_component('toggle', jAct, 'br', 'Connectome', [], 'Overlay the connectome fibers, coloured by the atom', @(h,e) bst_call(@OnConnectomeCb));
+        jFibers.setPreferredSize(Dimension(2*BUTTON_WIDTH, DEFAULT_HEIGHT));
+        jSave = gui_component('button', jAct, [], 'Save', [], 'Save atom -> Scout + Event', @(h,e) bst_call(@OnSaveCb)); %#ok<NASGU>
+        jSave.setPreferredSize(Dimension(BUTTON_WIDTH, DEFAULT_HEIGHT));
+    jPanelOptions.add(jAct);
 
-    % --- status line ---
-    jStatus = gui_component('label', jPanelNew, 'br hfill', '', [], [], [], []);
+    % ===== STATUS (contained in a bordered box) =====
+    jStat = gui_river([1,1], [1,8,1,4], 'Status');
+        jStatus = gui_component('label', jStat, 'br hfill', '');
+    jPanelOptions.add(jStat);
 
+    jPanelNew = gui_component('Panel');
+    jPanelNew.add(jPanelOptions, BorderLayout.NORTH);
     ctrl = struct('jOperator',jOperator, 'jKernel',jKernel, 'jParams',jParams, ...
                   'jFibers',jFibers, 'jStatus',jStatus, 'atomKeys',{atomKeys});
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
