@@ -158,7 +158,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 end
 
 
-% Standard EEG/MEG bands (delta/theta/alpha/beta/gamma): {name, [lo hi], greek-label}
+%% ===== MEASUREMENT (differential operator descriptor; not an axis) =====
 function OnMeasureMenu(jButton) %#ok<DEFNU>
     [~, st] = i_cs();
     curOp = 'none';  if ~isempty(st), curOp = i_field(st, 'curOp', 'none'); end
@@ -234,22 +234,21 @@ function i_close_panel()
 end
 
 
-%% ===== frequency-atlas preset: a chosen band fills the freq center/window fields =====
+%% ===== shared panel/target accessor =====
 function [ctrl, st] = i_cs()
     ctrl = bst_get('PanelControls', 'Dynamics');
     st   = getappdata(0, 'DynamicsTarget');
 end
 
 
-%% ===== BIDIRECTIONAL FOCUS: re-entrancy guard =====
-% True while the panel is DRIVING a figure selection (panel->view), so a redraw-triggered
-% hook cannot echo back (view->panel) and create a feedback loop.
+%% ===== NOTIFY SELECTION (view -> panel) =====
 function NotifySelection(hFig, axis, range) %#ok<DEFNU,INUSD>
     % Retired no-op. The freq/time selection-sync was removed with the Navigator
     % strip; figure_spectrum / figure_timeseries still call this hook, so the entry
     % point is retained as a no-op to preserve their contract.
 end
 
+%% ===== SYNC the Source block fields from the geodesic tool state =====
 function SyncSource() %#ok<DEFNU>
     % The geodesic tool (repurposed as the atom Localize seed-picker) calls this on every Draw.
     % The atom tool needs only the SEED vertex (its kernel + threshold define the spatial extent).
@@ -268,7 +267,7 @@ function SyncSource() %#ok<DEFNU>
 end
 
 
-%% ===== LOAD ATOM: fill the navigator blocks + st.nav from the selected saved atom =====
+%% ===== SHOW-PHASES FILTER (display-only; never deletes atoms) =====
 function OnTogglePhase(ip) %#ok<DEFNU>
     [ctrl, st] = i_cs();
     if isempty(ctrl) || isempty(st) || ~isfield(ctrl,'jPhaseItems') || isempty(ctrl.jPhaseItems), return; end
@@ -303,6 +302,8 @@ end
 function val = i_field(st, name, default)
     if isfield(st, name) && ~isempty(st.(name)), val = st.(name); else, val = default; end
 end
+
+%% ===== SET TARGET (called by view_dynamics) =====
 function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
@@ -322,6 +323,7 @@ function BuildTree()
     UpdateAtomList();
 end
 
+%% ===== FILE menu =====
 function FileOpen()
     [fn, pth] = uigetfile('dynamics_*.mat', 'Open dynamics table');
     if isequal(fn, 0), return; end
