@@ -41,12 +41,29 @@ An **Apply** toggle on the east toolbar. When ON (overlay mode `atom-filtered`):
 
 Because Apply touches the real source, the operator must match the source's structure: read `R.nComponents` (1 = scalar, 3 = unconstrained vector) from the source result. **Disable** incompatible operators in the Set-operator menu — scalar source → only Geometric/Connectomic; vector source → all four (scalar operators act on the magnitude). Don't default to an unavailable/incompatible operator. (This guard is optional in Design mode but **required** in Apply.)
 
-## 6. The source→sensor projection (open implementation detail)
+## 6. The source→sensor projection — RESOLVED (2026-06-30): Dirac-eigenbasis kernel
 
-The atom filters the source spatially (`g(λ)`) and temporally (over the wavelet support), giving `Ffilt`. To show the **sensor** effect we need `Ffilt` → channel space. Candidate (to settle first in implementation):
-- **Forward through the head model** (`data_filt = LeadField × Ffilt`) — the physically correct source→sensor map; needs the study's head model.
-- **Imaging-kernel relationship** — the user's framing ("the ImagingKernel relates the atom-filtered data back to the sensor data"); reuse `K` (or its forward partner) so no separate leadfield load is required.
-Resolve this in the plan's first task (verify which is available + correct for the launch result), then wire the recording-figure display.
+**Decision (user):** the **imaging kernel** route — and specifically the **Dirac dSPM** path. The imaging
+kernel already encodes the head model, all the physics, and the priors, and it maps leadfield vectors to
+sensor channels. The move is to transform the imaging kernel from `nSources × nChannels` into the **Dirac
+eigenbasis** (`nEig × nChannels`) — *exactly what the Dirac dSPM does* — apply the atom's spectral gain
+`g(λ)` to the eigenmodes, and forward back to channels:
+
+> `D_filt = L_eig · diag(g(λ)) · K_eig · D`   (eigenbasis forward · atom filter · eigenbasis inverse · sensors)
+
+**Critical constraint:** *only the Dirac dSPM can filter the 3-component leadfield vectors and forward to
+the sensors.* Scalar operators (Laplace-Beltrami / LB-Connectome) filter a source **magnitude** — not an
+oriented field — so they have **no sensor view**. The filtered-sensor timeseries is therefore a
+**Dirac-operator-only** feature.
+
+**Implications for Task 3 (now its own design):**
+- The Dynamics session must be launched from the **Dirac dSPM kernel** (`results_DiracEig_KERNEL_*`), not a
+  plain unconstrained dSPM — that kernel carries the eigenbasis transform.
+- The current **Dirac Apply guard** (Task 2: "scalar-only for now") must be **lifted** for the Dirac path.
+- Reuse `bst_dirac` (Transform/Reconstruct) for the eigenbasis leadfield transform (`L_eig`/`K_eig`); see
+  the [[dirac-eigenmode-leadfield]] / [[bst-inverse-dirac]] machinery.
+- The cortex Preview (Tasks 1+2) is independent and already shipped (scalar magnitude filtering); the sensor
+  view is the Dirac-operator extension layered on top.
 
 ## 7. Scope
 

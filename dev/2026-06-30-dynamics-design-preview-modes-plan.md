@@ -52,7 +52,15 @@
 
 ---
 
-### Task 3: filtered sensor timeseries (live)
+### Task 3: filtered sensor timeseries (live) — SUPERSEDED, needs its own design
+
+> **2026-06-30 update:** Tasks 1+2 shipped (commits on `development`: filter-apply core; Design/Preview
+> modes + operator gate). Task 3 as written below (`Gain × Ffilt`) is **wrong** — per the user, the sensor
+> view is a **Dirac-operator-only** feature: transform the imaging kernel into the **Dirac eigenbasis**
+> (`nEig × nChannels`, the Dirac dSPM), filter the eigenmodes by `g(λ)`, forward back to channels
+> (`D_filt = L_eig·diag(g(λ))·K_eig·D`). It requires launching from the Dirac dSPM kernel, lifting the
+> Task-2 Dirac Apply guard, and reusing `bst_dirac`. See design §6 (RESOLVED). **Do this as a fresh
+> brainstorm → spec → plan**, not the steps below.
 
 **Files:** Modify `toolbox/gui/panel_bst_dynamics.m`. **Live-validated.**
 
