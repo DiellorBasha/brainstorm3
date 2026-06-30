@@ -1406,8 +1406,10 @@ end
 
 %% ===== filterbank: an atom IS a filter (generator), not a thresholded marker =====
 % Build a generator atomgroup: kernel + params + seed, with Threshold/region(Scout)/times(Event) UNSET.
-function G = i_default_atom(kernelName, kp, seed, surfaceFile, label) %#ok<DEFNU>
+function G = i_default_atom(kernelName, kp, seed, surfaceFile, label, operator) %#ok<DEFNU>
+    if (nargin < 6) || isempty(operator), operator = 'Laplace-Beltrami'; end
     G = bst_dynamics('NewGroup', label);
+    G.Operator     = operator;
     G.KernelName   = kernelName;
     G.KernelParams = kp;
     G.vertices     = seed;
@@ -1416,7 +1418,8 @@ end
 % One-line summary of an atom's generator for the Atom-section readout.
 function s = i_atom_detail(G) %#ok<DEFNU>
     seed = 0;  if ~isempty(G.vertices), seed = G.vertices(1); end
-    s = sprintf('%s . vtx %d', G.KernelName, seed);
+    op = '';  if isfield(G,'Operator') && ~isempty(G.Operator), op = [char(G.Operator) ' | ']; end
+    s = sprintf('%s%s . vtx %d', op, G.KernelName, seed);
     if isstruct(G.KernelParams)
         f = fieldnames(G.KernelParams);
         for i = 1:numel(f)
@@ -1425,6 +1428,53 @@ function s = i_atom_detail(G) %#ok<DEFNU>
             if isnumeric(v) && isscalar(v), s = sprintf('%s . %s=%.3g', s, f{i}, v); end
         end
     end
+end
+
+% Launch-derived default operator: Dirac if the source result is a Dirac inverse, else Laplace-Beltrami.
+function op = i_launch_operator(st) %#ok<DEFNU>
+    op = 'Laplace-Beltrami';
+    cmt = '';
+    if isfield(st,'srcComment')
+        cmt = st.srcComment;
+    elseif isfield(st,'hFig') && ~isempty(st.hFig) && ishandle(st.hFig)
+        D = getappdata(st.hFig, 'DynamicsOverlay');
+        if ~isempty(D) && isfield(D,'srcDS') && isfield(D,'srcResult')
+            try
+                gd = []; global GlobalData; gd = GlobalData; %#ok<TLEV>
+                cmt = gd.DataSet(D.srcDS).Results(D.srcResult).Comment;
+            catch %#ok<CTCH>
+            end
+        end
+    end
+    if ~isempty(cmt) && contains(lower(char(cmt)), 'dirac'), op = 'Dirac'; end
+end
+
+% Per-variant eigen-axes over a 4 s window at the recording Fs; cached (variant|surface) across the session.
+function ax = i_atom_axes(st, variant) %#ok<DEFNU>
+    ax = [];
+    surf = i_atom_surface(st);  if isempty(surf), return; end
+    key = [variant '|' surf];
+    M = getappdata(0, 'DynamicsAtomAx');
+    if isempty(M) || ~isa(M, 'containers.Map'), M = containers.Map('KeyType','char','ValueType','any'); end
+    if isKey(M, key), ax = M(key); return; end
+    Fs = 100;
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if ~isempty(D) && isfield(D,'srcDS') && isfield(D,'srcResult')
+        try, tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  if numel(tv) > 1, Fs = 1/median(diff(tv)); end, catch, end %#ok<CTCH>
+    end
+    nF = max(2, round(4*Fs));                                       % 4 s window at the recording sample rate
+    bst_progress('start', 'Atom', sprintf('Building %s eigenbasis...', variant));
+    ax = bst_eigen('Axes', struct('SurfaceFile',surf, 'Variant',variant, 'nModes',60, 'TimeWindow',[0 (nF-1)/Fs], 'SampleRate',Fs));
+    bst_progress('stop');
+    M(key) = ax;  setappdata(0, 'DynamicsAtomAx', M);
+end
+function surf = i_atom_surface(st)
+    surf = '';
+    if ~isfield(st,'hFig') || isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    TI = getappdata(st.hFig, 'Surface');  if isempty(TI), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');  iTess = 1;
+    if ~isempty(D) && isfield(D,'iTess') && ~isempty(D.iTess), iTess = D.iTess; end
+    surf = TI(iTess).SurfaceFile;
 end
 
 %% ===== atom tool: filter selector + contextual params + localize + store =====
