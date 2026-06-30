@@ -121,10 +121,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jApply = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_TS_DISPLAY, TB_DIM}, 'Apply: filter the REAL source through the selected atom over a 4 s window (Preview); OFF = impulse response (Design)', @(h,e)bst_call(@OnApply));
     jToolbar2.addSeparator();
     % --- legacy detection / differential maps (untouched this step) ---
-    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_EVT_TYPE_ADD, TB_DIM}, 'Detect windows: run the band-power detector on the selected band (preview events; not saved)', @(h,e)bst_call(@OnDetect));
     jShow = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_ALL, TB_DIM}, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
     jShow.setSelected(true);
-    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_EVT_TYPE_DEL, TB_DIM}, 'Clear: discard the staged detection preview (no save)', @(h,e)bst_call(@OnClearDetection));
     jToolbar2.addSeparator();
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Measure: choose the differential map (None / Divergence / Curl / Potential / Stream)', @(h,e)bst_call(@()OnMeasureMenu(h)));
 
@@ -311,22 +309,6 @@ function OnMeasurement(name) %#ok<DEFNU>
     end
 end
 
-% Save toolbar button: commit the staged detection to atoms if one is staged, else pin the cursor.
-function OnSave() %#ok<DEFNU>
-    if i_has_staged_detection()
-        OnSaveDetection();
-    else
-        OnSaveCursor();
-    end
-end
-function tf = i_has_staged_detection()
-    tf = false;
-    evs = panel_record('GetEvents', [], 1);
-    if isempty(evs), return; end
-    isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
-    tf = any(isDet);
-end
-
 % Show toolbar toggle: show/hide ALL atom phases at once (syncs the per-phase menu checkboxes).
 function OnShowAll() %#ok<DEFNU>
     [ctrl, st] = i_cs();
@@ -381,178 +363,6 @@ function nm = i_freq_name(ctrl)
     nm = '';
     if isfield(ctrl,'jFreqBand') && ~isempty(ctrl.jFreqBand), nm = char(ctrl.jFreqBand.getSelectedItem()); end
     if any(strcmpi(nm,{'custom','none'})), nm = ''; end
-end
-
-
-%% ===== DETECT: refphase time-window skeleton for the selected band =====
-% The FIRST atom creation: runs process_evt_refphase on the recording for the current
-% band and writes the temporal skeleton -- the band-window extended stack + the 4
-% phase-marker trains (time + phase, NO source). Space is added later by Record.
-function OnDetect() %#ok<DEFNU>
-    [~, st] = i_cs();
-    if isempty(st), return; end
-    band = i_field(st, 'curBand', []);  bandName = i_field(st, 'curBandName', '');
-    if isempty(band)
-        java_dialog('warning', ['Select a frequency band first (' char(948) '/' char(952) '/' char(945) '/' char(946) '/' char(947) ').'], 'Detect windows');
-        return;
-    end
-    DataFile = st.T.DataFile;
-    if isempty(DataFile)
-        for g = 1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
-    end
-    if isempty(DataFile)
-        java_dialog('warning', 'No recording (DataFile) is associated with this table.', 'Detect windows');  return;
-    end
-    bst_progress('start', 'Detect windows', sprintf('Running refphase on the %s band...', bandName));
-    ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', DataFile));
-    iMEG = channel_find(ChannelMat.Channel, 'MEG');
-    [F, TimeVector] = i_load_meg(DataFile, ChannelMat, iMEG);
-    if isempty(F)
-        bst_progress('stop');  java_dialog('error', 'Could not read the recording.', 'Detect windows');  return;
-    end
-    OPTIONS = process_evt_refphase('Compute');  OPTIONS.freqRange = band;
-    [evt, markers] = process_evt_refphase('Compute', F, TimeVector, OPTIONS);
-    bst_progress('stop');
-    if isempty(evt)
-        java_dialog('msgbox', sprintf('No %s windows detected (try a different band or threshold).', bandName), 'Detect windows');  return;
-    end
-    % Stage the detection as a Brainstorm EVENT group on the recording (NOT atoms).
-    % The events auto-render on the time series + mirror in the tree; Save converts them to atoms.
-    i_detect_events(bandName, band, evt, markers);
-    i_apply(st);                                                  % refresh tree (mirrors the detection events)
-    [~, st] = i_cs();                                            % i_apply rewrote the target
-    st.detSel = []; setappdata(0, 'DynamicsTarget', st);        % clear any stale staged-window index
-    i_focus_time(st, [evt(1,1), evt(2,1)]);                      % focus the FIRST detected window
-    bst_progress('text', sprintf('Detected %d %s windows (events; not yet saved)', size(evt,2), bandName));
-end
-
-% Load MEG sensor data (matrix [nMEG x nT] + time) for a data block or raw file.
-function [F, TimeVector] = i_load_meg(DataFile, ChannelMat, iMEG)
-    F = [];  TimeVector = [];
-    DataMat = in_bst_data(DataFile, 'F', 'Time');
-    if isstruct(DataMat.F)                                  % raw link
-        IO = db_template('ImportOptions');
-        IO.ImportMode='Time';  IO.UseCtfComp=1;  IO.UseSsp=1;  IO.EventsMode='ignore';  IO.DisplayMessages=0;  IO.RemoveBaseline='no';
-        [F, TimeVector] = in_fread(DataMat.F, ChannelMat, 1, [], iMEG, IO);
-    else                                                    % imported data block
-        F = DataMat.F(iMEG, :);  TimeVector = DataMat.Time;
-    end
-end
-
-% Drop the band's time-window group(s) (extended top-level, this bandName) + their phase
-% children, leaving recorded spatial groups (simple, with a Function) untouched.
-function T = i_remove_band(T, bandName)
-    if isempty(T.Groups), return; end
-    keep = true(1, numel(T.Groups));  winLabels = {};
-    for g = 1:numel(T.Groups)
-        G = T.Groups(g);  bn = G.bandName;  if isempty(bn), bn = ''; end
-        if isempty(G.parent) && strcmp(bn, bandName) && (size(G.times,1) == 2)
-            winLabels{end+1} = G.label;  keep(g) = false; %#ok<AGROW>
-        end
-    end
-    for g = 1:numel(T.Groups)
-        if any(strcmp(T.Groups(g).parent, winLabels)), keep(g) = false; end
-    end
-    T.Groups = T.Groups(keep);  T.nGroups = numel(T.Groups);
-end
-
-
-% Install the refphase detection as a Brainstorm event group on the loaded recording
-% (extended band-window + 4 phase-marker simple events). Replaces prior same-label events.
-function i_detect_events(bandName, band, evt, markers)
-    global GlobalData;
-    % Detection events are render-only preview, not a permanent edit to the recording file.
-    % SetEvents sets Measures.isModified=1, and recording unload auto-saves under nogui --
-    % so capture the dataset's clean/dirty state and restore CLEAN afterwards (preserving any
-    % genuine prior user event edits).
-    iDS = panel_record('GetCurrentDataset');                 % the loaded recording's dataset
-    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
-    winLabel = sprintf('%s (%g-%g Hz)', bandName, band(1), band(2));
-    defs = { winLabel,                    evt,             [0.5 0.5 0.5]; ...
-             [bandName '_peak'],          markers.peak,    [0.90 0.10 0.10]; ...
-             [bandName '_trough'],        markers.trough,  [0.10 0.25 0.90]; ...
-             [bandName '_rising'],        markers.rising,  [0.10 0.70 0.20]; ...
-             [bandName '_falling'],       markers.falling, [0.95 0.55 0.10] };
-    for k = 1:size(defs,1)
-        label = defs{k,1};  times = defs{k,2};  color = defs{k,3};
-        if isempty(times), continue; end
-        sEvent = db_template('event');
-        sEvent.label  = label;
-        sEvent.color  = color;
-        sEvent.times  = times;
-        sEvent.epochs = ones(1, size(times,2));
-        % find-or-replace by label (replace prior detection for this band on re-detect)
-        all = panel_record('GetEvents', [], 1);
-        iEvt = [];
-        if ~isempty(all), iEvt = find(strcmpi({all.label}, label), 1); end
-        if isempty(iEvt), iEvt = numel(all) + 1; end
-        panel_record('SetEvents', sEvent, iEvt);
-    end
-    panel_record('UpdateEventsList');                            % refresh the Record-panel event list
-    panel_record('ReplotEvents');                               % re-plot the event markers on the open time series
-    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % staged events are render-only, don't persist
-end
-
-
-%% ===== SAVE DETECTION: convert the detection event group -> atoms in st.T =====
-function OnSaveDetection() %#ok<DEFNU>
-    [~, st] = i_cs();  if isempty(st), return; end
-    evs = panel_record('GetEvents', [], 1);
-    if isempty(evs), java_dialog('msgbox', 'No detection to save. Run Detect first.', 'Save detection');  return; end
-    % find the band-window event ("<band> (lo-hi Hz)") + its 4 phase events
-    iWin = find(~cellfun(@isempty, regexp({evs.label}, '^.+ \([0-9.]+-[0-9.]+ Hz\)$', 'once')), 1);
-    if isempty(iWin), java_dialog('msgbox', 'No detection window event found.', 'Save detection');  return; end
-    winLabel = evs(iWin).label;
-    tok = regexp(winLabel, '^(.+) \(([0-9.]+)-([0-9.]+) Hz\)$', 'tokens', 'once');
-    bandName = tok{1};  band = [str2double(tok{2}), str2double(tok{3})];
-    DataFile = st.T.DataFile;
-    if isempty(DataFile)
-        for g=1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
-    end
-    % numeric freq Localization from the band the detection was RUN at (from the event label)
-    fLoc = bst_dynamics('NewLoc', 'freq');  fLoc.center = mean(band);  fLoc.extent = (band(2)-band(1))/2;  fLoc.label = bandName;
-    % rebuild this band's saved groups
-    st.T = i_remove_band(st.T, bandName);
-    W = bst_dynamics('NewGroup', winLabel);
-    W.type='extended';  W.times=evs(iWin).times;  W.epochs=ones(1,size(evs(iWin).times,2));  W.bandName=bandName;
-    W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
-    W = bst_dynamics('Set', W, 'freq', 1, fLoc);                      % numeric freq tensor index
-    st.T = bst_dynamics('AddGroup', st.T, W);
-    phaseColors = struct('peak',[0.90 0.10 0.10],'trough',[0.10 0.25 0.90],'rising',[0.10 0.70 0.20],'falling',[0.95 0.55 0.10]);
-    for ph = {'peak','trough','rising','falling'}
-        lbl = [bandName '_' ph{1}];  ie = find(strcmpi({evs.label}, lbl), 1);
-        if isempty(ie) || isempty(evs(ie).times), continue; end
-        P = bst_dynamics('NewGroup', lbl);
-        P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph{1});
-        P.times=evs(ie).times(1,:);  P.epochs=ones(1,size(evs(ie).times,2));  P.bandName=bandName;
-        P.color=phaseColors.(ph{1});  P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
-        P = bst_dynamics('Set', P, 'freq', 1, fLoc);                  % numeric freq on each child
-        st.T = bst_dynamics('AddGroup', st.T, P);
-    end
-    if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;      end
-    if isempty(st.T.SurfaceFile), st.T.SurfaceFile = W.SurfaceFile; end
-    i_apply(st);
-    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
-    bst_progress('text', sprintf('Saved %s detection as atoms', bandName));
-end
-
-%% ===== CLEAR DETECTION: remove the detection event group (discard) =====
-function OnClearDetection() %#ok<DEFNU>
-    global GlobalData;
-    evs = panel_record('GetEvents', [], 1);
-    if isempty(evs), return; end
-    % Clearing mutates events (SetEvents sets isModified=1); preserve the recording's clean/dirty
-    % state so discarding a render-only preview never dirties/persists the recording.
-    iDS = panel_record('GetCurrentDataset');
-    wasMod = ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).Measures.sFile) && GlobalData.DataSet(iDS).Measures.isModified;
-    isDet = ~cellfun(@isempty, regexp({evs.label}, '_(peak|trough|rising|falling)$|\([0-9.]+-[0-9.]+ Hz\)$', 'once'));
-    keep = evs(~isDet);
-    if isempty(keep), keep = repmat(db_template('event'), 1, 0); end   % empty event array, not []
-    panel_record('SetEvents', keep);                             % replace the whole event set with the non-detection ones
-    panel_record('UpdateEventsList');
-    panel_record('ReplotEvents');                               % re-plot the (now cleared) markers; do NOT ReloadFigures (would reload events from disk)
-    if ~isempty(iDS) && ~wasMod, GlobalData.DataSet(iDS).Measures.isModified = 0; end   % discarding preview must not dirty the recording
-    [~, st] = i_cs();  if ~isempty(st), st.detSel = []; i_apply(st); end
 end
 
 
