@@ -184,7 +184,7 @@ end
 
 %% ===== READ a block's (center, extent) into a Localization =====
 function loc = i_read_block(ctrl, axis)
-    loc = bst_atom('NewLoc', axis);
+    loc = bst_dynamics('NewLoc', axis);
     % Time has NO widget -- the global Brainstorm cursor drives it: read the live current time.
     if strcmp(axis, 'time')
         global GlobalData; %#ok<TLEV>
@@ -214,7 +214,7 @@ function OnAxisChange(axis) %#ok<DEFNU>
     [ctrl, st] = i_cs();
     if isempty(ctrl) || isempty(st), return; end
     loc = i_read_block(ctrl, axis);
-    st.nav = bst_atom('Set', st.nav, axis, 1, loc);
+    st.nav = bst_dynamics('Set', st.nav, axis, 1, loc);
     setappdata(0, 'DynamicsTarget', st);
     i_drive(axis, loc);
 end
@@ -500,13 +500,13 @@ function OnSaveDetection() %#ok<DEFNU>
         for g=1:numel(st.T.Groups), if ~isempty(st.T.Groups(g).DataFile), DataFile = st.T.Groups(g).DataFile; break; end; end
     end
     % numeric freq Localization from the band the detection was RUN at (from the event label)
-    fLoc = bst_atom('NewLoc', 'freq');  fLoc.center = mean(band);  fLoc.extent = (band(2)-band(1))/2;  fLoc.label = bandName;
+    fLoc = bst_dynamics('NewLoc', 'freq');  fLoc.center = mean(band);  fLoc.extent = (band(2)-band(1))/2;  fLoc.label = bandName;
     % rebuild this band's saved groups
     st.T = i_remove_band(st.T, bandName);
     W = bst_dynamics('NewGroup', winLabel);
     W.type='extended';  W.times=evs(iWin).times;  W.epochs=ones(1,size(evs(iWin).times,2));  W.bandName=bandName;
     W.color=[0.5 0.5 0.5];  W.SurfaceFile=st.T.SurfaceFile;  W.DataFile=DataFile;
-    W = bst_atom('Set', W, 'freq', 1, fLoc);                      % numeric freq tensor index
+    W = bst_dynamics('Set', W, 'freq', 1, fLoc);                      % numeric freq tensor index
     st.T = bst_dynamics('AddGroup', st.T, W);
     phaseColors = struct('peak',[0.90 0.10 0.10],'trough',[0.10 0.25 0.90],'rising',[0.10 0.70 0.20],'falling',[0.95 0.55 0.10]);
     for ph = {'peak','trough','rising','falling'}
@@ -516,7 +516,7 @@ function OnSaveDetection() %#ok<DEFNU>
         P.type='simple';  P.parent=winLabel;  P.phase=process_evt_refphase('PhaseValue', ph{1});
         P.times=evs(ie).times(1,:);  P.epochs=ones(1,size(evs(ie).times,2));  P.bandName=bandName;
         P.color=phaseColors.(ph{1});  P.SurfaceFile=st.T.SurfaceFile;  P.DataFile=DataFile;
-        P = bst_atom('Set', P, 'freq', 1, fLoc);                  % numeric freq on each child
+        P = bst_dynamics('Set', P, 'freq', 1, fLoc);                  % numeric freq on each child
         st.T = bst_dynamics('AddGroup', st.T, P);
     end
     if isempty(st.T.DataFile),    st.T.DataFile    = DataFile;      end
@@ -778,9 +778,9 @@ function SyncSource() %#ok<DEFNU>
     if isempty(gs), return; end
     ctrl.jSrcC.setText(num2str(double(gs.seed)));
     ctrl.jSrcW.setText(num2str(round(gs.radius*1000)));      % radius in mm
-    loc = bst_atom('NewLoc', 'source');
+    loc = bst_dynamics('NewLoc', 'source');
     loc.center = double(gs.seed);  loc.extent = gs.radius;  loc.pos = gs.pos;  loc.state = 'window';
-    st.nav = bst_atom('Set', st.nav, 'source', 1, loc);
+    st.nav = bst_dynamics('Set', st.nav, 'source', 1, loc);
     setappdata(0, 'DynamicsTarget', st);
 end
 
@@ -788,9 +788,9 @@ end
 %% ===== SAVE CURSOR: commit the live 4-D cursor (st.nav) as ONE atom =====
 function OnSaveCursor() %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(st) || isempty(st.nav), return; end
-    st.nav = bst_atom('Set', st.nav, 'time', 1, i_read_block(ctrl, 'time'));   % time from the global cursor (no widget)
-    lt = bst_atom('Get', st.nav, 'time');     lf = bst_atom('Get', st.nav, 'freq');
-    ls = bst_atom('Get', st.nav, 'source');   lk = bst_atom('Get', st.nav, 'scale'); %#ok<NASGU>
+    st.nav = bst_dynamics('Set', st.nav, 'time', 1, i_read_block(ctrl, 'time'));   % time from the global cursor (no widget)
+    lt = bst_dynamics('Get', st.nav, 'time');     lf = bst_dynamics('Get', st.nav, 'freq');
+    ls = bst_dynamics('Get', st.nav, 'source');   lk = bst_dynamics('Get', st.nav, 'scale'); %#ok<NASGU>
     if ~isfinite(lt.center)
         java_dialog('warning', 'Move the time cursor first (no cursor time).', 'Save cursor');  return;
     end
@@ -834,7 +834,7 @@ function OnSaveCursor() %#ok<DEFNU>
         G.vertices(end+1) = NaN;  G.pos(end+1,:) = [NaN NaN NaN];  G.hemi(end+1) = NaN;
     end
     G.strength(end+1) = strength;   G.charge(end+1) = charge;   G.type='simple';
-    if ~isempty(band), G = bst_atom('Set', G, 'freq', 1, lf); end   % numeric freq index
+    if ~isempty(band), G = bst_dynamics('Set', G, 'freq', 1, lf); end   % numeric freq index
     st.T.Groups(g) = G;  st.T.nGroups = numel(st.T.Groups);
     i_apply(st);
     if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
@@ -851,8 +851,8 @@ function OnLoadAtom() %#ok<DEFNU>
     G = st.T.Groups(g);
     for axis = {'time','freq','source','scale'}
         ax = axis{1};
-        loc = bst_atom('Get', G, ax, o);
-        st.nav = bst_atom('Set', st.nav, ax, 1, loc);
+        loc = bst_dynamics('Get', G, ax, o);
+        st.nav = bst_dynamics('Set', st.nav, ax, 1, loc);
         i_fill_block(ctrl, ax, loc);
         i_drive(ax, loc);                          % drive the viewers to the atom
     end
@@ -1002,7 +1002,7 @@ function OnRegionTool() %#ok<DEFNU>
             ctrl.jSrcC.setText('');  ctrl.jSrcW.setText('');
         end
         if ~isempty(st)
-            st.nav = bst_atom('Set', st.nav, 'source', 1, bst_atom('NewLoc','source'));   % unlocalized
+            st.nav = bst_dynamics('Set', st.nav, 'source', 1, bst_dynamics('NewLoc','source'));   % unlocalized
             setappdata(0, 'DynamicsTarget', st);
         end
     end

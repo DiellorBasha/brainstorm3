@@ -279,3 +279,119 @@ function OutFile = Save(OutFile, T)
     % DB; it is loadable by path via bst_dynamics('Load', ...). A tree node +
     % viewer come in Phase 2 (bst-java).
 end
+
+
+%% ===== MARKER LOCALISATION ACCESSOR (moved from bst_atom) =====
+% Uniform (center, extent, weighting) accessor over an atom group's four axes (time/freq/source/scale):
+% maps between the heterogeneous stored fields and a uniform Localization struct so the panel/detectors
+% treat all axes identically. (Localization is a property of the stored MARKER, distinct from the JTV
+% wavelet REALISER bst_eigenfilter('Atom') and the eigenbasis ax from bst_dynamics('Axes')/bst_eigen('Axes').)
+
+% Canonical axis metadata (name/perOcc/unit). Named AxisMeta to avoid clash with Axes(T,...) above.
+function A = AxisMeta() %#ok<DEFNU>
+    A = struct('name',   {'time','freq','source','scale'}, ...
+               'perOcc', {true,   false,  true,    false}, ...
+               'unit',   {'s',    'Hz',   'vertex','eigenvalue'});
+end
+
+% New (empty) localization struct.
+function loc = NewLoc(axis) %#ok<DEFNU>
+    if (nargin < 1), axis = ''; end
+    loc = struct('axis',axis, 'center',NaN, 'extent',NaN, 'weighting','hard', ...
+                 'label','', 'state','unlocalized', 'pos',[]);
+end
+
+% Read one axis localization from the group.
+function loc = Get(G, axis, occ) %#ok<DEFNU>
+    if (nargin < 3) || isempty(occ), occ = 1; end
+    loc = NewLoc(axis);
+    switch axis
+        case 'time'
+            if isempty(G.times) || (occ > size(G.times,2)), return; end
+            col = G.times(:, occ);
+            if any(~isfinite(col)), return; end
+            if (size(G.times,1) >= 2)
+                loc.center = mean(col(1:2));  loc.extent = (col(2) - col(1)) / 2;
+            else
+                loc.center = col(1);          loc.extent = 0;
+            end
+            loc.state = i_state(loc.extent);
+        case 'freq'
+            if (numel(G.band) < 2), return; end
+            loc.center = mean(G.band(1:2));  loc.extent = (G.band(2) - G.band(1)) / 2;
+            loc.label  = G.bandName;         loc.state  = i_state(loc.extent);
+        case 'source'
+            if isempty(G.vertices) || (occ > numel(G.vertices)) || ~isfinite(G.vertices(occ)), return; end
+            loc.center = double(G.vertices(occ));
+            if ~isempty(G.pos) && (occ <= size(G.pos,1)), loc.pos = G.pos(occ, :); end
+            hasR = isfield(G,'radius') && ~isempty(G.radius) && (occ <= numel(G.radius)) && isfinite(G.radius(occ));
+            hasReg = isfield(G,'region') && ~isempty(G.region) && (occ <= numel(G.region)) && ~isempty(G.region{occ});
+            if hasR
+                loc.extent = G.radius(occ);  loc.state = i_state(loc.extent);
+            elseif hasReg
+                loc.extent = NaN;  loc.state = 'window';   % region materialized but radius unrecorded
+            else
+                loc.extent = 0;    loc.state = 'point';
+            end
+        case 'scale'
+            if (numel(G.scale) < 2), return; end
+            loc.center = mean(G.scale(1:2));  loc.extent = (G.scale(2) - G.scale(1)) / 2;
+            loc.label  = G.scaleName;         loc.state  = i_state(loc.extent);
+        otherwise
+            error('bst_dynamics:Get', 'Unknown axis "%s".', axis);
+    end
+end
+
+% Write one axis localization into the group.
+function G = Set(G, axis, occ, loc) %#ok<DEFNU>
+    if (nargin < 4), error('bst_dynamics:Set','Set requires (G, axis, occ, loc).'); end
+    if isempty(occ), occ = 1; end
+    c = loc.center;  w = loc.extent;  if ~isfinite(w), w = 0; end
+    switch axis
+        case 'time'
+            G.times = i_pad_cols(G.times, occ);
+            if (w > 0) && (size(G.times,1) < 2)
+                G.times = [G.times; G.times];          % promote simple->extended (others zero-width)
+            end
+            if (size(G.times,1) >= 2)
+                G.times(1, occ) = c - w;  G.times(2, occ) = c + w;
+            else
+                G.times(1, occ) = c;
+            end
+            G.type = i_type(G.times);
+        case 'freq'
+            G.band = [c - w, c + w];
+            if ~isempty(loc.label), G.bandName = loc.label; end
+        case 'source'
+            G.vertices = i_pad_vec(G.vertices, occ);  G.vertices(occ) = c;
+            G.radius   = i_pad_vec(G.radius,   occ);  G.radius(occ)   = w;
+            if ~isempty(loc.pos)
+                G.pos = i_pad_pos(G.pos, occ);  G.pos(occ, :) = loc.pos(:)';
+            end
+        case 'scale'
+            G.scale = [c - w, c + w];
+            if ~isempty(loc.label), G.scaleName = loc.label; end
+        otherwise
+            error('bst_dynamics:Set', 'Unknown axis "%s".', axis);
+    end
+end
+
+% group type consistent with the times row count
+function t = i_type(times)
+    if (size(times,1) >= 2), t = 'extended'; else, t = 'simple'; end
+end
+% pad a [r x m] times matrix to >= n columns with NaN
+function M = i_pad_cols(M, n)
+    if isempty(M), M = nan(1, n); elseif (size(M,2) < n), M(:, end+1:n) = NaN; end
+end
+% pad a [1 x m] row vector to >= n with NaN
+function v = i_pad_vec(v, n)
+    if isempty(v), v = nan(1, n); elseif (numel(v) < n), v(end+1:n) = NaN; end
+end
+% state from extent
+function s = i_state(extent)
+    if ~isfinite(extent),   s = 'unlocalized';
+    elseif (extent == 0),   s = 'point';
+    else,                   s = 'window';
+    end
+end
