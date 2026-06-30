@@ -74,7 +74,18 @@ No edits to `bst_dynamics.m`, `bst_eigen*.m`, `view_dynamics.m`, `view_atom_desi
 
 Retain: `hFig`, `T`, `file`, `curAtom`, `atomSeed`, `atomThreshold`, `showPhase`, `curOp` (read by the retained Measure path), plus `atomAx`/`atomBounds` populated lazily by `i_atom_ensure_axes`.
 
-> Verification cross-check: after the prune, `grep` each dropped field name in the file — there must be zero remaining reads.
+**`curGroup` → `curAtom` repoint (discovered during planning).** `curGroup` is read by the retained
+`i_selected` (which backs the Atoms-menu Rename/Delete/Set-color/Sort actions), but it was *only ever
+set* by the now-deleted `TreeSel_Callback`. In the shipped panel it is therefore always `0`, so those
+menu actions are **already dead-on-arrival** (they warn "Select a band atom in the tree first" every
+time). The live selection field is `curAtom` (set by `AtomsListValueChanged_Callback`/`SetSelectedAtom`).
+Resolution: repoint `i_selected` to read `st.curAtom`, and change the two `st.curGroup = 0` resets in
+`AtomDeleteGroup`/`AtomSort` to `st.curAtom = 0`. This both removes the last reader of `curGroup` (so it
+can be pruned) **and** makes the retained group-management menu actually operate on the selected list
+atom. This is a behavior *fix* (broken → working) on retained code, not a behavior change to a working
+feature; it is the one intentional deviation from strict behavior-preservation.
+
+> Verification cross-check: after the prune, `grep` each dropped field name in the file — there must be zero remaining reads (`curGroup` included, after the repoint).
 
 ## 5. Retained code (explicit keep-list)
 
@@ -82,7 +93,7 @@ Retain: `hFig`, `T`, `file`, `curAtom`, `atomSeed`, `atomThreshold`, `showPhase`
 - **Localize feedback:** `SyncSource` (invoked by `bst_geodesic_tool.m:168`).
 - **Measure / differential:** `OnMeasureMenu`, `OnMeasurement`, the **Measure** toolbar button.
 - **Phase display (latent):** `OnShowAll`, `OnTogglePhase`, `i_phase_index`, `i_phase_type`, `jShow`, `jPhaseItems`, the Show-phases submenu, and the `showPhase` argument in `i_apply`→`view_dynamics('Redraw', …, showPhase)`.
-- **Infrastructure:** `SetTarget`, `OnCloseSession`, `OnFigureDeleted`, `i_close_panel`, `i_cs`, `i_apply`, `i_field`, `i_firsttime`, `i_jump`, `i_str`, File menu (`FileOpen`/`FileSave`/`FileSaveAs`), Atoms group management (`AtomAddGroup`/`AtomRenameGroup`/`AtomDeleteGroup`/`AtomSetColor`/`AtomSort`/`i_selected`).
+- **Infrastructure:** `SetTarget`, `OnCloseSession`, `OnFigureDeleted`, `i_close_panel`, `i_cs`, `i_apply`, `i_field`, `i_firsttime`, `i_jump`, `i_str`, File menu (`FileOpen`/`FileSave`/`FileSaveAs`), Atoms group management (`AtomAddGroup`/`AtomRenameGroup`/`AtomDeleteGroup`/`AtomSetColor`/`AtomSort`/`i_selected` — with `i_selected` repointed to `curAtom` per §4.4).
 
 ## 6. Consolidation (#6)
 
