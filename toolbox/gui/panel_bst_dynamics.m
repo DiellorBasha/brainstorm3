@@ -570,11 +570,7 @@ function [W, gv, isSigned] = i_atom_realise(st, kernel, vals, seed, variant)
         W = [];  gv = [];  return;                                  % operator not realisable -> caller guards
     end
     nGv = numel(gv);
-    if ~isreal(W), W = abs(W); end                                  % complex tangent (Connection Laplacian) -> magnitude
-    if (size(W,1) > nGv) && (mod(size(W,1), nGv) == 0)              % vector/quaternion basis (Dirac k=4) -> per-vertex magnitude
-        nc = size(W,1) / nGv;
-        W  = reshape(sqrt(sum(reshape(W, nc, nGv, []).^2, 1)), nGv, []);
-    end
+    W = i_paintable_scalar(W, nGv);
     if size(W,1) ~= nGv, W = [];  return; end                       % unexpected shape -> not paintable (guarded)
     if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))   % scalar basis: density/peak by kernel class
         [W, isSigned] = i_atom_normalize(W, ax.Mass{i_seed_block(ax, seed)});
@@ -707,7 +703,7 @@ function i_atom_apply() %#ok<DEFNU>
     % The joint time-vertex filter (dynamic atoms) is scalar-only for now; vector/Dirac/Tangent
     % dynamic real-source Preview is a follow-up. Scalar operators act on the source magnitude.
     if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
-        Fr = i_vec2scalar(F, nV);                                   % scalar operator: per-vertex magnitude
+        Fr = i_paintable_scalar(F, nV);                             % scalar operator: per-vertex magnitude
     else
         bst_progress('stop');
         ctrl.jAtomInfo.setText(sprintf('%s: real-source Preview is scalar-only for now (use Geometric/Connectomic)', variant));
@@ -717,7 +713,7 @@ function i_atom_apply() %#ok<DEFNU>
     Ffilt = i_atom_filter_field(Fr, ax, variant, kernel, kp);
     bst_progress('stop');
     if isempty(Ffilt), ctrl.jAtomInfo.setText(sprintf('%s: filter not applicable to this source', variant)); return; end
-    Ffilt = i_vec2scalar(Ffilt, nV);
+    Ffilt = i_paintable_scalar(Ffilt, nV);
     if size(Ffilt,1) ~= nV, ctrl.jAtomInfo.setText('Apply: source/operator shape mismatch'); return; end
     pk = max(abs(Ffilt(:)));  if pk > 0, Ffilt = Ffilt / pk; end
     if ~isempty(st.hFig) && ishandle(st.hFig)
@@ -726,12 +722,15 @@ function i_atom_apply() %#ok<DEFNU>
     ctrl.jAtomInfo.setText(sprintf('%s | %s  [Preview: filtered source, %d-sample window]', variant, kernel, numel(iWin)));
 end
 
-% Reduce a real/complex/vector field [k*nV x nT] to a per-vertex magnitude [nV x nT] (scalar passes through).
-function s = i_vec2scalar(F, nV)
+% Reduce a real/complex/vector field [k*nRows x nT] to a per-row magnitude [nRows x nT]
+% (scalar passes through). nRows is the divisor for THIS call: the basis-support count nGv
+% at the impulse site, the full-surface count nV at the apply site.
+function s = i_paintable_scalar(F, nRows)
     if ~isreal(F), F = abs(F); end
-    if size(F,1) == nV, s = F; return; end
-    if mod(size(F,1), nV) == 0
-        nc = size(F,1) / nV;  s = reshape(sqrt(sum(reshape(F, nc, nV, []).^2, 1)), nV, []);
+    if size(F,1) == nRows, s = F; return; end
+    if mod(size(F,1), nRows) == 0
+        nc = size(F,1) / nRows;
+        s = reshape(sqrt(sum(reshape(F, nc, nRows, []).^2, 1)), nRows, []);
     else
         s = F;                                                     % unexpected shape -> caller guards
     end
