@@ -355,6 +355,9 @@ switch lower(structureName)
             'persistence', [], ...      % descriptor: [1 x N] topological persistence
             'DataFile',    '', ...      % provenance: recording (time source)
             'ResultsFile', '', ...      % provenance: kernel/source link (the inverse used)
+            'KernelName',   '', ...     % GENERATOR: eigfilter kernel name (atom = thresholded localized filter)
+            'KernelParams', [], ...     % GENERATOR: kernel param struct (bst_eigfilter_controls('ToKernel'))
+            'Threshold',    [], ...     % GENERATOR: level-set threshold (fraction of peak) used for Scout/Event
             'SurfaceFile', '');         % provenance: cortex (space source)
 
     case 'dynamicsmat'
