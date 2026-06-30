@@ -154,47 +154,12 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         Status();
     end
     function i_config_sliders(k)
-        % Per-kernel labels/units/ranges for the three sliders; values read live by i_phys2kernel.
-        % Each row: {label, lo, hi, default, fmt} or [] to disable.
-        sc = {scaleMinMM, scaleMaxMM};
-        switch lower(k)
-            case 'diffusion'
-                i_setrow(hScale,hScaleL,hScaleV,'Rate (mm^2/s)',rateMinMM2,rateMaxMM2,pRate,'%.0f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case {'heat','mexhat','diffgauss','flat','ideal','inverse_heat','log','matern','power','tikhonov'}
-                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case 'wave'
-                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
-                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case 'kleingordon'
-                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
-                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case 'dampedwave'
-                i_setrow(hScale,hScaleL,hScaleV,[],0,1,0,'');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'Speed (m/s)',0.1,10,pSpeed,'%.2g');
-                i_setrow(hDecay,hDecayL,hDecayV,'Decay (s)',0.05,2,pDecay,'%.2g');
-            case 'gabor'
-                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'Freq (Hz)',0,50,10,'%.1f');
-                i_setrow(hDecay,hDecayL,hDecayV,'BW (Hz)',0.5,20,2,'%.1f');
-            case 'travwave'
-                i_setrow(hScale,hScaleL,hScaleV,'Speed (m/s)',0.05,3,1,'%.2g');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'RidgeW (Hz)',0.5,20,2,'%.1f');
-                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case 'resonator'
-                i_setrow(hScale,hScaleL,hScaleV,'Freq (Hz)',0,50,10,'%.1f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'Q',1,30,6,'%.1f');
-                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            case 'stmatern'
-                i_setrow(hScale,hScaleL,hScaleV,'Corr (mm)',sc{1},sc{2},pScaleMM,'%.0f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,'nu',0.5,4,1.5,'%.1f');
-                i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
-            otherwise
-                i_setrow(hScale,hScaleL,hScaleV,'Scale (mm)',sc{1},sc{2},pScaleMM,'%.0f');
-                i_setrow(hSpeed,hSpeedL,hSpeedV,[],0,1,0,'');  i_setrow(hDecay,hDecayL,hDecayV,[],0,1,0,'');
+        % Per-kernel slider config comes from the shared control spec (designer + panel single source).
+        b = struct('scaleMinMM',scaleMinMM, 'scaleMaxMM',scaleMaxMM, 'rateMinMM2',rateMinMM2, 'rateMaxMM2',rateMaxMM2);
+        S = bst_eigfilter_controls('Sliders', k, b);
+        H = {hScale,hScaleL,hScaleV; hSpeed,hSpeedL,hSpeedV; hDecay,hDecayL,hDecayV};
+        for ii = 1:3
+            i_setrow(H{ii,1}, H{ii,2}, H{ii,3}, S(ii).label, S(ii).lo, S(ii).hi, S(ii).def, S(ii).fmt);
         end
     end
     function i_setrow(hs, hl, hv, label, lo, hi, val, fmt)
@@ -343,19 +308,7 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         try, panel_time('SetCurrentTime', ax.tlag(1)); catch, end
     end
     function kp = i_phys2kernel()
-        kp = struct('lmax', lmax);  s1=get(hScale,'Value'); s2=get(hSpeed,'Value'); s3=get(hDecay,'Value');
-        switch lower(kernel)
-            case 'wave',        kp.alpha = s2 * sqrt(lmax) / 2;
-            case 'kleingordon', kp.alpha = s2 * sqrt(lmax) / 2;  kp.mu = 0.1*lmax;
-            case 'dampedwave',  kp.alpha = s2 * sqrt(lmax) / 2;  kp.beta = 1/max(s3,eps);
-            case 'diffusion',   kp.tau   = max((s1/1e6) * lmax, eps);
-            case 'heat',        lamS = (2*pi/(s1/1000))^2;  kp.t = log(2)/max(lamS,eps);
-            case 'mexhat',      lamS = (2*pi/(s1/1000))^2;  kp.t = 1/max(lamS,eps);
-            case 'gabor',       kp.k0 = 2*pi/max(s1/1000,eps);  kp.f0 = s2;  kp.sf = max(s3,eps);
-            case 'travwave',    kp.c  = s1;  kp.width = max(s2,eps);
-            case 'resonator',   kp.f0 = s1;  kp.Q = max(s2,eps);
-            case 'stmatern',    kp.kappa = 2*pi/max(s1/1000,eps);  kp.nu = max(s2,eps);
-        end
+        kp = bst_eigfilter_controls('ToKernel', kernel, [get(hScale,'Value'), get(hSpeed,'Value'), get(hDecay,'Value')], lmax);
     end
     function SaveAtom(~,~)
         if isempty(W), set(hLabel,'String','[design] nothing to save - drop an atom first.'); return; end
