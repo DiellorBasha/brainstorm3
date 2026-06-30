@@ -126,6 +126,9 @@ function BuildAtomSliders(jParams, kernel, bounds, onSettle) %#ok<DEFNU>
 % Render kernel's bst_eigfilter_controls('Sliders') spec as physical-units JSliders (0..1000 -> [lo,hi]).
     S = bst_eigfilter_controls('Sliders', kernel, bounds);
     jParams.removeAll();
+    for i = 1:3                                                 % clear stale slot handles (removeAll keeps client properties)
+        jParams.putClientProperty(sprintf('atomslot_%d', i), []);
+    end
     for i = 1:numel(S)
         if isempty(S(i).label), continue; end              % disabled slot -> no row
         rng = max(S(i).hi - S(i).lo, eps);

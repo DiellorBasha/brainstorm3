@@ -14,6 +14,14 @@ panel_eigenfilter_design('SetAtomVals', jR, [10 6 0]);
 vr = panel_eigenfilter_design('ReadAtomVals', jR);
 assert(abs(vr(1)-10)<0.2 && abs(vr(2)-6)<0.2, sprintf('resonator round-trip [%.2f %.2f]', vr(1), vr(2)));
 assert(vr(3)==0, 'disabled slot reads 0');
+% rebuild in the SAME panel must clear stale slots (removeAll keeps client properties):
+% gabor (3 slots) -> resonator (2 slots) must drop the old slot-3 value
+jX = JPanel();
+panel_eigenfilter_design('BuildAtomSliders', jX, 'gabor', b, []);
+panel_eigenfilter_design('SetAtomVals', jX, [30 12 7]);          % slot 3 (BW) = 7
+panel_eigenfilter_design('BuildAtomSliders', jX, 'resonator', b, []);   % rebuild: only slots 1,2
+vx = panel_eigenfilter_design('ReadAtomVals', jX);
+assert(vx(3)==0, 'rebuild clears the stale slot-3 handle');
 % the kernel list includes the js kernels and is diffusion-first
 [keys, displays] = panel_eigenfilter_design('AtomKernels');
 assert(strcmp(keys{1},'diffusion'), 'diffusion is first');
