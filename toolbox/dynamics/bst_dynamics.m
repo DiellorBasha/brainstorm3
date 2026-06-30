@@ -409,3 +409,20 @@ function LS = Levelset(W, gv, thr, iRef) %#ok<DEFNU>
     LS.eventSamples  = find(e   >= thr * max(e));        % temporal level set -> Event (sample indices)
     LS.iRef          = iRef;
 end
+
+
+%% ===== ATOM FROM KERNEL =====
+function G = AtomFromKernel(ax, kernelName, kernelParams, seed, thr) %#ok<DEFNU>
+    % Realise an eigfilter atom from its generator and threshold it into a populated atom group:
+    % Scout = spatial level set (region), Event = temporal level set (times). Atom = thresholded filter.
+    if (nargin < 6) || isempty(thr), thr = 0.5; end
+    [W, gv] = bst_eigenfilter('Atom', ax, kernelName, kernelParams, seed);
+    LS = Levelset(W, gv, thr);
+    G = NewGroup(sprintf('%s @vtx%d', kernelName, seed));
+    G.vertices = seed;
+    if isfield(ax,'SurfaceFile'), G.SurfaceFile = ax.SurfaceFile; end
+    G.region   = {LS.scoutVertices(:)'};
+    G.times    = [ax.tlag(LS.eventSamples(1)); ax.tlag(LS.eventSamples(end))];
+    G.type     = 'extended';
+    G.KernelName = kernelName;  G.KernelParams = kernelParams;  G.Threshold = thr;
+end
