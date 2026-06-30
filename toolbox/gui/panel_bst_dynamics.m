@@ -307,10 +307,8 @@ end
 function SetTarget(hFig, T) %#ok<DEFNU>
     file = '';
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
-    setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, 'curGroup',0, ...
-        'nodeList',{ {} }, 'nodeInfo',[], 'occMap',[], 'Lambda',[], 'showPhase',[1 1 1 1], ...
-        'hSpec',[], 'focusTime',[], 'detSel',[], ...
-        'nav', bst_dynamics('NewGroup', 'cursor')));
+    setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, ...
+        'curAtom',0, 'atomSeed',[], 'showPhase',[1 1 1 1], 'curOp','none'));
     BuildTree();
 end
 
@@ -371,7 +369,7 @@ function AtomDeleteGroup()
     if ~java_dialog('confirm', sprintf('Delete band "%s" and its atoms?', st.T.Groups(g).label), 'Delete group'), return; end
     lbl = st.T.Groups(g).label;
     kill = strcmpi({st.T.Groups.parent}, lbl);  kill(g) = true;   % the band + its children
-    st.T.Groups(kill) = [];  st.T.nGroups = numel(st.T.Groups);  st.curGroup = 0;
+    st.T.Groups(kill) = [];  st.T.nGroups = numel(st.T.Groups);  st.curAtom = 0;
     i_apply(st);
 end
 function AtomSetColor()
@@ -387,7 +385,7 @@ function AtomSort(mode)
     if strcmpi(mode, 'time'), key = cellfun(@i_firsttime, {st.T.Groups.times});
     else,                     key = lower({st.T.Groups.label}); end
     [~, ord] = sort(key);
-    st.T.Groups = st.T.Groups(ord);  st.curGroup = 0;
+    st.T.Groups = st.T.Groups(ord);  st.curAtom = 0;
     i_apply(st);
 end
 
@@ -396,8 +394,8 @@ end
 function [st, g] = i_selected()
     g = 0;  st = getappdata(0, 'DynamicsTarget');
     if isempty(st), return; end
-    g = st.curGroup;
-    if g < 1, java_dialog('warning', 'Select a band atom in the tree first.', 'Atoms'); end
+    g = i_field(st, 'curAtom', 0);
+    if g < 1, java_dialog('warning', 'Select an atom in the list first.', 'Atoms'); end
 end
 function i_apply(st)
     setappdata(0, 'DynamicsTarget', st);
