@@ -203,9 +203,6 @@ function ax = Axes(T, variant, nModes, tWin) %#ok<DEFNU>
     if (nargin < 3) || isempty(nModes),  nModes  = 200; end
     if (nargin < 4), tWin = []; end
     if isempty(T.SurfaceFile), error('bst_dynamics(''Axes''): no SurfaceFile bound.'); end
-    % --- cortex axis (eigenbasis of the bound surface) ---
-    EigenMat = tess_eigen(T.SurfaceFile, variant, 'nModes', nModes);   % cache + reuse the eigen_ file (no NoSave)
-    Op       = in_bst_operator(EigenMat.OperatorFile);
     % --- time axis (Time/Fs of the bound recording; raw -> reconstructed + windowed) ---
     timeFile = T.DataFile;
     if isempty(timeFile) && ~isempty(T.Groups)
@@ -213,16 +210,10 @@ function ax = Axes(T, variant, nModes, tWin) %#ok<DEFNU>
         elseif isfield(T.Groups,'DataFile') && ~isempty(T.Groups(1).DataFile),   timeFile = T.Groups(1).DataFile; end
     end
     if isempty(timeFile), error('bst_dynamics(''Axes''): no DataFile/ResultsFile bound for the time axis.'); end
-    [Time, Fs] = i_load_time(timeFile, tWin);
-    nT = numel(Time); NFFT = nT;
-    omega = (0:NFFT-1) * (Fs / NFFT);                 % temporal frequency grid (Hz)
-    tlag  = (0:nT-1) / Fs;                             % time-lag axis (s) for eigen-time (ts) kernels
-    % --- assemble (assign cell fields after struct() to avoid struct-array widening) ---
-    ax = struct('Variant',EigenMat.Variant, 'Time',Time, 'Fs',Fs, 'nT',nT, 'NFFT',NFFT, ...
-                'omega',omega, 'tlag',tlag, 'SurfaceFile',T.SurfaceFile, 'TimeFile',timeFile);
-    ax.EigenMat = EigenMat;  ax.Operator = Op;
-    ax.Phi = EigenMat.Phi;   ax.Lambda = EigenMat.Lambda;  ax.Mass = Op.Mass;
-    ax.GlobalVertices = EigenMat.GlobalVertices;
+    [Time, ~] = i_load_time(timeFile, tWin);
+    % --- delegate the canonical eigenbasis x time x freq assembly to bst_eigen('Axes') ---
+    ax = bst_eigen('Axes', struct('SurfaceFile',T.SurfaceFile, 'Variant',variant, 'nModes',nModes, 'Time',Time));
+    ax.TimeFile = timeFile;
 end
 
 function [Time, Fs] = i_load_time(file, tWin)

@@ -71,6 +71,12 @@ function [OutputFiles, Messages, isError] = bst_eigen(Data, OPTIONS)
 %
 % Authors: Diellor Basha, 2026
 
+% ===== VERB DISPATCH (string first arg) =====
+if ischar(Data) && strcmpi(Data, 'Axes')          % ax = bst_eigen('Axes', OPTIONS)
+    OutputFiles = BuildAxes(OPTIONS);  Messages = '';  isError = 0;
+    return;
+end
+
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment       = '';
 Def_OPTIONS.Method        = 'spectrum';  % {'spectrum','filter','wavelet'} wired; 'project' stub
@@ -664,4 +670,42 @@ function V = ComplexToTangent(Wc, E1, E2)
         end
         V(:, :, m) = reshape(Vk, 3 * nVg, nT);
     end
+end
+
+
+%% ===== AXES: canonical eigenbasis x time x temporal-frequency =====
+function [Time, tlag, omega, nT, NFFT, Fs] = BuildTimeAxis(OPTIONS)
+    % Time = actual time vector (s); tlag = lags from 0 (for ts kernels); omega = temporal-freq grid (Hz).
+    if isfield(OPTIONS,'Time') && ~isempty(OPTIONS.Time)
+        Time = OPTIONS.Time(:)';  Fs = 1 / (Time(2) - Time(1));
+    else
+        Fs = OPTIONS.SampleRate;  tw = OPTIONS.TimeWindow;
+        Time = tw(1) : 1/Fs : tw(2);
+    end
+    nT = numel(Time);  NFFT = nT;
+    omega = (0:NFFT-1) * (Fs / NFFT);            % temporal-frequency grid (Hz)
+    tlag  = (0:nT-1) / Fs;                        % time-lag axis (s)
+end
+
+function ax = BuildAxes(OPTIONS)
+    % ax = bst_eigen('Axes', OPTIONS): assemble the JOINT (cortex, time, temporal-frequency) axes a JTV
+    % atom is realised on. The cortex axis is an eigenbasis of OPTIONS.SurfaceFile (find-or-create via
+    % tess_eigen); the time axis is OPTIONS.Time, or OPTIONS.TimeWindow + OPTIONS.SampleRate; omega is the
+    % temporal FFT grid. Single source-of-truth shared by view_atom_designer and bst_dynamics('Axes').
+    if ~isfield(OPTIONS,'SurfaceFile') || isempty(OPTIONS.SurfaceFile)
+        error('bst_eigen(''Axes''): OPTIONS.SurfaceFile is required.');
+    end
+    Variant = 'Laplace-Beltrami'; if isfield(OPTIONS,'Variant') && ~isempty(OPTIONS.Variant), Variant = OPTIONS.Variant; end
+    nModes  = 200;                if isfield(OPTIONS,'nModes')  && ~isempty(OPTIONS.nModes),  nModes  = OPTIONS.nModes;  end
+    % --- spatial axis: eigenbasis (find-or-create) ---
+    EigenMat = tess_eigen(OPTIONS.SurfaceFile, Variant, 'nModes', nModes);
+    Op       = in_bst_operator(EigenMat.OperatorFile);
+    % --- temporal + spectral axis ---
+    [Time, tlag, omega, nT, NFFT, Fs] = BuildTimeAxis(OPTIONS);
+    % --- assemble (cell fields after struct() to avoid struct-array widening) ---
+    ax = struct('Variant',EigenMat.Variant, 'Time',Time, 'Fs',Fs, 'nT',nT, 'NFFT',NFFT, ...
+                'omega',omega, 'tlag',tlag, 'SurfaceFile',OPTIONS.SurfaceFile);
+    ax.EigenMat = EigenMat;  ax.Operator = Op;
+    ax.Phi = EigenMat.Phi;   ax.Lambda = EigenMat.Lambda;  ax.Mass = Op.Mass;
+    ax.GlobalVertices = EigenMat.GlobalVertices;
 end
