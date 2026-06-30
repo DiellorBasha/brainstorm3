@@ -77,8 +77,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
     jMenuAtoms.addSeparator();
     gui_component('MenuItem', jMenuAtoms, [], 'Record at cursor', IconLoader.ICON_EVT_TYPE_ADD, [], @(h,e)bst_call(@OnRecord));
-    gui_component('MenuItem', jMenuAtoms, [], 'Capture region -> active atom', IconLoader.ICON_SCOUT_NEW, [], @(h,e)bst_call(@OnCaptureRegion));
-    gui_component('MenuItem', jMenuAtoms, [], 'Load into navigator', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@OnLoadAtom));
     % EAST close button: a glue pushes it to the right, then an 'x' that ends the whole session
     % (hide the panel + close the linked source figure), like the main GUI's close-all button.
     jMenuBar.add(javax.swing.Box.createHorizontalGlue());
@@ -128,26 +126,35 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     % atoms list = CENTER (primary, dominant)
     jPanelMain.add(jSplit, BorderLayout.CENTER);
 
-    % navigator strip (SOUTH): Frequency / Source / Scale (Time removed -- the global Brainstorm
-    % cursor already drives it). Collapsible re-design deferred; a compact titled strip for now.
-    jNav = JPanel();  jNav.setLayout(BoxLayout(jNav, BoxLayout.Y_AXIS));
-    jNav.setBorder(java_scaled('titledborder', 'Navigator'));
-    bnames = i_bands();  bandItems = [{'none'}; bnames(:,1); {'custom'}];
-    jFreqBand = gui_component('combobox', [], [], [], {bandItems}, [], [], []);
-    jFreqBand.setSelectedItem('none');                          % panel opens broadband (no filter)
-    java_setcb(jFreqBand, 'ActionPerformedCallback', @(h,e)bst_call(@OnFreqPreset));
-    [jFreqC, jFreqW] = i_axis_block(jNav, 'freq', 'Frequency', 'center', char(177), jFreqBand);
-    jRegionTool = gui_component('toggle', [], '', 'Region', {Insets(0,0,0,0), Dimension(java_scaled('value',54),BH)}, 'Heat-disk tool: ON = click a vertex to seed (center) + scroll to grow the radius (window); OFF = clear the Source selection', @(h,e)bst_call(@OnRegionTool));
-    [jSrcC, jSrcW] = i_axis_block(jNav, 'source', 'Source', 'center', 'radius', jRegionTool);
-    [jScaleC, jScaleW] = i_axis_block(jNav, 'scale', 'Scale', 'center', char(177), []);
-    jPanelMain.add(jNav, BorderLayout.SOUTH);
+    % ATOM section (SOUTH): the atom tool -- pick a filter, set its contextual params, localize on the
+    % cortex, threshold + store. A dynamics atom = a thresholded localized eigfilter filter (Scout+Event).
+    % Replaces the old (non-functional) Frequency/Source/Scale navigator.
+    [atomKeys, atomDisp] = panel_eigenfilter_design('AtomKernels');
+    jAtom = JPanel();  jAtom.setLayout(BoxLayout(jAtom, BoxLayout.Y_AXIS));
+    jAtom.setBorder(java_scaled('titledborder', 'Atom'));
+    jRowK = gui_river([0 0], [0 2 0 2]);
+    gui_component('label', jRowK, [], 'Filter: ');
+    jKernel = gui_component('combobox', jRowK, 'hfill', [], {atomDisp}, [], [], []);
+    java_setcb(jKernel, 'ActionPerformedCallback', @(h,e)bst_call(@OnKernelChange));
+    jAtom.add(jRowK);
+    jAtomParams = gui_river([0 0], [0 2 0 2]);                  % contextual per-kernel sliders live here
+    jAtom.add(jAtomParams);
+    jRowA = gui_river([0 0], [0 2 0 2]);
+    jLocalize = gui_component('toggle', jRowA, [], 'Localize', {Insets(0,0,0,0), Dimension(java_scaled('value',64),BH)}, 'Localize: ON = click a cortex vertex to seed the atom; OFF = clear the seed', @(h,e)bst_call(@OnLocalize));
+    gui_component('label', jRowA, [], '  Thr ');
+    jThresh = gui_component('text', jRowA, [], '0.5', {Dimension(java_scaled('value',40),BH)}, 'Level-set threshold (fraction of peak) for the stored Scout + Event', []);
+    jStore = gui_component('button', jRowA, [], 'Store', {Dimension(java_scaled('value',56),BH)}, 'Store: threshold the atom into a Scout + Event group (carrying its kernel generator)', @(h,e)bst_call(@OnStore)); %#ok<NASGU>
+    jAtom.add(jRowA);
+    jPanelMain.add(jAtom, BorderLayout.SOUTH);
+    % initial sliders for the default kernel (diffusion) with placeholder bounds; SetTarget rebuilds
+    % them with the real spectrum once a surface is linked.
+    panel_eigenfilter_design('BuildAtomSliders', jAtomParams, atomKeys{1}, i_atom_default_bounds(), []);
 
     jPanelNew.add(jPanelMain, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jTree',jTree, 'jListOccur',jListOccur, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
-        'jFreqC',jFreqC, 'jFreqW',jFreqW, 'jFreqBand',jFreqBand, ...
-        'jSrcC',jSrcC, 'jSrcW',jSrcW, 'jRegionTool',jRegionTool, 'jScaleC',jScaleC, 'jScaleW',jScaleW, ...
-        'jShow',jShow, 'jPhaseItems',jPhaseItems));
+        'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jThresh',jThresh, ...
+        'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems));
 end
 
 
@@ -567,8 +574,9 @@ end
 % Called by figure_timeseries (axis='time') / figure_spectrum (axis='freq') on mouse-up
 % when the user edited a native selection box. range=[lo hi] in seconds (time) or Hz (freq).
 % No-op unless a Dynamics session owns the notifying figure and we are not mid-drive.
-function NotifySelection(hFig, axis, range) %#ok<DEFNU>
-    if i_driving(), return; end
+function NotifySelection(hFig, axis, range) %#ok<DEFNU,INUSD>
+    return;   % freq/time selection-sync retired with the Navigator strip (atom tool phase)
+    if i_driving(), return; end %#ok<UNRCH>
     st = getappdata(0, 'DynamicsTarget');
     if isempty(st), return; end
     if isempty(range) || (numel(range) < 2) || any(~isfinite(range)), return; end
@@ -772,16 +780,15 @@ end
 
 %% ===== SYNC the Source block fields from the geodesic tool state =====
 function SyncSource() %#ok<DEFNU>
+    % The geodesic tool (repurposed as the atom Localize seed-picker) calls this on every Draw.
+    % The atom tool needs only the SEED vertex (its kernel + threshold define the spatial extent).
     [ctrl, st] = i_cs();
-    if isempty(ctrl) || isempty(st) || ~isfield(ctrl,'jSrcC'), return; end
+    if isempty(ctrl) || isempty(st) || ~isfield(ctrl,'jLocalize'), return; end
     gs = bst_geodesic_tool('GetState');
-    if isempty(gs), return; end
-    ctrl.jSrcC.setText(num2str(double(gs.seed)));
-    ctrl.jSrcW.setText(num2str(round(gs.radius*1000)));      % radius in mm
-    loc = bst_dynamics('NewLoc', 'source');
-    loc.center = double(gs.seed);  loc.extent = gs.radius;  loc.pos = gs.pos;  loc.state = 'window';
-    st.nav = bst_dynamics('Set', st.nav, 'source', 1, loc);
+    if isempty(gs) || ~isfield(gs,'seed') || isempty(gs.seed), return; end
+    st.atomSeed = double(gs.seed);
     setappdata(0, 'DynamicsTarget', st);
+    i_atom_preview();
 end
 
 
@@ -1398,6 +1405,108 @@ function [W, isSigned] = i_atom_normalize(W, Mass) %#ok<DEFNU>
         pk = max(abs(W(:)));  if pk > 0, W = W / pk; end
         isSigned = true;                             % relative amplitude (density n/a)
     end
+end
+
+%% ===== atom tool: filter selector + contextual params + localize + store =====
+function b = i_atom_default_bounds()
+    b = struct('scaleMinMM',5, 'scaleMaxMM',120, 'rateMinMM2',25, 'rateMaxMM2',14400);
+end
+
+function k = i_atom_current_kernel(ctrl)
+    keys = ctrl.atomKeys;
+    idx  = max(1, min(numel(keys), double(ctrl.jKernel.getSelectedIndex()) + 1));
+    k = keys{idx};
+end
+
+% (Re)build the contextual sliders for the selected filter; preview if a seed is already placed.
+function OnKernelChange() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl), return; end
+    k = i_atom_current_kernel(ctrl);
+    b = i_field(st, 'atomBounds', i_atom_default_bounds());
+    panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, k, b, @()bst_call(@OnParamSettle));
+    if ~isempty(st) && ~isempty(i_field(st,'atomSeed',[])), i_atom_preview(); end
+end
+
+% A slider drag settled -> re-realise the preview.
+function OnParamSettle() %#ok<DEFNU>
+    i_atom_preview();
+end
+
+% Arm click-to-seed on the cortex (the repurposed geodesic tool); OFF clears the seed + preview.
+function OnLocalize() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl), return; end
+    state = ctrl.jLocalize.isSelected();
+    bst_geodesic_tool('Toggle', state);
+    if ~state && ~isempty(st)
+        st.atomSeed = [];  setappdata(0, 'DynamicsTarget', st);
+        if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('ClearAtomField', st.hFig); end
+    end
+end
+
+% Build (once) the eigen-axes + physical-scale bounds for the linked surface; cache on st.
+function st = i_atom_ensure_axes(st)
+    if ~isempty(i_field(st,'atomAx',[])), return; end
+    if isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    TI = getappdata(st.hFig, 'Surface');  if isempty(TI), return; end
+    D  = getappdata(st.hFig, 'DynamicsOverlay');
+    iTess = 1;  if ~isempty(D) && isfield(D,'iTess') && ~isempty(D.iTess), iTess = D.iTess; end
+    SurfaceFile = TI(iTess).SurfaceFile;
+    nFrames = 100;
+    ax = bst_eigen('Axes', struct('SurfaceFile',SurfaceFile, 'Variant','Laplace-Beltrami', ...
+                   'nModes',60, 'TimeWindow',[0 (nFrames-1)/100], 'SampleRate',100));
+    lamAll = ax.Lambda{1}(:);  if numel(ax.Lambda)>1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
+    lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
+    mm = @(l) 2*pi ./ sqrt(l) * 1000;
+    sMin = mm(lmax);  sMax = mm(lminPos);
+    st.atomAx     = ax;
+    st.atomBounds = struct('scaleMinMM',sMin, 'scaleMaxMM',sMax, 'rateMinMM2',sMin^2, 'rateMaxMM2',sMax^2);
+    setappdata(0, 'DynamicsTarget', st);
+end
+
+% Realise the atom field for (kernel, slider values, seed) and normalize it for display.
+function [W, gv, isSigned] = i_atom_realise(st, kernel, vals, seed)
+    ax   = st.atomAx;
+    lmax = max(ax.Lambda{1}(:));
+    kp   = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
+    [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed);
+    blk = 1;
+    for bI = 1:numel(ax.GlobalVertices)
+        if any(ax.GlobalVertices{bI} == seed), blk = bI; break; end
+    end
+    [W, isSigned] = i_atom_normalize(W, ax.Mass{blk});
+end
+
+% Read the controls + seed, realise, and paint the live preview through the overlay.
+function i_atom_preview() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    seed = i_field(st, 'atomSeed', []);  if isempty(seed), return; end
+    st = i_atom_ensure_axes(st);  if isempty(i_field(st,'atomAx',[])), return; end
+    k    = i_atom_current_kernel(ctrl);
+    vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
+    [W, gv, isSigned] = i_atom_realise(st, k, vals, seed);
+    if ~isempty(st.hFig) && ishandle(st.hFig)
+        view_dynamics('SetAtomField', st.hFig, W, gv, isSigned);
+    end
+end
+
+% Threshold the current atom into a stored Scout + Event group (carrying its kernel generator).
+function OnStore() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    seed = i_field(st, 'atomSeed', []);
+    if isempty(seed)
+        java_dialog('warning', 'Localize the atom first: toggle Localize and click a cortex vertex.', 'Atom tool');  return;
+    end
+    st = i_atom_ensure_axes(st);  if isempty(i_field(st,'atomAx',[])), return; end
+    k    = i_atom_current_kernel(ctrl);
+    vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
+    lmax = max(st.atomAx.Lambda{1}(:));
+    kp   = bst_eigfilter_controls('ToKernel', k, vals, lmax);
+    thr  = str2double(char(ctrl.jThresh.getText()));
+    if isnan(thr) || (thr <= 0) || (thr >= 1), thr = 0.5; end
+    G    = bst_dynamics('AtomFromKernel', st.atomAx, k, kp, seed, thr);
+    st.T = bst_dynamics('AddGroup', st.T, G);
+    i_apply(st);
+    if ~isempty(st.file), try, bst_dynamics('Save', st.file, st.T); catch, end; end %#ok<CTCH>
 end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
