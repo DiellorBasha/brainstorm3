@@ -1381,6 +1381,24 @@ end
 function t0 = i_firsttime(times)
     if isempty(times), t0 = inf; else, t0 = times(1,1); end
 end
+
+%% ===== atom preview: normalize a realised field W[nGv x nT] for display =====
+% Mirrors the atom designer's normalization. W rows are aligned with the eigenbasis support; Mass
+% is the block lumped-mass [nGv x nGv]. One-signed mass-conserving kernels (heat/diffusion) -> per-
+% frame unit-mass DENSITY (isSigned=false -> sequential colormap). Zero-mean/oscillatory kernels
+% (mexhat/waves) -> the mass integral collapses, fall back to global PEAK (isSigned=true -> diverging).
+function [W, isSigned] = i_atom_normalize(W, Mass) %#ok<DEFNU>
+    mvec = full(sum(Mass, 2));                       % [nGv x 1] lumped vertex areas
+    s    = mvec.' * W;                               % [1 x nT] signed mass per frame
+    l1   = mvec.' * abs(W);                          % [1 x nT] absolute mass per frame
+    r    = abs(s) ./ max(l1, eps);                   % one-signedness in [0,1]
+    if ~isempty(r) && (min(r) > 0.1)
+        W = W ./ s;  isSigned = false;               % unit-mass density (broadcast over columns)
+    else
+        pk = max(abs(W(:)));  if pk > 0, W = W / pk; end
+        isSigned = true;                             % relative amplitude (density n/a)
+    end
+end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
 end
