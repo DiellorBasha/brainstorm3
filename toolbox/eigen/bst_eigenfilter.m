@@ -62,6 +62,42 @@ function g = Design(KernelName, KernelParams) %#ok<DEFNU>
 end
 
 
+%% ===== ATOM: realise ONE localised atom (static / ts / js), domain-aware =====
+function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert) %#ok<DEFNU>
+    % Drop a unit delta at seedVert and propagate it through the kernel over the eigenbasis.
+    % Domain-aware (kernel registry 'domain' tag): static g(lambda) (constant in time) | ts g(lambda,t)
+    % | js g(lambda,omega) (realised by inverse JOINT time-vertex transform). ax = bst_eigen('Axes', ...).
+    if (nargin < 4) || isempty(seedVert), error('bst_eigenfilter(''Atom''): seedVert required.'); end
+    blk = 0;
+    for h = 1:numel(ax.GlobalVertices)
+        if ~isempty(ax.GlobalVertices{h}) && any(ax.GlobalVertices{h} == seedVert), blk = h; break; end
+    end
+    if blk == 0, error('bst_eigenfilter(''Atom''): seed vertex %d not in the eigenbasis support.', seedVert); end
+    Phi = ax.Phi{blk};  Lam = ax.Lambda{blk};  M = ax.Mass{blk};  gv = ax.GlobalVertices{blk};
+    loc = find(gv == seedVert, 1);
+    c0  = manifold_ft(Phi, M, full(sparse(loc,1,1,size(Phi,1),1)));    % seed in the eigenbasis [K x 1]
+    kp  = KernelParams;  if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(Lam); end
+    g    = bst_eigfilter_kernel(KernelName, kp);
+    meta = bst_eigfilter_kernel('info', KernelName);
+    dom  = 'static';  if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+    switch lower(dom)
+        case 'static'
+            W = repmat(manifold_ift(Phi, g(Lam) .* c0), 1, ax.nT);
+        case 'ts'
+            W = manifold_ift(Phi, g(Lam, ax.tlag) .* c0);
+        case 'js'
+            % js kernel = temporal frequency response g(lambda,omega). The seed (spatial delta, temporal
+            % impulse) has a flat temporal spectrum, so the atom is the inverse temporal FFT of g(lambda,omega)
+            % scaled by the spatial seed coeffs -> the exact temporal-Fourier dual of the ts path.
+            G  = bst_eigfilter_jtv_evaluate(g, 'js', Lam, ax.omega, ax.NFFT);   % [K x NFFT] = g(lambda,omega)
+            Gt = real(ifft(G, ax.NFFT, 2));                                     % -> temporal impulse response
+            W  = manifold_ift(Phi, Gt(:, 1:ax.nT) .* c0);
+        otherwise
+            error('bst_eigenfilter(''Atom''): unknown kernel domain ''%s''.', dom);
+    end
+end
+
+
 %% ===== EVALUATE: handle -> gains on Lambda =====
 function h = Evaluate(g, Lambda) %#ok<DEFNU>
     if isnumeric(g)
