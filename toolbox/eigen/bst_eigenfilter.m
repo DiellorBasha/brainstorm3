@@ -63,19 +63,38 @@ end
 
 
 %% ===== ATOM: realise ONE localised atom (static / ts / js), domain-aware =====
-function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert) %#ok<DEFNU>
+function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DEFNU>
     % Drop a unit delta at seedVert and propagate it through the kernel over the eigenbasis.
     % Domain-aware (kernel registry 'domain' tag): static g(lambda) (constant in time) | ts g(lambda,t)
     % | js g(lambda,omega) (realised by inverse JOINT time-vertex transform). ax = bst_eigen('Axes', ...).
+    % seedDir (optional): scalar amplitude | tangent complex amplitude | Dirac 3-vector dipole direction.
     if (nargin < 4) || isempty(seedVert), error('bst_eigenfilter(''Atom''): seedVert required.'); end
+    if (nargin < 5); seedDir = []; end
     blk = 0;
     for h = 1:numel(ax.GlobalVertices)
         if ~isempty(ax.GlobalVertices{h}) && any(ax.GlobalVertices{h} == seedVert), blk = h; break; end
     end
     if blk == 0, error('bst_eigenfilter(''Atom''): seed vertex %d not in the eigenbasis support.', seedVert); end
     Phi = ax.Phi{blk};  Lam = ax.Lambda{blk};  M = ax.Mass{blk};  gv = ax.GlobalVertices{blk};
-    loc = find(gv == seedVert, 1);
-    c0  = manifold_ft(Phi, M, full(sparse(loc,1,1,size(Phi,1),1)));    % seed in the eigenbasis [K x 1]
+    [C, kind] = i_fiber(ax); %#ok<ASGLU>
+    nSrc = 0; for hh=1:numel(ax.GlobalVertices), nSrc = max(nSrc, max(ax.GlobalVertices{hh}(:))); end
+    switch kind
+        case 'scalar'
+            if isempty(seedDir), seedDir = 1; end
+            F = zeros(nSrc, 1);       F(seedVert) = seedDir(1);
+        case 'tangent'
+            if isempty(seedDir), seedDir = 1; end
+            F = complex(zeros(nSrc,1)); F(seedVert) = seedDir(1);           % complex tangent in the frame
+        case 'quaternion'
+            if isempty(seedDir), seedDir = [1;0;0]; end
+            seedDir = seedDir(:);
+            F = zeros(3*nSrc, 1);     F((seedVert-1)*3 + (1:3)) = seedDir(1:3);   % 3-vector dipole
+    end
+    [srcRows, dstRows, nrows, mapMsg] = RowMap(F, ax, blk);
+    if ~isempty(mapMsg), error('bst_eigenfilter:Atom', '%s', mapMsg); end
+    U = zeros(nrows, 1);  if ~isreal(F), U = complex(U); end
+    U(dstRows) = F(srcRows);
+    c0 = manifold_ft(Phi, M, U);                                          % seed in the eigenbasis [K x 1]
     kp  = KernelParams;  if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(Lam); end
     g    = bst_eigfilter_kernel(KernelName, kp);
     meta = bst_eigfilter_kernel('info', KernelName);

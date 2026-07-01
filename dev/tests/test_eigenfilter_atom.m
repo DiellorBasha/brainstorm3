@@ -4,6 +4,7 @@ nV = 60; K = 20; nT = 64; Fs = 100;
 Phi = Q;  Lam = (linspace(0.0, 5, K)').^2;  M = speye(nV);
 ax = struct('nT',nT,'NFFT',nT,'Fs',Fs);
 ax.Phi = {Phi}; ax.Lambda = {Lam}; ax.Mass = {M}; ax.GlobalVertices = {(1:nV)'};
+ax.Variant = 'Laplace-Beltrami';   % scalar fiber (RowMap/i_fiber dispatch, added for the Atom seedDir refactor)
 ax.tlag = (0:nT-1)/Fs;  ax.omega = (0:nT-1)*(Fs/nT);
 seed = 13;  loc = seed;  c0 = manifold_ft(Phi, M, full(sparse(loc,1,1,nV,1)));
 
