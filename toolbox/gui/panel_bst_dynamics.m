@@ -526,6 +526,23 @@ function k = i_atom_current_kernel(ctrl)
     k = keys{idx};
 end
 
+% Resolve the (kernel, kp) to realise for the SELECTED atom. Hand-pickable kernels come from the
+% combobox + sliders (the live editor); a kernel NOT in the combobox (e.g. an itersine tight-frame
+% member) uses the atom's STORED generator directly -- so the atom, not the combobox, is the source
+% of truth for what gets previewed/applied.
+function [kernel, kp] = i_selected_generator(st, ctrl, lmax)
+    kernel = i_atom_current_kernel(ctrl);  kp = struct();
+    ia = i_field(st, 'curAtom', 0);
+    G = [];  if (ia >= 1) && (ia <= numel(st.T.Groups)), G = st.T.Groups(ia); end
+    if ~isempty(G) && ~any(strcmp(ctrl.atomKeys, G.KernelName))     % non-combobox (itersine) -> stored generator
+        kernel = G.KernelName;  kp = G.KernelParams;  if ~isstruct(kp), kp = struct(); end
+    else                                                            % hand-pickable -> combobox + sliders (live)
+        vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
+        kp   = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
+    end
+    if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = lmax; end
+end
+
 % (Re)build the contextual sliders for the selected filter; preview if a seed is already placed.
 function OnKernelChange() %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(ctrl), return; end
@@ -574,12 +591,12 @@ function st = i_atom_ensure_axes(st)
 end
 
 % Realise the atom field on its operator's eigenbasis; reduce vector/complex bases to magnitude.
-function [W, gv, isSigned] = i_atom_realise(st, kernel, vals, seed, variant)
+function [W, gv, isSigned] = i_atom_realise(st, kernel, kp, seed, variant)
     if (nargin < 5) || isempty(variant), variant = 'Laplace-Beltrami'; end
     W = [];  gv = [];  isSigned = false;
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
-    lmax = max(ax.Lambda{1}(:));
-    kp   = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
+    if ~isstruct(kp), kp = struct(); end
+    if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(ax.Lambda{1}(:)); end
     try
         [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed);
     catch %#ok<CTCH>
@@ -618,9 +635,9 @@ function i_atom_preview_impulse()
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     seed = i_field(st, 'atomSeed', []);  if isempty(seed), return; end
     variant = i_atom_op(st);
-    k    = i_atom_current_kernel(ctrl);
-    vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
-    [W, gv, isSigned] = i_atom_realise(st, k, vals, seed, variant);
+    axk = i_atom_axes(st, variant);  lmax = 1;  if ~isempty(axk), lmax = max(axk.Lambda{1}(:)); end
+    [k, kp] = i_selected_generator(st, ctrl, lmax);
+    [W, gv, isSigned] = i_atom_realise(st, k, kp, seed, variant);
     if isempty(W)                                                   % operator not realisable -> guard
         ctrl.jAtomInfo.setText(sprintf('%s: not realisable for this atom', variant));
         if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('ClearAtomField', st.hFig); end
@@ -727,9 +744,7 @@ function i_atom_apply() %#ok<DEFNU>
     variant = i_atom_op(st);
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     lmax   = max(ax.Lambda{1}(:));
-    kernel = i_atom_current_kernel(ctrl);
-    vals   = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
-    kp     = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
+    [kernel, kp] = i_selected_generator(st, ctrl, lmax);
     nV     = i_overlay_nv(ax);
     % --- reduce the reconstructed field to the operator's expected row layout ---
     % The joint time-vertex filter (dynamic atoms) is scalar-only for now; vector/Dirac/Tangent
@@ -939,6 +954,11 @@ function fr = i_frame_response(st, ax)
         G = st.T.Groups(i);
         op = 'Laplace-Beltrami'; if isfield(G,'Operator') && ~isempty(G.Operator), op = G.Operator; end
         if ~strcmp(op, variant), continue; end
+        % frame coverage is a SPATIAL concept: a dynamic (ts/js) kernel is g(lambda,t|omega),
+        % not a single g(lambda), so it contributes no spatial band -- skip it.
+        meta = struct(); try, meta = bst_eigfilter_kernel('info', G.KernelName); catch, end %#ok<CTCH>
+        dom = 'static'; if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+        if any(strcmpi(dom, {'ts','js'})), continue; end
         kp = G.KernelParams;  if ~isstruct(kp), kp = struct(); end
         if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = lmax; end
         try, g = bst_eigfilter_kernel(G.KernelName, kp); catch, continue; end
