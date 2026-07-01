@@ -358,6 +358,7 @@ switch lower(structureName)
             'Operator',     '', ...     % GENERATOR: eigenbasis operator (bst_eigen Variant: Laplace-Beltrami / LB-Connectome / Connection Laplacian / Dirac)
             'KernelName',   '', ...     % GENERATOR: eigfilter kernel name (atom = thresholded localized filter)
             'KernelParams', [], ...     % GENERATOR: kernel param struct (bst_eigfilter_controls('ToKernel'))
+            'SeedDir',      [], ...     % GENERATOR: impulse direction -- [] scalar | complex tangent | [nx ny nz] Dirac
             'Threshold',    [], ...     % GENERATOR: level-set threshold (fraction of peak) used for Scout/Event
             'SurfaceFile', '');         % provenance: cortex (space source)
 
