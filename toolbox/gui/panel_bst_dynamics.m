@@ -953,3 +953,31 @@ function OnFrameShow() %#ok<DEFNU>
         try, view_eigfilter_response('close'); catch, end %#ok<CTCH>
     end
 end
+
+% Design tight frame: replace the bank with N itersine members spanning the current operator's spectrum.
+function OnDesignFrame() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    op = i_atom_op(st);
+    ax = i_atom_axes(st, op);  if isempty(ax), return; end
+    lamAll = ax.Lambda{1}(:);
+    if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
+    lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));  if isempty(lminPos), lminPos = eps; end
+    N = 6;  if isfield(ctrl,'jFrameN') && ~isempty(ctrl.jFrameN), N = double(ctrl.jFrameN.getValue()); end
+    N = max(2, round(N));
+    if ~isempty(st.T.Groups)
+        if ~java_dialog('confirm', sprintf('Replace the current %d atom(s) with a %d-member itersine tight frame?', numel(st.T.Groups), N), 'Design tight frame')
+            return;
+        end
+        st.T.Groups(:) = [];  st.T.nGroups = 0;
+    end
+    seed = ax.GlobalVertices{1}(1);
+    for ii = 1:N
+        kp = struct('member',ii, 'Nf',N, 'lmin',lminPos, 'lmax',lmax, 'vals',[]);
+        G  = i_default_atom('itersine', kp, seed, ax.SurfaceFile, sprintf('itersine %d/%d', ii, N), op);
+        st.T = bst_dynamics('AddGroup', st.T, G);
+    end
+    setappdata(0, 'DynamicsTarget', st);
+    UpdateAtomList();
+    SetSelectedAtom(1);              % selects member 1, loads it, and triggers i_frame_refresh
+    bst_progress('text', sprintf('Designed %d-member itersine tight frame on %s', N, op));
+end

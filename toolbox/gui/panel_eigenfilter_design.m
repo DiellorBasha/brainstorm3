@@ -110,6 +110,7 @@ end
 function [keys, displays] = AtomKernels() %#ok<DEFNU>
 % All eigfilter kernels (flat), ordered (diffusion, then static, ts, js), with clean display names.
     keys = bst_eigfilter_kernel('list');
+    keys = keys(~strcmpi(keys, 'itersine'));   % itersine is generate-only (Design tight frame), not hand-picked
     rank = zeros(numel(keys), 1);  displays = cell(1, numel(keys));
     for i = 1:numel(keys)
         try, m = bst_eigfilter_kernel('info', keys{i}); catch, m = struct('display',keys{i},'domain','static'); end
