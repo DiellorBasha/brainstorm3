@@ -284,16 +284,18 @@ function tests = test_jtvatoms_localize
 tests = functiontests(localfunctions);
 end
 function test_one_atom_per_band_at_peak(tc)
-% Synthetic W [nV x nT x M]: band m peaks at vertex 10*m, time m.
+% Controller runs with BST_TEST_SURF = a real cortex (JTVAtoms reads vertex positions via
+% in_tess_bst; an empty SurfaceFile errors). Seed INDICES come from W. Skips if unset.
+surf = getenv('BST_TEST_SURF');  assumeTrue(tc, ~isempty(surf));
 nV = 60; nT = 4; M = 3;  W = zeros(nV,nT,M);
 for m=1:M, W(10*m, m, m) = 1; end
-ax = struct('SurfaceFile','', 'TimeFile','', 'Time', (1:nT), 'tlag',(1:nT));
+ax = struct('SurfaceFile', surf, 'TimeFile','', 'Time', (1:nT), 'tlag',(1:nT));
 T = bst_eigenwavelet('JTVAtoms', W, ax, 0.5);
 verifyEqual(tc, numel(T.Groups), M);
 for m=1:M, verifyEqual(tc, T.Groups(m).vertices, 10*m); end
 end
 ```
-(If `JTVAtoms` needs `ax.SurfaceFile` for vertices, the test passes `''` and only checks seed indices, which come from `W`, not the surface.)
+(Uses a real surface via BST_TEST_SURF; JTVAtoms reads vertex positions, seed indices come from W.)
 
 - [ ] **Step 2: Note RED state (static-only)** — `JTVAtoms` exists but the test pins its localization; do NOT run MATLAB.
 
