@@ -66,14 +66,16 @@ if isstruct(g) && isfield(g, 'Kernels')
         end
     end
     % --- optional coverage overlay: S(lambda) = sum_m g_m(lambda)^2 (frame tightness) ---
+    ylab = 'g(\lambda)';
     if isfield(g,'Coverage') && ~isempty(g.Coverage) && g.Coverage
         S = zeros(size(xg));
         for j = 1:nT; yj = g.Kernels{j}(xg); S = S + real(yj(:)).^2; end
         plot(ax, xg, S, '-', 'Color',[.1 .1 .8], 'LineWidth', 2.5);
-        plot(ax, [0 lmax], mean(S)*[1 1], ':', 'Color',[.1 .1 .8 ]);   % faint "flat" reference
+        plot(ax, [0 lmax], mean(S)*[1 1], ':', 'Color',[.55 .55 .85]);   % faint "flat" reference
+        ylab = 'g(\lambda) / S(\lambda)';
     end
     xlim(ax, [0 lmax]);
-    xlabel(ax, '\lambda (eigenvalue)'); ylabel(ax, 'g(\lambda) / S(\lambda)'); grid(ax, 'on');
+    xlabel(ax, '\lambda (eigenvalue)'); ylabel(ax, ylab); grid(ax, 'on');
     ttl = '';  if (nargin >= 3) && ~isempty(titleStr); ttl = titleStr; end
     if isfield(g,'Bounds') && ~isempty(g.Bounds) && isstruct(g.Bounds)
         chk = ''; if abs(g.Bounds.tightness - 1) < 0.05; chk = ' OK'; end
