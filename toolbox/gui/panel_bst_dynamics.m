@@ -327,6 +327,7 @@ function SetTarget(hFig, T) %#ok<DEFNU>
         'curAtom',0, 'atomSeed',[], 'showPhase',[1 1 1 1], 'curOp','none'));
     setappdata(0, 'DynamicsApplyCache', []);                          % new session -> stale projection
     BuildTree();
+    i_gate_operators(getappdata(0, 'DynamicsTarget'));
 end
 
 
@@ -860,6 +861,45 @@ function n = scal_nmembers(scal), n = size(scal.energy, 3); end
 function rf = i_src_resultfile(D)
     rf = '';  global GlobalData; %#ok<TLEV>
     try, rf = GlobalData.DataSet(D.srcDS).Results(D.srcResult).FileName; catch, end %#ok<CTCH>
+end
+
+% Which operators a source with nComponents supports (order = ctrl.opVariants):
+%   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
+% Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
+function m = i_gate_mask(nComponents) %#ok<DEFNU>
+    m = true(1,4);
+    if isequal(nComponents, 1), m = logical([1 1 0 0]); end
+end
+
+% Grey out the Set-operator radio items the linked source can't support (reads nComponents).
+function i_gate_operators(st)
+    ctrl = bst_get('PanelControls', 'Dynamics');
+    if isempty(ctrl) || ~isfield(ctrl,'jOpItems') || isempty(ctrl.jOpItems), return; end
+    nComp = [];
+    src = i_src_resultfile_from_target(st);
+    if ~isempty(src)
+        try, R = in_bst_results(src, 0, 'nComponents'); nComp = R.nComponents; catch, end %#ok<CTCH>
+    end
+    m = i_gate_mask(nComp);
+    for k = 1:min(numel(ctrl.jOpItems), numel(m))
+        try, ctrl.jOpItems(k).setEnabled(logical(m(k))); catch, end %#ok<CTCH>
+    end
+    % if the currently-selected op is now disabled, fall back to the first enabled one
+    for k = 1:numel(ctrl.jOpItems)
+        if ctrl.jOpItems(k).isSelected() && ~m(k)
+            f = find(m, 1);  if ~isempty(f), ctrl.jOpItems(f).setSelected(1); OnSetOperator(ctrl.opVariants{f}); end
+            break;
+        end
+    end
+end
+
+% Resolve the launched source's results filename from the target (link|... form ok), or '' if none.
+function src = i_src_resultfile_from_target(st)
+    src = '';
+    if isempty(st) || ~isfield(st,'hFig') || isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcDS') || ~isfield(D,'srcResult') || isempty(D.srcResult), return; end
+    src = i_src_resultfile(D);      % the C-era index->filename resolver
 end
 
 function TfFile = i_save_scalogram(srcFile, FileMat, tag)
