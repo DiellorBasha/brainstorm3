@@ -49,10 +49,12 @@ Mass{h}, Fr(gv,:))` — from B's `i_apply_projection` cache, or computed per win
 Returns a struct:
 - `energy` `[3 × nT × M]` — `Σ_v W(v,t,m)²` for rows {Global, LH, RH}. Per hemisphere, `W_h(:,:,m) =
   manifold_ift(Phi{h}, g_m(Lam_h).*C{h})`; global = LH+RH sum.
-- `residual` `[1 × nT]` (and a scalar summary) — relative reconstruction error `‖F − Frec/A‖ / ‖F‖`
-  per time sample, where `Frec_h = manifold_ift(Phi{h}, (Σ_m g_m(Lam_h)²).*C{h})` and `A = min_λ Σ_m
-  g_m(λ)²` is the frame's lower bound (from B's `i_frame_response`). For a tight frame `Σ_m g_m²≈A` const
-  ⇒ `Frec≈A·F` ⇒ `residual≈0`; a loose frame leaves the under-covered spectrum in the residual.
+- `residual` `[1 × nT]` (and a scalar summary) — relative reconstruction error `‖F_modal − Frec‖ / ‖F_modal‖`
+  per time sample, using the **canonical dual** per mode: `Frec_h = manifold_ift(Phi{h}, dual .* C{h})`
+  with `dual(λ) = Σ_m g_m(λ)² / max(Σ_m g_m(λ)², tol)` (≈1 where the frame covers, ≈0 in a spectral gap).
+  So `Frec = F` on covered modes and the residual is exactly the source energy in the frame's **gaps**:
+  ≈0 for a gap-free (tight) itersine frame, >0 for a loose bank. (Normalizing by the scalar bound `A=min Σg²`
+  would over-amplify interior modes and is NOT used; the per-mode dual is correct.)
 - `centers` `[1 × M]` — each member's characteristic spatial scale (`√λ` gain-weighted centroid; also
   provide mm via `2π/√λ·1000`), for the TimefreqMat `Freqs` axis.
 - `W` (optional out) — the transient `[nV × nT × M]` coefficient field, for JTVAtoms.
