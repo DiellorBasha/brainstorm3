@@ -142,17 +142,33 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jRowI = gui_river([0 0], [0 2 0 2]);                        % selected-atom readout (kernel . seed . params)
     jAtomInfo = gui_component('label', jRowI, 'hfill', '');
     jAtom.add(jRowI);
-    jPanelMain.add(jAtom, BorderLayout.SOUTH);
     % initial sliders for the default kernel (diffusion) with placeholder bounds; SetTarget rebuilds
     % them with the real spectrum once a surface is linked.
     panel_eigenfilter_design('BuildAtomSliders', jAtomParams, atomKeys{1}, i_atom_default_bounds(), []);
+
+    % Frame section (SOUTH, below Atom): bounds readout + tight-frame generate + coverage toggle
+    jFrame = gui_river([0 0], [0 2 0 2], 'Frame');
+    jFrameA = gui_component('label', jFrame, [], 'A —');
+    jFrameB = gui_component('label', jFrame, 'tab', 'B —');
+    jFrameT = gui_component('label', jFrame, 'tab', 'B/A —');
+    jFrame.add('br', javax.swing.JLabel('N'));
+    jFrameN = gui_component('spinner', jFrame, 'tab', []);
+    jFrameN.setModel(javax.swing.SpinnerNumberModel(int32(6), int32(2), int32(24), int32(1)));
+    gui_component('button', jFrame, 'tab', 'Design tight frame', [], 'Replace the bank with an itersine tight frame of N members', @(h,e)bst_call(@OnDesignFrame));
+    jFrameShow = gui_component('checkbox', jFrame, 'br', 'Show coverage', [], 'Open/close the frame coverage response view', @(h,e)bst_call(@OnFrameShow));
+
+    % wrap the Atom + Frame sections into a vertical SOUTH container
+    jSouth = gui_component('Panel');  jSouth.setLayout(BoxLayout(jSouth, BoxLayout.Y_AXIS));
+    jSouth.add(jAtom);  jSouth.add(jFrame);
+    jPanelMain.add(jSouth, BorderLayout.SOUTH);
 
     jPanelNew.add(jPanelMain, BorderLayout.CENTER);
     bstPanelNew = BstPanel(panelName, jPanelNew, struct( ...
         'jListAtoms',jListAtoms, 'jMenuFile',jMenuFile, 'jMenuAtoms',jMenuAtoms, ...
         'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jAtomInfo',jAtomInfo, ...
         'jApply',jApply, 'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
-        'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems));
+        'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems, ...
+        'jFrameA',jFrameA, 'jFrameB',jFrameB, 'jFrameT',jFrameT, 'jFrameN',jFrameN, 'jFrameShow',jFrameShow));
 end
 
 
@@ -369,6 +385,7 @@ function AtomDeleteGroup()
     kill = strcmpi({st.T.Groups.parent}, lbl);  kill(g) = true;   % the band + its children
     st.T.Groups(kill) = [];  st.T.nGroups = numel(st.T.Groups);  st.curAtom = 0;
     i_apply(st);
+    i_frame_refresh();
 end
 function AtomSetColor()
     [st, g] = i_selected();  if g < 1, return; end
@@ -753,6 +770,7 @@ function OnCreateAtom() %#ok<DEFNU>
     G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1), op);
     st.T = bst_dynamics('AddGroup', st.T, G);  setappdata(0,'DynamicsTarget', st);
     UpdateAtomList();  SetSelectedAtom(numel(st.T.Groups));
+    i_frame_refresh();
 end
 
 % Rebuild the BstClusterList model from the atom table (one coloured row per atom).
@@ -789,6 +807,7 @@ function AtomsListValueChanged_Callback(h, ev) %#ok<DEFNU,INUSL>
     if (iSel < 1) || (iSel > numel(st.T.Groups)), return; end
     st.curAtom = iSel;  setappdata(0,'DynamicsTarget', st);
     i_select_atom_load(iSel);
+    i_frame_refresh();
 end
 
 % Load the selected atom's generator into the Atom section (combobox + sliders + seed) and preview.
@@ -809,6 +828,7 @@ function i_select_atom_load(iAtom)
     st.atomSeed = G.vertices;  setappdata(0, 'DynamicsTarget', st);
     ctrl.jAtomInfo.setText(i_atom_detail(G));
     i_atom_preview();
+    i_frame_refresh();
 end
 
 % Persist the edited params back to the selected atom (+ refresh the readout).
@@ -822,6 +842,7 @@ function i_atom_writeback()
     st.T.Groups(ia).KernelName = k;  st.T.Groups(ia).KernelParams = kp;
     setappdata(0, 'DynamicsTarget', st);
     ctrl.jAtomInfo.setText(i_atom_detail(st.T.Groups(ia)));
+    i_frame_refresh();
 end
 
 % Save the filterbank (atom table) to disk.
@@ -852,6 +873,7 @@ function OnSetOperator(variant) %#ok<DEFNU>
     st.T.Groups(ia).Operator = variant;  setappdata(0, 'DynamicsTarget', st);
     i_select_op_radio(variant);
     i_select_atom_load(ia);                                        % reload sliders/bounds on the new basis + preview
+    i_frame_refresh();
 end
 % Check the operator radio matching the variant.
 function i_select_op_radio(variant)
@@ -865,4 +887,69 @@ end
 function i_jump(t)   % drive the global time cursor (like Record's JumpToEvent); no-op if no time context
     if isempty(t), return; end
     try, panel_time('SetCurrentTime', t(1)); catch, end %#ok<CTCH>
+end
+
+%% ===== FRAME: coverage S(lambda) + bounds A/B/tightness over the CURRENT operator's atoms =====
+% Frame response over the CURRENT operator's atoms: coverage S(lambda) + bounds A/B/tightness.
+function fr = i_frame_response(st, ax)
+    fr = struct('lam',[], 'S',[], 'A',NaN, 'B',NaN, 'tightness',NaN, 'nMembers',0, 'gCell',{{}});
+    if isempty(ax) || ~isfield(ax,'Lambda') || isempty(ax.Lambda), return; end
+    variant = i_atom_op(st);
+    lamAll = ax.Lambda{1}(:);
+    if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
+    lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));  if isempty(lminPos), lminPos = 0; end
+    % gather g(lambda) for every atom on the current operator
+    gCell = {};
+    for i = 1:numel(st.T.Groups)
+        G = st.T.Groups(i);
+        op = 'Laplace-Beltrami'; if isfield(G,'Operator') && ~isempty(G.Operator), op = G.Operator; end
+        if ~strcmp(op, variant), continue; end
+        kp = G.KernelParams;  if ~isstruct(kp), kp = struct(); end
+        if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = lmax; end
+        try, g = bst_eigfilter_kernel(G.KernelName, kp); catch, continue; end
+        if iscell(g), gCell = [gCell, g(:)']; else, gCell{end+1} = g; end %#ok<AGROW>
+    end
+    fr.nMembers = numel(gCell);  fr.gCell = gCell;
+    if fr.nMembers == 0, return; end
+    lam = linspace(max(lminPos,eps), lmax, 400)';
+    S = zeros(size(lam));
+    for m = 1:numel(gCell), y = gCell{m}(lam); S = S + real(y(:)).^2; end
+    fr.lam = lam;  fr.S = S;  fr.A = min(S);  fr.B = max(S);
+    if fr.nMembers >= 2 && fr.A > 0, fr.tightness = fr.B / fr.A; end   % undefined for a single band
+end
+
+% Recompute the frame response and update the Frame labels (+ the coverage view if shown).
+function i_frame_refresh()
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    if ~isfield(ctrl,'jFrameA'), return; end
+    ax = [];  try, ax = i_atom_axes(st, i_atom_op(st)); catch, end
+    fr = i_frame_response(st, ax);
+    if fr.nMembers == 0
+        ctrl.jFrameA.setText('A —');  ctrl.jFrameB.setText('B —');  ctrl.jFrameT.setText('B/A —');
+    else
+        ctrl.jFrameA.setText(sprintf('A %.3g', fr.A));
+        ctrl.jFrameB.setText(sprintf('B %.3g', fr.B));
+        if isnan(fr.tightness), ctrl.jFrameT.setText('B/A —');
+        else
+            chk = ''; if abs(fr.tightness-1) < 0.05, chk = ' ✓'; end
+            ctrl.jFrameT.setText(sprintf('B/A %.3g%s', fr.tightness, chk));
+        end
+    end
+    if isfield(ctrl,'jFrameShow') && ~isempty(ctrl.jFrameShow) && ctrl.jFrameShow.isSelected() && ~isempty(ax)
+        bnd = struct('A',fr.A,'B',fr.B,'tightness',fr.tightness);
+        gstruct = struct('Kernels',{fr.gCell}, 'Active', max(1,i_field(st,'curAtom',1)), ...
+            'OnSelect', @(j)bst_call(@()SetSelectedAtom(j)), 'Coverage', true, 'Bounds', bnd);
+        lamMark = ax.Lambda{1}(:);
+        try, view_eigfilter_response(gstruct, lamMark, sprintf('Frame coverage (%s)', i_atom_op(st))); catch, end
+    end
+end
+
+% Show-coverage toggle: open/refresh or close the frame coverage response view.
+function OnFrameShow() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end %#ok<ASGLU>
+    if isfield(ctrl,'jFrameShow') && ~isempty(ctrl.jFrameShow) && ctrl.jFrameShow.isSelected()
+        i_frame_refresh();
+    else
+        try, view_eigfilter_response('close'); catch, end %#ok<CTCH>
+    end
 end
