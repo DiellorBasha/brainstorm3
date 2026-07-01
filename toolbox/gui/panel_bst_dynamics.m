@@ -867,11 +867,17 @@ function i_select_atom_load(iAtom)
     op = 'Laplace-Beltrami';  if isfield(G,'Operator') && ~isempty(G.Operator), op = G.Operator; end
     ax = i_atom_axes(st, op);
     ik = find(strcmp(ctrl.atomKeys, G.KernelName), 1);
-    if ~isempty(ik), ctrl.jKernel.setSelectedIndex(ik - 1); end
-    if ~isempty(ax), b = i_atom_bounds(ax); else, b = i_atom_default_bounds(); end
-    panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, G.KernelName, b, @()bst_call(@OnParamSettle));
-    if isstruct(G.KernelParams) && isfield(G.KernelParams, 'vals')
-        panel_eigenfilter_design('SetAtomVals', ctrl.jAtomParams, G.KernelParams.vals);
+    if ~isempty(ik)                                                % hand-pickable kernel: combobox + sliders (live editor)
+        ctrl.jKernel.setSelectedIndex(ik - 1);
+        if ~isempty(ax), b = i_atom_bounds(ax); else, b = i_atom_default_bounds(); end
+        panel_eigenfilter_design('BuildAtomSliders', ctrl.jAtomParams, G.KernelName, b, @()bst_call(@OnParamSettle));
+        if isstruct(G.KernelParams) && isfield(G.KernelParams, 'vals') && ~isempty(G.KernelParams.vals)
+            panel_eigenfilter_design('SetAtomVals', ctrl.jAtomParams, G.KernelParams.vals);
+        end
+    else                                                          % non-combobox (itersine tight-frame member): no editable sliders
+        ctrl.jAtomParams.removeAll();
+        for si = 1:3, ctrl.jAtomParams.putClientProperty(sprintf('atomslot_%d', si), []); end   % clear slot handles (BuildAtomSliders convention)
+        ctrl.jAtomParams.revalidate();  ctrl.jAtomParams.repaint();
     end
     i_select_op_radio(op);                                         % check the matching operator radio
     st.atomSeed = G.vertices;  setappdata(0, 'DynamicsTarget', st);
@@ -884,6 +890,9 @@ end
 function i_atom_writeback()
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
     ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
+    % non-combobox kernels (itersine tight-frame members) are not slider-editable; the atom's stored
+    % generator is authoritative -- never overwrite it from the (stale) combobox + sliders.
+    if ~any(strcmp(ctrl.atomKeys, st.T.Groups(ia).KernelName)), return; end
     ax = i_atom_axes(st, i_atom_op(st));  if isempty(ax), return; end
     k = i_atom_current_kernel(ctrl);  vals = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
     lmax = max(ax.Lambda{1}(:));
