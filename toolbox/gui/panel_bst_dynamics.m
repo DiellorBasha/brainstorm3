@@ -471,23 +471,21 @@ function s = i_atom_detail(G) %#ok<DEFNU>
     end
 end
 
-% Launch-derived default operator: Dirac if the source result is a Dirac inverse, else Laplace-Beltrami.
+% Default atom operator for a freshly launched panel. Operators are canonical properties of the cortical
+% SURFACE (find-or-create via bst_eigen): scalar->Laplace-Beltrami, tangent->Connection Laplacian,
+% 3D vector->Dirac. An atom is a kernel on one of those operators + the time base; it does not depend on
+% the dSPM. The panel is launched from an inverse kernel only to know the DATA kind, which sets a sensible
+% DEFAULT: constrained (scalar) source -> Laplace-Beltrami; unconstrained (3-vector) source -> Dirac.
+% (The user can switch operators afterward within what i_gate_mask allows.)
 function op = i_launch_operator(st) %#ok<DEFNU>
-    op = 'Laplace-Beltrami';
-    cmt = '';
-    if isfield(st,'srcComment')
-        cmt = st.srcComment;
-    elseif isfield(st,'hFig') && ~isempty(st.hFig) && ishandle(st.hFig)
-        D = getappdata(st.hFig, 'DynamicsOverlay');
-        if ~isempty(D) && isfield(D,'srcDS') && isfield(D,'srcResult')
-            try
-                gd = []; global GlobalData; gd = GlobalData; %#ok<TLEV>
-                cmt = gd.DataSet(D.srcDS).Results(D.srcResult).Comment;
-            catch %#ok<CTCH>
-            end
+    op = 'Laplace-Beltrami';                              % scalar default (constrained, or if unknown)
+    src = i_src_resultfile_from_target(st);
+    if ~isempty(src)
+        try, R = in_bst_results(src, 0, 'nComponents');
+            if isequal(R.nComponents, 3), op = 'Dirac'; end   % unconstrained 3-vector -> quaternion operator
+        catch %#ok<CTCH>
         end
     end
-    if ~isempty(cmt) && contains(lower(char(cmt)), 'dirac'), op = 'Dirac'; end
 end
 
 % Per-variant eigen-axes over a 4 s window at the recording Fs; cached (variant|surface) across the session.
@@ -936,8 +934,14 @@ end
 %   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
 % Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
 function m = i_gate_mask(nComponents) %#ok<DEFNU>
+    % Order: {Laplace-Beltrami, LB-Connectome, Connection Laplacian, Dirac}. Applicability follows the
+    % inverse type: constrained (scalar) supports the two scalar bases + the tangent operator (for the
+    % gradient of the scalar map), but not Dirac. Unconstrained (vector) supports Dirac (native) + the
+    % two scalar bases (on the norm |J|), but not the tangent-only Connection Laplacian.
     m = true(1,4);
-    if isequal(nComponents, 1), m = logical([1 1 0 0]); end
+    if     isequal(nComponents, 1), m = logical([1 1 1 0]);   % constrained: LBO, LB-Connectome, Connection Laplacian
+    elseif isequal(nComponents, 3), m = logical([1 1 0 1]);   % unconstrained: LBO, LB-Connectome, Dirac
+    end
 end
 
 % Grey out the Set-operator radio items the linked source can't support (reads nComponents).
