@@ -96,7 +96,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         tv = R.Time;  Fs = 1/median(diff(tv));  nWin = max(1, round(winsec*Fs));
         starts = 1:nWin:numel(tv);
         [iDS, iRes] = bst_memory('LoadResultsFileFull', sInputs(iIn).FileName);   % load once; page windows below
-        E = [];  Res = [];  Tall = [];
+        E = [];  Tall = [];
         for s0 = starts
             iWin = s0:min(s0+nWin-1, numel(tv));
             F = double(bst_memory('GetResultsValues', iDS, iRes, [], iWin, 0));   % reconstruct only this window
@@ -105,7 +105,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             C = cell(1,numel(ax.Phi));
             for h=1:numel(ax.Phi), gv=ax.GlobalVertices{h}(:); C{h}=manifold_ft(ax.Phi{h}, ax.Mass{h}, F(gv,:)); end
             scal = bst_eigenwavelet('Scalogram', ax, gCell, C);
-            E = cat(2, E, scal.energy);  Res = [Res, scal.residual];  Tall = [Tall, tv(iWin)]; %#ok<AGROW>
+            E = cat(2, E, scal.energy);  Tall = [Tall, tv(iWin)]; %#ok<AGROW>
         end
         FileMat = db_template('timefreqmat');
         FileMat.TF = E;  FileMat.Time = Tall;  FileMat.Freqs = scal.centers(:);

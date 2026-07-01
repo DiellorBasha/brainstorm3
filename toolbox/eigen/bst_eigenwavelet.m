@@ -11,6 +11,7 @@ function varargout = bst_eigenwavelet(varargin)
 %   Wq    = bst_eigenwavelet('Steer', W, q0, EigenMat)       % right-quaternion steer (Dirac family)
 %   V     = bst_eigenwavelet('ToVec',  W, EigenMat)          % full-quaternion -> physical 3-vector
 %   W     = bst_eigenwavelet('ToQuat', V, EigenMat)          % physical 3-vector -> pure quaternion (w=0)
+%   scal  = bst_eigenwavelet('Scalogram', ax, gCell, C)      % per-member energy [3 x nT x M] + dual residual
 %
 % DESCRIPTION:
 %     GSPBox-style spectral graph wavelet frame (Perraudin et al., GSPBOX, arXiv:1408.5781,
