@@ -1294,7 +1294,9 @@ function [Dfilt, Jfilt, cfilt] = i_dirac_forward(ax, Leig, J, g) %#ok<DEFNU>
         Uf = manifold_ift(Phi, Ch);                      % [4n x nT] filtered quaternion field
         Jfilt(gIn, :) = Uf(lIn, :);                      % extract imag 3-vector
     end
-    Dfilt = Leig * cfilt;                                % [nCh x nT]
+    if ~isempty(Leig), Dfilt = Leig * cfilt;             % [nCh x nT]
+    else,              Dfilt = [];                       % basis mismatch -> no sensor view (cortex still previews)
+    end
 end
 
 % Dirac eigenbasis leadfield L_eig [nCh x 2K] via bst_dirac(HeadModel); cached per (headmodel,nModes,tau).
@@ -1305,16 +1307,31 @@ function Leig = i_dirac_leadfield(st, ax) %#ok<DEFNU>
     R = in_bst_results(src, 0, 'HeadModelFile');
     hmFile = R.HeadModelFile;
     if isempty(hmFile)
-        sS = bst_get('AnyFile', src);  hm = bst_get('HeadModelForStudy', []); %#ok<NASGU>
+        sS = bst_get('AnyFile', src);
         if isfield(sS,'HeadModel') && ~isempty(sS.HeadModel), hmFile = sS.HeadModel(sS.iHeadModel).FileName; end
     end
     if isempty(hmFile), return; end
-    K = size(ax.Lambda{1},1);  tau = 0.5;   % nModes/Tau must match ax; ax built via i_atom_axes(st,'Dirac')
+    % nModes/Tau MUST match the atom's Dirac eigenbasis (ax) so L_eig's eigenmode ordering aligns with
+    % c_filt; pull Tau from the eigen node ax resolved to (ax is built any-Tau) rather than hardcoding it.
+    K = size(ax.Lambda{1},1);  tau = 0.5;
+    if isfield(ax,'EigenMat') && isstruct(ax.EigenMat) && isfield(ax.EigenMat,'Provenance') ...
+            && isstruct(ax.EigenMat.Provenance) && isfield(ax.EigenMat.Provenance,'Tau') ...
+            && ~isempty(ax.EigenMat.Provenance.Tau)
+        tau = ax.EigenMat.Provenance.Tau;
+    end
     key = sprintf('%s|%d|%g', hmFile, K, tau);
     M = getappdata(0, 'DynamicsDiracFwd');
     if ~isempty(M) && isstruct(M) && strcmp(M.key, key), Leig = M.Leig; return; end
     HeadModel = in_bst_headmodel(hmFile);
     CompHM = bst_dirac(HeadModel, 'nModes', K, 'Tau', tau);
     Leig = CompHM.Gain;                     % [nCh x 2K]
+    % Guard (spec §4/§8): assert L_eig's Dirac spectrum matches the atom's ax eigenvalues (same
+    % eigendecomposition, L-then-R). On mismatch, bail the sensor view (Leig=[]) -> cortex still previews.
+    lamAx = ax.Lambda{1}(:);
+    if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAx = [lamAx; ax.Lambda{2}(:)]; end
+    okAlign = isfield(CompHM,'Eigenvalues') && ~isempty(CompHM.Eigenvalues) ...
+        && (numel(CompHM.Eigenvalues) == numel(lamAx)) ...
+        && (max(abs(sort(double(CompHM.Eigenvalues(:))) - sort(double(lamAx)))) <= 1e-6*max(abs(lamAx)) + 1e-12);
+    if ~okAlign, Leig = [];  return; end    % basis mismatch -> no sensor view
     setappdata(0, 'DynamicsDiracFwd', struct('key',key, 'Leig',Leig));
 end
