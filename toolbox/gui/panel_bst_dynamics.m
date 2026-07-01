@@ -1200,3 +1200,51 @@ function OnDesignFrame() %#ok<DEFNU>
     SetSelectedAtom(1);              % selects member 1, loads it, and triggers i_frame_refresh
     bst_progress('text', sprintf('Designed %d-member itersine tight frame on %s', N, op));
 end
+
+%% ===== Dirac sensor forward (Task 3: filtered-SENSOR view for the Preview mode) =====
+% Dirac sensor forward: filter J in the Dirac eigenbasis and forward to sensors.
+%   ax   : i_atom_axes(st,'Dirac') (per-hemi Phi/Lambda/Mass/GlobalVertices; quaternion basis)
+%   Leig : eigenbasis leadfield [nCh x 2K] (L-then-R), from i_dirac_leadfield
+%   J    : source 3-vector field [3nV x nT]
+%   g    : gain handle g(lambda)
+% Returns Dfilt [nCh x nT], Jfilt [3nV x nT] (filtered 3-vector field), cfilt [2K x nT].
+function [Dfilt, Jfilt, cfilt] = i_dirac_forward(ax, Leig, J, g) %#ok<DEFNU>
+    nV = 0; for h=1:numel(ax.GlobalVertices), nV = max(nV, max(ax.GlobalVertices{h}(:))); end
+    nT = size(J, 2);  Jfilt = zeros(3*nV, nT);  cfilt = [];
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};  if isempty(Phi), continue; end
+        idx = ax.GlobalVertices{h}(:);  n = numel(idx);  Lam = ax.Lambda{h}(:);
+        % embed the 3-vector source into the quaternion imag slots (w=0), per bst_eigenwavelet i_hemimap
+        gIn = reshape([(idx-1)*3+1, (idx-1)*3+2, (idx-1)*3+3].', [], 1);            % global 3-vec rows
+        lIn = reshape([(0:n-1)*4+2; (0:n-1)*4+3; (0:n-1)*4+4], [], 1);              % local quat imag slots
+        U = zeros(4*n, nT);  U(lIn, :) = J(gIn, :);
+        C  = manifold_ft(Phi, ax.Mass{h}, U);            % [K x nT] eigenmode coeffs
+        Ch = g(Lam) .* C;                                % gain
+        cfilt = [cfilt; Ch]; %#ok<AGROW>                 % stack L-then-R -> [2K x nT]
+        Uf = manifold_ift(Phi, Ch);                      % [4n x nT] filtered quaternion field
+        Jfilt(gIn, :) = Uf(lIn, :);                      % extract imag 3-vector
+    end
+    Dfilt = Leig * cfilt;                                % [nCh x nT]
+end
+
+% Dirac eigenbasis leadfield L_eig [nCh x 2K] via bst_dirac(HeadModel); cached per (headmodel,nModes,tau).
+function Leig = i_dirac_leadfield(st, ax) %#ok<DEFNU>
+    Leig = [];
+    D = getappdata(st.hFig, 'DynamicsOverlay');  if isempty(D), return; end
+    src = i_src_resultfile(D);  if isempty(src), return; end
+    R = in_bst_results(src, 0, 'HeadModelFile');
+    hmFile = R.HeadModelFile;
+    if isempty(hmFile)
+        sS = bst_get('AnyFile', src);  hm = bst_get('HeadModelForStudy', []); %#ok<NASGU>
+        if isfield(sS,'HeadModel') && ~isempty(sS.HeadModel), hmFile = sS.HeadModel(sS.iHeadModel).FileName; end
+    end
+    if isempty(hmFile), return; end
+    K = size(ax.Lambda{1},1);  tau = 0.5;   % nModes/Tau must match ax; ax built via i_atom_axes(st,'Dirac')
+    key = sprintf('%s|%d|%g', hmFile, K, tau);
+    M = getappdata(0, 'DynamicsDiracFwd');
+    if ~isempty(M) && isstruct(M) && strcmp(M.key, key), Leig = M.Leig; return; end
+    HeadModel = in_bst_headmodel(hmFile);
+    CompHM = bst_dirac(HeadModel, 'nModes', K, 'Tau', tau);
+    Leig = CompHM.Gain;                     % [nCh x 2K]
+    setappdata(0, 'DynamicsDiracFwd', struct('key',key, 'Leig',Leig));
+end
