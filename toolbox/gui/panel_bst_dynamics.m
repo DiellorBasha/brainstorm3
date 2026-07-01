@@ -117,6 +117,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Threshold: set the level-set threshold for the optional Scout+Event export', @(h,e)bst_call(@OnThresholdMenu));
     jApply = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_TS_DISPLAY, TB_DIM}, 'Apply: filter the REAL source through the selected atom over a 4 s window (Preview); OFF = impulse response (Design)', @(h,e)bst_call(@OnApply));
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_TIMEFREQ, TB_DIM}, 'Analyze: decompose the current window''s source through the frame -> spatial scalogram + residual', @(h,e)bst_call(@OnAnalyzeWindow));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_SCOUT_SEL, TB_DIM}, 'Localize bands: localize each frame band into a marker atom -> a separate dynamics table', @(h,e)bst_call(@OnLocalizeBands));
     jToolbar2.addSeparator();
     % --- legacy detection / differential maps (untouched this step) ---
     jShow = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_ALL, TB_DIM}, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
@@ -879,6 +880,37 @@ function TfFile = i_save_scalogram(srcFile, FileMat, tag)
     end
     panel_protocols('UpdateNode', 'Study', iStudy);
 end
+
+% Localize each frame band into a marker atom (peak vertex / time window / level set) -> separate dynamicsmat.
+function OnLocalizeBands() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcResult') || isempty(D.srcResult)
+        ctrl.jAtomInfo.setText('Localize bands: no real source linked');  return;
+    end
+    variant = i_atom_op(st);
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
+        ctrl.jAtomInfo.setText(sprintf('%s: Localize bands is scalar-only for now', variant));  return;
+    end
+    ax = i_atom_axes(st, variant);  if isempty(ax), return; end
+    fr = i_frame_response(st, ax);  if fr.nMembers < 1, ctrl.jAtomInfo.setText('Localize: no static frame members'); return; end
+    nV = i_overlay_nv(ax);
+    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);  if isempty(iWin), return; end
+    bst_progress('start', 'Frame', 'Localizing frame bands...');
+    [C, ~] = i_apply_projection(st, ax, D, iWin, nV);
+    scal = bst_eigenwavelet('Scalogram', ax, fr.gCell, C);
+    axL = ax;  axL.Time = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  axL.Time = axL.Time(iWin);  axL.tlag = axL.Time;
+    thr = i_field(st, 'atomThreshold', 0.5);
+    T = bst_eigenwavelet('JTVAtoms', scal.W, axL, thr);
+    T.SurfaceFile = ax.SurfaceFile;  T.DataFile = D.srcResult;
+    T.Comment = sprintf('Frame bands (%s, %d members)', variant, fr.nMembers);
+    bst_progress('stop');
+    out = bst_fullfile(bst_fileparts(file_fullpath(D.srcResult)), sprintf('dynamics_framebands_%s.mat', datestr_safe()));
+    bst_dynamics('Save', out, T);
+    try, view_dynamics(out); catch, end %#ok<CTCH>
+    ctrl.jAtomInfo.setText(sprintf('Localized %d frame-band atoms', numel(T.Groups)));
+end
+function s = datestr_safe(), s = sprintf('%09d', mod(round(now*1e5), 1e9)); end
 
 %% ===== filterbank: create / list / select / save =====
 % + Create atom: append a default DIFFUSION filter atom (no threshold) on a default seed, select it.
