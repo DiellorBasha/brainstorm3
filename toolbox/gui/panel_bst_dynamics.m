@@ -732,7 +732,17 @@ end
 % Apply toggle: ON -> Preview (filtered real source); OFF -> Design (impulse response). i_atom_preview
 % dispatches on the toggle, so both branches just re-run the preview.
 function OnApply() %#ok<DEFNU>
+    i_clear_dirac_sensor_overlay();
     i_atom_preview();
+end
+
+% Clear the Dirac filtered-sensor overlay; i_atom_preview redraws it if still in Dirac-Apply.
+function i_clear_dirac_sensor_overlay()
+    st = getappdata(0,'DynamicsTarget');
+    if ~isempty(st)
+        hRec = i_rec_figure(st);
+        if ~isempty(hRec) && ishandle(hRec), try, view_dynamics('ClearFilteredSensors', hRec); catch, end, end %#ok<CTCH>
+    end
 end
 
 % Preview: reconstruct the real source over a 4 s window at the cursor, filter it through the selected
@@ -749,6 +759,31 @@ function i_atom_apply() %#ok<DEFNU>
     lmax   = max(ax.Lambda{1}(:));
     [kernel, kp] = i_selected_generator(st, ctrl, lmax);
     nV     = i_overlay_nv(ax);
+    % --- Dirac operator: filter in the Dirac eigenbasis -> cortex magnitude + filtered-sensor overlay ---
+    if strcmp(variant, 'Dirac')
+        Leig = i_dirac_leadfield(st, ax);
+        iWin = i_cursor_window(D.srcDS, D.srcResult, 4);  if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no window'); return; end
+        J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] Dirac field
+        g = bst_eigfilter_kernel(kernel, kp);
+        bst_progress('start','Atom','Dirac filter -> sensors...');
+        [Dfilt, Jfilt] = i_dirac_forward(ax, Leig, J, g);
+        bst_progress('stop');
+        % cortex: filtered magnitude
+        Jmag = i_paintable_scalar(Jfilt, nV);
+        pk = max(abs(Jmag(:))); if pk>0, Jmag = Jmag/pk; end
+        if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('SetFilteredField', st.hFig, Jmag, (1:nV)', iWin, false); end
+        % sensor: overlay Dfilt vs raw (only if L_eig available)
+        if ~isempty(Leig) && ~isempty(Dfilt)
+            hRec = i_rec_figure(st);
+            if isempty(hRec) || ~ishandle(hRec), try, hRec = view_timeseries(st.T.DataFile, 'MEG'); catch, hRec=[]; end, end %#ok<CTCH>
+            tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tWin = tv(iWin);
+            if ~isempty(hRec) && ishandle(hRec), view_dynamics('SetFilteredSensors', hRec, Dfilt, tWin); end
+            ctrl.jAtomInfo.setText(sprintf('Dirac | %s [Preview: cortex + %d-sensor overlay]', kernel, size(Dfilt,1)));
+        else
+            ctrl.jAtomInfo.setText('Dirac: cortex filtered (no Dirac-dSPM leadfield -> no sensor view)');
+        end
+        return;
+    end
     % --- reduce the reconstructed field to the operator's expected row layout ---
     % The joint time-vertex filter (dynamic atoms) is scalar-only for now; vector/Dirac/Tangent
     % dynamic real-source Preview is a follow-up. Scalar operators act on the source magnitude.
@@ -787,6 +822,18 @@ function i_atom_apply() %#ok<DEFNU>
         view_dynamics('SetFilteredField', st.hFig, Ffilt, (1:nV)', iWin, false);
     end
     ctrl.jAtomInfo.setText(sprintf('%s | %s  [Preview: filtered source, %d-sample window]', variant, kernel, numel(iWin)));
+end
+
+% The recording DataTimeSeries figure for this session (matches st.T.DataFile), or [] if none open.
+function hFig = i_rec_figure(st)
+    hFig = [];  global GlobalData; %#ok<TLEV>
+    if isempty(st) || ~isfield(st,'T') || isempty(st.T.DataFile), return; end
+    for h = bst_figures('GetFiguresByType', {'DataTimeSeries'})'
+        [~,~,iDS] = bst_figures('GetFigure', h);
+        if ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).DataFile) && file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile)
+            hFig = h;  return;
+        end
+    end
 end
 
 % Reduce a real/complex/vector field [k*nRows x nT] to a per-row magnitude [nRows x nT]
@@ -1085,6 +1132,7 @@ function OnSetOperator(variant) %#ok<DEFNU>
     ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
     st.T.Groups(ia).Operator = variant;  setappdata(0, 'DynamicsTarget', st);
     setappdata(0, 'DynamicsApplyCache', []);                        % operator changed -> stale projection
+    i_clear_dirac_sensor_overlay();
     i_select_op_radio(variant);
     i_select_atom_load(ia);                                        % reload sliders/bounds on the new basis + preview
     i_frame_refresh();
