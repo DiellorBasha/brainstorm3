@@ -85,7 +85,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jMenuSort = gui_component('Menu', jMenuAtoms, [], 'Sort groups', IconLoader.ICON_EVT_TYPE, [], []);
     gui_component('MenuItem', jMenuSort, [], 'By name', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('name')));
     gui_component('MenuItem', jMenuSort, [], 'By time', IconLoader.ICON_EVT_TYPE, [], @(h,e)bst_call(@()AtomSort('time')));
-    jMenuAtoms.addSeparator();
     % EAST close button: a glue pushes it to the right, then an 'x' that ends the whole session
     % (hide the panel + close the linked source figure), like the main GUI's close-all button.
     jMenuBar.add(javax.swing.Box.createHorizontalGlue());
@@ -99,8 +98,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jScrollList = JScrollPane(jListAtoms);  jScrollList.setBorder(java_scaled('titledborder',''));
     jScrollList.setPreferredSize(java_scaled('dimension', 360, 300));
 
-    % ===== MAIN (CENTER): atoms list (CENTER, dominant) + action toolbar (EAST) + navigator (SOUTH) =====
-    BH = java_scaled('value', 22);
+    % ===== MAIN (CENTER): atoms list (CENTER, dominant) + action toolbar (EAST) + Atom section (SOUTH) =====
     jPanelMain = gui_component('Panel');
     jPanelMain.setBorder(BorderFactory.createEmptyBorder(0,7,7,7));
 
