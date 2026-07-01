@@ -761,6 +761,14 @@ function i_atom_apply() %#ok<DEFNU>
     nV     = i_overlay_nv(ax);
     % --- Dirac operator: filter in the Dirac eigenbasis -> cortex magnitude + filtered-sensor overlay ---
     if strcmp(variant, 'Dirac')
+        % the Dirac cortex/sensor forward uses a STATIC spatial gain g(lambda); a dynamic (ts/js)
+        % kernel is g(lambda,t|omega) -> not supported here (use a static kernel, e.g. heat/mexhat/itersine).
+        meta = bst_eigfilter_kernel('info', kernel);
+        dom = 'static'; if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+        if any(strcmpi(dom, {'ts','js'}))
+            ctrl.jAtomInfo.setText(sprintf('Dirac Apply: %s is dynamic; use a static kernel', kernel));
+            return;
+        end
         Leig = i_dirac_leadfield(st, ax);
         iWin = i_cursor_window(D.srcDS, D.srcResult, 4);  if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no window'); return; end
         J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] Dirac field
@@ -775,10 +783,15 @@ function i_atom_apply() %#ok<DEFNU>
         % sensor: overlay Dfilt vs raw (only if L_eig available)
         if ~isempty(Leig) && ~isempty(Dfilt)
             hRec = i_rec_figure(st);
-            if isempty(hRec) || ~ishandle(hRec), try, hRec = view_timeseries(st.T.DataFile, 'MEG'); catch, hRec=[]; end, end %#ok<CTCH>
+            if isempty(hRec) || ~ishandle(hRec), try, hRec = view_timeseries(i_rec_datafile(st), 'MEG'); catch, hRec=[]; end, end %#ok<CTCH>
             tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tWin = tv(iWin);
-            if ~isempty(hRec) && ishandle(hRec), view_dynamics('SetFilteredSensors', hRec, Dfilt, tWin); end
-            ctrl.jAtomInfo.setText(sprintf('Dirac | %s [Preview: cortex + %d-sensor overlay]', kernel, size(Dfilt,1)));
+            if ~isempty(hRec) && ishandle(hRec)
+                view_dynamics('SetFilteredSensors', hRec, Dfilt, tWin);
+                try, figure_timeseries('SetTimeSelectionManual', hRec, [tWin(1) tWin(end)]); catch, end %#ok<CTCH>  % mark the filtered window
+                ctrl.jAtomInfo.setText(sprintf('Dirac | %s [Preview: cortex + %d-sensor overlay]', kernel, size(Dfilt,1)));
+            else
+                ctrl.jAtomInfo.setText(sprintf('Dirac | %s [cortex filtered; open the recording for the sensor overlay]', kernel));
+            end
         else
             ctrl.jAtomInfo.setText('Dirac: cortex filtered (no Dirac-dSPM leadfield -> no sensor view)');
         end
@@ -827,13 +840,22 @@ end
 % The recording DataTimeSeries figure for this session (matches st.T.DataFile), or [] if none open.
 function hFig = i_rec_figure(st)
     hFig = [];  global GlobalData; %#ok<TLEV>
-    if isempty(st) || ~isfield(st,'T') || isempty(st.T.DataFile), return; end
+    recFile = i_rec_datafile(st);  if isempty(recFile), return; end
     for h = bst_figures('GetFiguresByType', {'DataTimeSeries'})'
         [~,~,iDS] = bst_figures('GetFigure', h);
-        if ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).DataFile) && file_compare(GlobalData.DataSet(iDS).DataFile, st.T.DataFile)
+        if ~isempty(iDS) && ~isempty(GlobalData.DataSet(iDS).DataFile) && file_compare(GlobalData.DataSet(iDS).DataFile, recFile)
             hFig = h;  return;
         end
     end
+end
+% The raw recording DataFile the linked Dirac source was computed from (st.T.DataFile is a link|... path).
+function recFile = i_rec_datafile(st)
+    recFile = '';
+    if isempty(st) || ~isfield(st,'hFig') || isempty(st.hFig) || ~ishandle(st.hFig), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcResult') || isempty(D.srcResult), return; end
+    src = i_src_resultfile(D);  if isempty(src), return; end
+    try, RR = in_bst_results(src, 0, 'DataFile'); recFile = RR.DataFile; catch, end %#ok<CTCH>
 end
 
 % Reduce a real/complex/vector field [k*nRows x nT] to a per-row magnitude [nRows x nT]
