@@ -846,7 +846,7 @@ function OnAnalyzeWindow() %#ok<DEFNU>
     [C, ~] = i_apply_projection(st, ax, D, iWin, nV);          % reuse B's cache
     scal = bst_eigenwavelet('Scalogram', ax, fr.gCell, C);
     tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tv = tv(iWin);
-    surf = ax.SurfaceFile;  srcFile = D.srcResult;
+    surf = ax.SurfaceFile;  srcFile = i_src_resultfile(D);   % D.srcResult is an INDEX; resolve the results filename
     FileMat = i_scalogram_timefreq(scal, tv, surf, srcFile, sprintf('Frame scalogram (window) | %d members', scal_nmembers(scal)));
     TfFile = i_save_scalogram(srcFile, FileMat, 'Frame scalogram (window)');   % find-or-replace in the source study
     bst_progress('stop');
@@ -856,6 +856,12 @@ end
 function n = scal_nmembers(scal), n = size(scal.energy, 3); end
 
 % Save (find-or-replace by Comment) a timefreq FileMat into the source result's study; return its path.
+% Resolve the results FILE name from the overlay's dataset/result INDICES (D.srcResult is an index).
+function rf = i_src_resultfile(D)
+    rf = '';  global GlobalData; %#ok<TLEV>
+    try, rf = GlobalData.DataSet(D.srcDS).Results(D.srcResult).FileName; catch, end %#ok<CTCH>
+end
+
 function TfFile = i_save_scalogram(srcFile, FileMat, tag)
     TfFile = '';
     [sStudy, iStudy] = bst_get('AnyFile', srcFile);
@@ -870,7 +876,7 @@ function TfFile = i_save_scalogram(srcFile, FileMat, tag)
     if ~isempty(old)
         TfFile = file_fullpath(old);
     else
-        TfFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(srcFile)), 'timefreq_framescalo');
+        TfFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(sStudy.FileName)), 'timefreq_framescalo');
     end
     bst_save(TfFile, FileMat, 'v6');
     if ~isempty(iOld)
@@ -900,12 +906,15 @@ function OnLocalizeBands() %#ok<DEFNU>
     [C, ~] = i_apply_projection(st, ax, D, iWin, nV);
     scal = bst_eigenwavelet('Scalogram', ax, fr.gCell, C);
     axL = ax;  axL.Time = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  axL.Time = axL.Time(iWin);  axL.tlag = axL.Time;
+    axL.TimeFile = i_src_resultfile(D);   % JTVAtoms reads ax.TimeFile for the table's DataFile
     thr = i_field(st, 'atomThreshold', 0.5);
     T = bst_eigenwavelet('JTVAtoms', scal.W, axL, thr);
-    T.SurfaceFile = ax.SurfaceFile;  T.DataFile = D.srcResult;
+    T.SurfaceFile = ax.SurfaceFile;  T.DataFile = i_src_resultfile(D);   % index -> results filename
     T.Comment = sprintf('Frame bands (%s, %d members)', variant, fr.nMembers);
     bst_progress('stop');
-    out = bst_fullfile(bst_fileparts(file_fullpath(D.srcResult)), sprintf('dynamics_framebands_%s.mat', datestr_safe()));
+    [sStudyL,~] = bst_get('AnyFile', T.DataFile);  studyDirL = pwd;
+    if ~isempty(sStudyL), studyDirL = bst_fileparts(file_fullpath(sStudyL.FileName)); end
+    out = bst_fullfile(studyDirL, sprintf('dynamics_framebands_%s.mat', datestr_safe()));
     bst_dynamics('Save', out, T);
     try, view_dynamics(out); catch, end %#ok<CTCH>
     ctrl.jAtomInfo.setText(sprintf('Localized %d frame-band atoms', numel(T.Groups)));
