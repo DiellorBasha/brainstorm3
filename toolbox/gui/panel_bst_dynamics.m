@@ -323,6 +323,7 @@ function SetTarget(hFig, T) %#ok<DEFNU>
     if ~isempty(hFig) && ishandle(hFig), file = getappdata(hFig, 'DynamicsFile'); end
     setappdata(0, 'DynamicsTarget', struct('hFig',hFig, 'T',T, 'file',file, ...
         'curAtom',0, 'atomSeed',[], 'showPhase',[1 1 1 1], 'curOp','none'));
+    setappdata(0, 'DynamicsApplyCache', []);                          % new session -> stale projection
     BuildTree();
 end
 
@@ -669,6 +670,27 @@ function Ffilt = i_atom_filter_field(F, ax, variant, kernel, kp) %#ok<DEFNU>
         if isError || isempty(W), Ffilt = []; else, Ffilt = W(:, :, 1); end
     end
 end
+% Windowed-source modal coefficients C{h} = Phi{h}' * B{h} * F(gv{h},:), cached by
+% (srcResult, iWin, operator). Seed and kernel params do NOT invalidate it (Apply filters the
+% whole field). Scalar operators only (F reduced to per-vertex magnitude).
+function [C, gvAll] = i_apply_projection(st, ax, D, iWin, nV)
+    C = {};  gvAll = [];
+    key = sprintf('%s|%d-%d|%s', D.srcResult, iWin(1), iWin(end), i_atom_op(st));
+    M = getappdata(0, 'DynamicsApplyCache');
+    if ~isempty(M) && isstruct(M) && isfield(M,'key') && strcmp(M.key, key)
+        C = M.C;  gvAll = M.gvAll;  return;
+    end
+    F = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
+    Fr = i_paintable_scalar(F, nV);                       % scalar per-vertex magnitude field
+    C = cell(1, numel(ax.Phi));  gvAll = [];
+    for h = 1:numel(ax.Phi)
+        if isempty(ax.Phi{h}), continue; end
+        gv = ax.GlobalVertices{h}(:);
+        C{h} = manifold_ft(ax.Phi{h}, ax.Mass{h}, Fr(gv,:));
+        gvAll = [gvAll; gv]; %#ok<AGROW>
+    end
+    setappdata(0, 'DynamicsApplyCache', struct('key',key, 'C',{C}, 'gvAll',gvAll));
+end
 % Sample indices of a `secs`-long window from the cursor (round(secs*Fs) samples, clamped).
 function iWin = i_cursor_window_core(tv, cursor, secs)
     iWin = [];
@@ -709,23 +731,35 @@ function i_atom_apply() %#ok<DEFNU>
     vals   = panel_eigenfilter_design('ReadAtomVals', ctrl.jAtomParams);
     kp     = bst_eigfilter_controls('ToKernel', kernel, vals, lmax);
     nV     = i_overlay_nv(ax);
-    % --- reconstruct the windowed real source (imaging kernel x recording, via bst_memory) ---
-    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
-    if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no recording window'); return; end
-    bst_progress('start', 'Atom', 'Filtering the real source...');
-    F = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
     % --- reduce the reconstructed field to the operator's expected row layout ---
     % The joint time-vertex filter (dynamic atoms) is scalar-only for now; vector/Dirac/Tangent
     % dynamic real-source Preview is a follow-up. Scalar operators act on the source magnitude.
-    if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
-        Fr = i_paintable_scalar(F, nV);                             % scalar operator: per-vertex magnitude
-    else
-        bst_progress('stop');
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
         ctrl.jAtomInfo.setText(sprintf('%s: real-source Preview is scalar-only for now (use Geometric/Connectomic)', variant));
         return;
     end
-    % --- filter through the atom, reduce to a paintable per-vertex magnitude ---
-    Ffilt = i_atom_filter_field(Fr, ax, variant, kernel, kp);
+    % --- domain-gated apply: static g(lambda) uses the cached projection (instant on param drag);
+    %     dynamic ts/js kernels keep the joint time-vertex path (cache does not apply). ---
+    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
+    if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no recording window'); return; end
+    meta = bst_eigfilter_kernel('info', kernel);
+    dom  = 'static';  if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+    bst_progress('start', 'Atom', 'Filtering the real source...');
+    if strcmpi(dom, 'static')
+        [C, ~] = i_apply_projection(st, ax, D, iWin, nV);         % cached by (srcResult,iWin,operator)
+        if isempty(C), bst_progress('stop'); ctrl.jAtomInfo.setText('Apply: projection failed'); return; end
+        g = bst_eigfilter_kernel(kernel, kp);
+        Ffilt = zeros(nV, numel(iWin));
+        for h = 1:numel(ax.Phi)
+            if isempty(ax.Phi{h}) || isempty(C{h}), continue; end
+            gv = ax.GlobalVertices{h}(:);  hgain = g(ax.Lambda{h}(:));
+            Ffilt(gv,:) = manifold_ift(ax.Phi{h}, hgain(:) .* C{h});
+        end
+    else
+        F  = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
+        Fr = i_paintable_scalar(F, nV);
+        Ffilt = i_atom_filter_field(Fr, ax, variant, kernel, kp);   % dynamic: JTVAnalysis (unchanged)
+    end
     bst_progress('stop');
     if isempty(Ffilt), ctrl.jAtomInfo.setText(sprintf('%s: filter not applicable to this source', variant)); return; end
     Ffilt = i_paintable_scalar(Ffilt, nV);
@@ -871,6 +905,7 @@ function OnSetOperator(variant) %#ok<DEFNU>
     [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end %#ok<ASGLU>
     ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
     st.T.Groups(ia).Operator = variant;  setappdata(0, 'DynamicsTarget', st);
+    setappdata(0, 'DynamicsApplyCache', []);                        % operator changed -> stale projection
     i_select_op_radio(variant);
     i_select_atom_load(ia);                                        % reload sliders/bounds on the new basis + preview
     i_frame_refresh();
