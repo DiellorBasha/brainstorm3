@@ -221,10 +221,10 @@ function TfFile = i_save_scalogram(srcFile, FileMat, tag)
     [sStudy, iStudy] = bst_get('AnyFile', srcFile);
     if isempty(sStudy), return; end
     % reuse an existing same-tag file for this source, else make a new path
-    old = '';
+    old = '';  iOld = [];
     if isfield(sStudy,'Timefreq') && ~isempty(sStudy.Timefreq)
         for i=1:numel(sStudy.Timefreq)
-            if strncmp(sStudy.Timefreq(i).Comment, tag, numel(tag)), old = sStudy.Timefreq(i).FileName; break; end
+            if strncmp(sStudy.Timefreq(i).Comment, tag, numel(tag)), old = sStudy.Timefreq(i).FileName; iOld = i; break; end
         end
     end
     if ~isempty(old)
@@ -233,7 +233,8 @@ function TfFile = i_save_scalogram(srcFile, FileMat, tag)
         TfFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(srcFile)), 'timefreq_framescalo');
     end
     bst_save(TfFile, FileMat, 'v6');
-    db_add_data(iStudy, file_short(TfFile), FileMat);
+    if ~isempty(iOld), db_add_data(iStudy, file_short(TfFile), FileMat, iOld);   % replace the same tree slot in place
+    else,             db_add_data(iStudy, file_short(TfFile), FileMat); end
     panel_protocols('UpdateNode', 'Study', iStudy);
 end
 ```
