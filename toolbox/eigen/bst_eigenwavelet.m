@@ -170,6 +170,53 @@ function [W, Messages, isError] = Analysis(F, EigenMat, OperatorMat, frame) %#ok
 end
 
 
+%% ===== SCALOGRAM: per-member energy + tightness residual from a cached projection =====
+% ax     : bst_eigen('Axes') struct (per-hemi Phi/Lambda/Mass/GlobalVertices)
+% gCell  : cell of static member handles {g_m(lambda)}
+% C      : per-hemi projection cell C{h} [K_h x nT] = manifold_ft(Phi{h}, Mass{h}, F(gv,:))
+% Returns energy [3 x nT x M] {Global,LH,RH}, residual [1 x nT], resScalar, centers [1 x M], A, W [nV x nT x M].
+function scal = Scalogram(ax, gCell, C) %#ok<DEFNU>
+    M  = numel(gCell);
+    nT = size(C{find(~cellfun(@isempty,C),1)}, 2);
+    nV = 0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV = max(nV, max(ax.GlobalVertices{h}(:))); end, end
+    W  = zeros(nV, nT, M);
+    eHemi = zeros(2, nT, M);                                  % rows: LH(1), RH(2)
+    Fmod2 = 0;  Res2 = 0;                                     % modal energies for the residual
+    % frame lower bound A = min over a dense grid of sum_m g_m(l)^2
+    lamAll = []; for h=1:numel(ax.Lambda), lamAll=[lamAll; ax.Lambda{h}(:)]; end %#ok<AGROW>
+    lg = linspace(max(min(lamAll),eps), max(lamAll), 512)';  Sg = zeros(size(lg));
+    for m=1:M, v=gCell{m}(lg); Sg = Sg + real(v(:)).^2; end
+    A = min(Sg);  if ~(A>0), A = 1; end
+    tol = 1e-3 * max(Sg);                                     % coverage floor for the canonical dual
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};  if isempty(Phi) || isempty(C{h}), continue; end
+        Lam = ax.Lambda{h}(:);  gv = ax.GlobalVertices{h}(:);
+        Sg2 = zeros(numel(Lam),1);
+        for m = 1:M
+            gm = gCell{m}(Lam);  gm = real(gm(:));
+            Wm = manifold_ift(Phi, gm .* C{h});               % [nGv x nT]
+            W(gv,:,m) = Wm;
+            eHemi(min(h,2),:,m) = sum(Wm.^2, 1);
+            Sg2 = Sg2 + gm.^2;
+        end
+        Fmod = manifold_ift(Phi, C{h});                       % modal-space source (K-mode part)
+        dual = Sg2 ./ max(Sg2, tol);                          % canonical dual: ~1 where covered, ~0 in gaps
+        Frec = manifold_ift(Phi, dual .* C{h});               % exact on covered modes, 0 in frame gaps
+        Fmod2 = Fmod2 + sum(Fmod.^2, 1);
+        Res2  = Res2  + sum((Fmod - Frec).^2, 1);
+    end
+    energy = zeros(3, nT, M);
+    energy(2,:,:) = eHemi(1,:,:);  energy(3,:,:) = eHemi(2,:,:);
+    energy(1,:,:) = eHemi(1,:,:) + eHemi(2,:,:);
+    residual = sqrt(Res2) ./ sqrt(max(Fmod2, eps));
+    % per-member characteristic scale center (gain-weighted centroid of sqrt(lambda))
+    centers = zeros(1, M);
+    for m = 1:M, gm = abs(gCell{m}(lg)); if sum(gm)>0, centers(m) = sqrt(sum(lg.*gm)/sum(gm)); end, end
+    scal = struct('energy',energy, 'residual',residual, 'resScalar',mean(residual), ...
+                  'centers',centers, 'A',A, 'W',W);
+end
+
+
 %% ===== SYNTHESIS: scalogram -> map (sum of g_m(L) c_m) =====
 % Inverse of Analysis. For the Dirac family W and Frec are FULL quaternion [4*nV x .];
 % apply ToVec to obtain the physical 3-vector for display.
