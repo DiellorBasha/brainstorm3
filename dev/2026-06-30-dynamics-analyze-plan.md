@@ -15,7 +15,7 @@
 - **Window-centric:** the time window is the unit. Panel Analyze = current 4 s window (default). `process_source_frame` runs the WHOLE series only when explicitly invoked, in **contiguous non-overlapping windows**, never loading the whole series at once.
 - **Reuse:** B's `i_apply_projection` (cache key `srcResult|iWin|operator`) and `i_frame_response` (returns `.gCell` static member handles + `.A`); `bst_eigenwavelet` `Analysis`/`Synthesis`/`JTVAtoms`; `view_timefreq`; `bst_dynamics`/`view_dynamics`.
 - **Scalogram = `TimefreqMat`:** `TF [3 × nT × M]`, `RowNames={'Global','LH','RH'}`, `Freqs` = member scale centers (`√λ` gain-weighted centroid), `Measure='power'`, `Time` = window (or series) time vector, `Method='framescalogram'`.
-- **Residual:** `‖F_modal − Frec/A‖/‖F_modal‖` in the K-mode subspace, `A=min_λ Σ_m g_m(λ)²` (frame lower bound). Tight frame ⇒ ≈0.
+- **Residual:** `‖F_modal − Frec‖/‖F_modal‖` in the K-mode subspace, using the **canonical dual** `Frec=manifold_ift(Phi, (Σg²/max(Σg²,tol)).*C)` (≈1 where covered, ≈0 in gaps). NOT scalar-`A` normalization. Tight frame ⇒ ≈0.
 - **Panel Analyze preview file:** `view_timefreq` needs a saved file, so Analyze does a **find-or-replace** of a single `Frame scalogram (window)` timefreq in the source's study (not a truly transient object; keeps the DB clean). The process saves a distinct `Frame scalogram (series)`.
 - **Static-only for implementers:** implementers run `git`, `grep`, `check_matlab_code`, and WRITE headless tests but DO NOT run/evaluate MATLAB or launch Brainstorm. The controller runs the consolidated live pass.
 - Commit after each task: `feat(dynamics): <summary>` with the standard session trailers. Branch `development`. Do not push.
