@@ -116,6 +116,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jLocalize = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_SEL, TB_DIM}, 'Localize: click a cortex vertex to re-seed the selected atom', @(h,e)bst_call(@OnLocalize));
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Threshold: set the level-set threshold for the optional Scout+Event export', @(h,e)bst_call(@OnThresholdMenu));
     jApply = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_TS_DISPLAY, TB_DIM}, 'Apply: filter the REAL source through the selected atom over a 4 s window (Preview); OFF = impulse response (Design)', @(h,e)bst_call(@OnApply));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_TIMEFREQ, TB_DIM}, 'Analyze: decompose the current window''s source through the frame -> spatial scalogram + residual', @(h,e)bst_call(@OnAnalyzeWindow));
     jToolbar2.addSeparator();
     % --- legacy detection / differential maps (untouched this step) ---
     jShow = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_ALL, TB_DIM}, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
@@ -804,6 +805,75 @@ end
 function nV = i_overlay_nv(ax)
     nV = 0;
     for b = 1:numel(ax.GlobalVertices), nV = max(nV, max(double(ax.GlobalVertices{b}(:)))); end
+end
+
+%% ===== ANALYZE: decompose the current window's real source through the frame -> scalogram =====
+% Build a scalogram TimefreqMat [3 x nT x M] {Global,LH,RH} from a bst_eigenwavelet('Scalogram') result.
+function FileMat = i_scalogram_timefreq(scal, timeVec, surfaceFile, dataFile, comment)
+    FileMat = db_template('timefreqmat');
+    FileMat.TF        = scal.energy;                          % [3 x nT x M]
+    FileMat.Time      = timeVec(:)';
+    FileMat.Freqs     = scal.centers(:);                      % sqrt(lambda) scale centers
+    FileMat.RowNames  = {'Global','LH','RH'};
+    FileMat.Measure   = 'power';
+    FileMat.Method    = 'framescalogram';
+    FileMat.DataType  = 'matrix';
+    FileMat.SurfaceFile = surfaceFile;
+    FileMat.nAvg = 1;  FileMat.Leff = 1;
+    if ~isempty(dataFile), FileMat.DataFile = file_short(dataFile); end
+    FileMat.Comment = comment;
+end
+
+% Analyze the current 4 s window's source through the frame -> scalogram TimefreqMat + residual.
+function OnAnalyzeWindow() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcResult') || isempty(D.srcResult)
+        ctrl.jAtomInfo.setText('Analyze: no real source linked');  return;
+    end
+    variant = i_atom_op(st);
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
+        ctrl.jAtomInfo.setText(sprintf('%s: Analyze is scalar-only for now (use Geometric/Connectomic)', variant));  return;
+    end
+    ax = i_atom_axes(st, variant);  if isempty(ax), return; end
+    fr = i_frame_response(st, ax);
+    if fr.nMembers < 1, ctrl.jAtomInfo.setText('Analyze: no static frame members'); return; end
+    nV = i_overlay_nv(ax);
+    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
+    if isempty(iWin), ctrl.jAtomInfo.setText('Analyze: no recording window'); return; end
+    bst_progress('start', 'Frame', 'Analyzing the source through the frame...');
+    [C, ~] = i_apply_projection(st, ax, D, iWin, nV);          % reuse B's cache
+    scal = bst_eigenwavelet('Scalogram', ax, fr.gCell, C);
+    tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tv = tv(iWin);
+    surf = ax.SurfaceFile;  srcFile = D.srcResult;
+    FileMat = i_scalogram_timefreq(scal, tv, surf, srcFile, sprintf('Frame scalogram (window) | %d members', scal_nmembers(scal)));
+    TfFile = i_save_scalogram(srcFile, FileMat, 'Frame scalogram (window)');   % find-or-replace in the source study
+    bst_progress('stop');
+    if ~isempty(TfFile), try, view_timefreq(TfFile, 'SingleSensor'); catch, end, end %#ok<CTCH>
+    ctrl.jAtomInfo.setText(sprintf('Analyze: residual %.1f%% (frame completeness)', 100*scal.resScalar));
+end
+function n = scal_nmembers(scal), n = size(scal.energy, 3); end
+
+% Save (find-or-replace by Comment) a timefreq FileMat into the source result's study; return its path.
+function TfFile = i_save_scalogram(srcFile, FileMat, tag)
+    TfFile = '';
+    [sStudy, iStudy] = bst_get('AnyFile', srcFile);
+    if isempty(sStudy), return; end
+    % reuse an existing same-tag file for this source, else make a new path
+    old = '';
+    if isfield(sStudy,'Timefreq') && ~isempty(sStudy.Timefreq)
+        for i=1:numel(sStudy.Timefreq)
+            if strncmp(sStudy.Timefreq(i).Comment, tag, numel(tag)), old = sStudy.Timefreq(i).FileName; break; end
+        end
+    end
+    if ~isempty(old)
+        TfFile = file_fullpath(old);
+    else
+        TfFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(srcFile)), 'timefreq_framescalo');
+    end
+    bst_save(TfFile, FileMat, 'v6');
+    db_add_data(iStudy, file_short(TfFile), FileMat);
+    panel_protocols('UpdateNode', 'Study', iStudy);
 end
 
 %% ===== filterbank: create / list / select / save =====
