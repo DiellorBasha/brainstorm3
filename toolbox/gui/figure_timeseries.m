@@ -5277,3 +5277,22 @@ function res = ContainsDims(MatA, MatB)
     res = nDimsB >= nDimsA && all(sizeB(1:nDimsA) == sizeA);
 end
 
+% Draw (or clear) a filtered-sensor overlay stashed on this figure by view_dynamics. No-op unless set.
+function DrawFilteredOverlay(hFig) %#ok<DEFNU>
+    ov = getappdata(hFig, 'FilteredSensorsOverlay');
+    delete(findobj(hFig, 'Tag', 'FilteredSensorOverlay'));       % clear prior overlay lines
+    if isempty(ov) || ~isfield(ov,'Dfilt') || isempty(ov.Dfilt), return; end
+    hAxes = findobj(hFig, '-depth', 1, 'Tag', 'AxesGraph');
+    if isempty(hAxes), return; end
+    hAxes = hAxes(1);
+    % scale Dfilt to the raw traces' current display scaling (butterfly): match the axes YLim span
+    Dfilt = ov.Dfilt;  t = ov.tWin(:)';
+    rng = max(abs(Dfilt(:)));  if rng <= 0, return; end
+    yl = get(hAxes, 'YLim');  sc = 0.9 * max(abs(yl)) / rng;      % fit into the current amplitude range
+    hold(hAxes, 'on');
+    for c = 1:size(Dfilt,1)
+        line(t, sc*Dfilt(c,:), 'Parent', hAxes, 'Color',[1 0.3 0.1 0.5], 'LineWidth',0.5, ...
+             'Tag','FilteredSensorOverlay', 'HitTest','off', 'PickableParts','none');
+    end
+end
+

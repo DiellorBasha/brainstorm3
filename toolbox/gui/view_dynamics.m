@@ -70,6 +70,12 @@ function varargout = view_dynamics( varargin )
         ClearAtomField(varargin{2});
         return;
     end
+    if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'SetFilteredSensors')
+        SetFilteredSensors(varargin{2:end});  return;
+    end
+    if (nargin >= 2) && ischar(varargin{1}) && strcmp(varargin{1}, 'ClearFilteredSensors')
+        ClearFilteredSensors(varargin{2});    return;
+    end
 
     % --- FromResult verb: open (reuse, else create) a dynamics table for a Dirac result ---
     SrcResult = '';
@@ -306,6 +312,18 @@ function ClearAtomField(hFig)
     bst_colormaps('AddColormapToFigure', hFig, 'source');
     panel_surface('UpdateSurfaceData', hFig, D.iTess);
     panel_surface('UpdateSurfaceColormap', hFig);
+end
+
+%% ===== filtered-sensor overlay: stash Dfilt on the recording figure + trigger the draw hook =====
+function SetFilteredSensors(hRec, Dfilt, tWin)
+    if isempty(hRec) || ~ishandle(hRec), return; end
+    setappdata(hRec, 'FilteredSensorsOverlay', struct('Dfilt',Dfilt, 'tWin',tWin));
+    figure_timeseries('DrawFilteredOverlay', hRec);
+end
+function ClearFilteredSensors(hRec)
+    if isempty(hRec) || ~ishandle(hRec), return; end
+    setappdata(hRec, 'FilteredSensorsOverlay', []);
+    figure_timeseries('DrawFilteredOverlay', hRec);
 end
 
 % Scatter frame iT of W (rows aligned with gv) onto a full-surface [nV x 1] vector (index-clamped).
