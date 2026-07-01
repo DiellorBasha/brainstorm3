@@ -619,6 +619,22 @@ function blk = i_seed_block(ax, seed)
     end
 end
 
+% Default impulse direction per operator dimensionality: Dirac -> seed surface normal (unit 3-vector);
+% tangent/scalar -> 1 (frame e1 / amplitude). See atom-operator-applicability.
+function dir = i_atom_default_dir(ax, seedVert) %#ok<DEFNU>
+    [~, kind] = bst_eigenfilter('Fiber', ax);
+    if ~strcmp(kind, 'quaternion'), dir = 1; return; end
+    dir = [0 0 1];                                       % fallback if normals are missing
+    try
+        S = in_tess_bst(ax.SurfaceFile, 0);
+        if isfield(S,'VertNormals') && ~isempty(S.VertNormals) && seedVert <= size(S.VertNormals,1)
+            n = S.VertNormals(seedVert, :);  if norm(n) > 0, dir = n / norm(n); end
+        end
+    catch %#ok<CTCH>
+    end
+    dir = dir(:)';
+end
+
 % Live preview dispatcher: Apply OFF -> impulse response (Design); Apply ON -> filtered real source (Preview).
 % Every existing call site (param edit, operator change, atom select, seed) routes through here, so the
 % displayed field always matches the current mode.
