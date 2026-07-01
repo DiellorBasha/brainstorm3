@@ -65,9 +65,21 @@ if isstruct(g) && isfield(g, 'Kernels')
             set(hL, 'ButtonDownFcn', @(h,e) g.OnSelect(j), 'HitTest','on', 'PickableParts','visible');
         end
     end
+    % --- optional coverage overlay: S(lambda) = sum_m g_m(lambda)^2 (frame tightness) ---
+    if isfield(g,'Coverage') && ~isempty(g.Coverage) && g.Coverage
+        S = zeros(size(xg));
+        for j = 1:nT; yj = g.Kernels{j}(xg); S = S + real(yj(:)).^2; end
+        plot(ax, xg, S, '-', 'Color',[.1 .1 .8], 'LineWidth', 2.5);
+        plot(ax, [0 lmax], mean(S)*[1 1], ':', 'Color',[.1 .1 .8 ]);   % faint "flat" reference
+    end
     xlim(ax, [0 lmax]);
-    xlabel(ax, '\lambda (eigenvalue)'); ylabel(ax, 'g(\lambda)'); grid(ax, 'on');
-    if (nargin >= 3) && ~isempty(titleStr); title(ax, titleStr, 'Interpreter','none'); end
+    xlabel(ax, '\lambda (eigenvalue)'); ylabel(ax, 'g(\lambda) / S(\lambda)'); grid(ax, 'on');
+    ttl = '';  if (nargin >= 3) && ~isempty(titleStr); ttl = titleStr; end
+    if isfield(g,'Bounds') && ~isempty(g.Bounds) && isstruct(g.Bounds)
+        chk = ''; if abs(g.Bounds.tightness - 1) < 0.05; chk = ' OK'; end
+        ttl = sprintf('%s   A=%.3g  B=%.3g  B/A=%.3g%s', ttl, g.Bounds.A, g.Bounds.B, g.Bounds.tightness, chk);
+    end
+    if ~isempty(ttl); title(ax, ttl, 'Interpreter','none'); end
     return;
 end
 
