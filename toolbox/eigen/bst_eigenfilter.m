@@ -143,8 +143,8 @@ function [srcRows, dstRows, nrows, msg] = RowMap(F, EigenMat, h) %#ok<DEFNU>
                 return;
             end
             srcRows = gv;  dstRows = (1:numel(gv))';  nrows = numel(gv);
-        case {'Dirac', 'Dirac-Face', 'Hodge-Face'}
-            if strcmp(EigenMat.Variant, 'Dirac')
+        case {'Dirac', 'Dirac-Connectome', 'Dirac-Face', 'Hodge-Face'}
+            if strcmp(EigenMat.Variant, 'Dirac') || strcmp(EigenMat.Variant, 'Dirac-Connectome')
                 idx = EigenMat.GlobalVertices{h}(:);
             else
                 idx = EigenMat.GlobalFaces{h}(:);

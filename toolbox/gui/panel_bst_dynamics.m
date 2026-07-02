@@ -555,6 +555,26 @@ function ax = i_atom_axes(st, variant) %#ok<DEFNU>
             % basis missing/malformed -> fall through to the canonical path
         end
     end
+    % Dirac-Connectome: lift the scalar LB-Connectome eigenbasis (whole-brain, single-block) to a
+    % quaternion basis via bst_lift_connectome_dirac, so RowMap/Fiber treat it like Dirac.
+    if strcmp(variant, 'Dirac-Connectome')
+        surf = i_atom_surface(st);  key = ['dconn|' surf];
+        Mc = getappdata(0,'DynamicsAtomAx');  if isempty(Mc)||~isa(Mc,'containers.Map'), Mc=containers.Map('KeyType','char','ValueType','any'); end
+        if isKey(Mc,key), ax = Mc(key); return; end
+        Fs = 100; D = getappdata(st.hFig,'DynamicsOverlay');
+        if ~isempty(D) && isfield(D,'srcDS') && isfield(D,'srcResult')
+            try, tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult); if numel(tv)>1, Fs=1/median(diff(tv)); end, catch, end %#ok<CTCH>
+        end
+        nF = max(2, round(4*Fs));
+        axs = bst_eigen('Axes', struct('SurfaceFile',surf,'Variant','LB-Connectome','nModes',60,'TimeWindow',[0 (nF-1)/Fs],'SampleRate',Fs));
+        if isempty(axs) || isempty(axs.Phi{1}), return; end
+        [Phiq,Lamq,Mq] = bst_lift_connectome_dirac(axs.Phi{1}, axs.Lambda{1}(:), axs.Mass{1});
+        ax = struct('Variant','Dirac-Connectome','SurfaceFile',surf, ...
+                    'Phi',{{Phiq,[]}}, 'GlobalVertices',{axs.GlobalVertices}, 'Mass',{{Mq,[]}}, 'Lambda',{{Lamq,[]}});
+        ax.nT = nF;  ax.tlag = (0:nF-1)/Fs;  ax.omega = (0:nF-1)*(Fs/nF);  ax.NFFT = nF;
+        Mc(key) = ax;  setappdata(0,'DynamicsAtomAx', Mc);
+        return;
+    end
     surf = i_atom_surface(st);  if isempty(surf), return; end
     key = [variant '|' surf];
     M = getappdata(0, 'DynamicsAtomAx');
