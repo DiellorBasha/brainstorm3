@@ -516,9 +516,9 @@ function ax = i_atom_axes(st, variant) %#ok<DEFNU>
             if isKey(Mc,key), ax = Mc(key); return; end
             src = i_src_resultfile(D);
             R = in_bst_results(src, 0, 'DiracEigenFile','Eigenvalues','ModeHemisphere','SurfaceFile');
-            E = in_bst_eigen(R.DiracEigenFile);
-            O = in_bst_operator(E.OperatorFile);
-            if isfield(E,'Phi') && ~isempty(E.Phi) && isfield(O,'Mass') && numel(O.Mass)==2
+            E = [];  O = [];   % in_bst_eigen/in_bst_operator THROW on a missing/corrupt file -> catch and fall through
+            try, E = in_bst_eigen(R.DiracEigenFile);  O = in_bst_operator(E.OperatorFile);  catch, E = [];  O = [];  end %#ok<CTCH>
+            if ~isempty(E) && isstruct(E) && isfield(E,'Phi') && ~isempty(E.Phi) && isstruct(O) && isfield(O,'Mass') && numel(O.Mass)==2
                 lam = double(R.Eigenvalues(:));  hemi = double(R.ModeHemisphere(:));
                 ax = struct('Variant','Dirac','SurfaceFile',R.SurfaceFile, ...
                             'Phi',{E.Phi},'GlobalVertices',{E.GlobalVertices},'Mass',{O.Mass},'Operator',O);
