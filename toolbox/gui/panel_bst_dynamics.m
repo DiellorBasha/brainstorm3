@@ -1506,7 +1506,9 @@ function i_build_measure_control(ctrl, st)
     show = false;
     if ~isempty(st) && isfield(st,'hFig') && ~isempty(st.hFig) && ishandle(st.hFig)
         D = getappdata(st.hFig, 'DynamicsOverlay');
-        if ~isempty(D) && i_is_dirac_dspm(D) && ~isempty(i_dspm_scale(st, D)), show = true; end
+        % only the Dirac operator's Apply path honors the measure toggle (scalar atoms ignore it), so gate
+        % on the selected operator too -- not just the source being Dirac-dSPM.
+        if ~isempty(D) && strcmp(i_atom_op(st),'Dirac') && i_is_dirac_dspm(D) && ~isempty(i_dspm_scale(st, D)), show = true; end
     end
     ctrl.jMeasureRow.setVisible(show);
     if ~show, return; end
