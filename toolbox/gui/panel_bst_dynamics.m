@@ -985,49 +985,46 @@ function i_atom_apply() %#ok<DEFNU>
     lmax   = max(ax.Lambda{1}(:));
     [kernel, kp] = i_selected_generator(st, ctrl, lmax);
     nV     = i_overlay_nv(ax);
-    % --- Dirac operator: filter in the Dirac eigenbasis -> cortex magnitude + filtered-sensor overlay ---
-    if strcmp(variant, 'Dirac')
-        % the Dirac cortex/sensor forward uses a STATIC spatial gain g(lambda); a dynamic (ts/js)
+    % --- Vector operators (Dirac / Dirac-Connectome): filter in the quaternion eigenbasis -> cortex
+    %     magnitude + quivers; surface Dirac also overlays a filtered-sensor forward (Dirac-Connectome
+    %     is source-space only: no leadfield -> no sensor). ---
+    if any(strcmp(variant, {'Dirac','Dirac-Connectome'}))
+        % the vector cortex/sensor forward uses a STATIC spatial gain g(lambda); a dynamic (ts/js)
         % kernel is g(lambda,t|omega) -> not supported here (use a static kernel, e.g. heat/mexhat/itersine).
         meta = bst_eigfilter_kernel('info', kernel);
         dom = 'static'; if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
         if any(strcmpi(dom, {'ts','js'}))
-            ctrl.jAtomInfo.setText(sprintf('Dirac Apply: %s is dynamic; use a static kernel', kernel));
+            ctrl.jAtomInfo.setText(sprintf('%s Apply: %s is dynamic; use a static kernel', variant, kernel));
             return;
         end
-        Leig = i_dirac_leadfield(st, ax);
+        Leig = i_dirac_leadfield(st, ax);   % [] for Dirac-Connectome (no physical eigen-leadfield)
         iWin = i_cursor_window(D.srcDS, D.srcResult, 4);  if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no window'); return; end
+        g = bst_eigfilter_kernel(kernel, kp);
         % --- Dirac-dSPM: filter the INVERSE's own mode coefficients directly (free projection, full
         %     mode count) instead of reconstructing the field and re-projecting it into a fresh basis. ---
-        if i_is_dirac_dspm(D)
+        if strcmp(variant,'Dirac') && i_is_dirac_dspm(D)
             [cCell,~] = i_mode_coeffs(st, D, iWin);
-            g = bst_eigfilter_kernel(kernel, kp);
             cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
             [V3, mag] = i_dirac_recon(ax, cf);                 % amplitude current
             sir = i_dspm_scale(st, D);
             magShow = mag;
             if strcmpi(i_field(st,'atomMeasure','amplitude'),'dspm') && ~isempty(sir), magShow = mag .* sir(:); end
-            nVmode = size(mag,1);
-            if ~isempty(st.hFig) && ishandle(st.hFig)
-                view_dynamics('SetFilteredField', st.hFig, magShow, (1:nVmode)', iWin, false);
-                Vq = zeros(nVmode,3);  Vq(:,:) = V3(:,:,max(1,round(size(V3,3)/2)));  % mid-window frame for quivers
-                setappdata(st.hFig,'QuiverVectorOverride', Vq);
-                try, figure_3d('SetShowSourceVectors', st.hFig, D.iTess, 1); catch, end %#ok<CTCH>
-            end
-            Dfilt = i_dirac_forward_modes(ax, Leig, cf);
-            i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel);
-            return;
+        else
+            % Dirac-Connectome (fiber-spread) OR non-dSPM Dirac: reconstruct the source field, re-project
+            % into ax, filter g(lambda), reconstruct -> amplitude magnitude + quivers (peak-normalized).
+            cCell = i_vector_coeffs(st, ax, D, iWin);
+            cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
+            [V3, mag] = i_dirac_recon(ax, cf);
+            magShow = mag;  pk = max(abs(magShow(:)));  if pk>0, magShow = magShow/pk; end
         end
-        J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] Dirac field
-        g = bst_eigfilter_kernel(kernel, kp);
-        bst_progress('start','Atom','Dirac filter -> sensors...');
-        [Dfilt, Jfilt] = i_dirac_forward(ax, Leig, J, g);
-        bst_progress('stop');
-        % cortex: filtered magnitude
-        Jmag = i_paintable_scalar(Jfilt, nV);
-        pk = max(abs(Jmag(:))); if pk>0, Jmag = Jmag/pk; end
-        if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('SetFilteredField', st.hFig, Jmag, (1:nV)', iWin, false); end
-        % sensor: overlay Dfilt vs raw (only if L_eig available)
+        nVmode = size(mag,1);
+        if ~isempty(st.hFig) && ishandle(st.hFig)
+            view_dynamics('SetFilteredField', st.hFig, magShow, (1:nVmode)', iWin, false);
+            Vq = zeros(nVmode,3);  Vq(:,:) = V3(:,:,max(1,round(size(V3,3)/2)));  % mid-window frame for quivers
+            setappdata(st.hFig,'QuiverVectorOverride', Vq);
+            try, figure_3d('SetShowSourceVectors', st.hFig, D.iTess, 1); catch, end %#ok<CTCH>
+        end
+        Dfilt = i_dirac_forward_modes(ax, Leig, cf);           % [] when Leig is [] (Dirac-Connectome)
         i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel);
         return;
     end
@@ -1217,6 +1214,24 @@ function [cCell, meta] = i_mode_coeffs(st, D, iWin) %#ok<DEFNU>
     end
     meta.DiracEigenFile = R.DiracEigenFile;
     setappdata(0,'DynamicsModeCoeffCache', struct('key',key,'cCell',{cCell},'meta',meta));
+end
+
+% Vector mode coefficients by reconstruct-then-project: pull the source's ambient 3-vector field
+% J [3nV x nWin], embed it into the quaternion source layout (imag x/y/z slots, w=0) via the ax's
+% RowMap, and project per block onto the (lifted) basis: cCell{h} = manifold_ft(Phi{h}, Mass{h}, U_h).
+% General for any vector ax (Dirac-Connectome; also non-dSPM Dirac) -- the field analog of i_mode_coeffs.
+function cCell = i_vector_coeffs(st, ax, D, iWin) %#ok<DEFNU>
+    cCell = cell(1, numel(ax.Phi));
+    J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] ambient field
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};
+        if isempty(Phi), cCell{h} = []; continue; end
+        [srcRows, dstRows, nrows, msg] = bst_eigenfilter('RowMap', J, ax, h);
+        if ~isempty(msg), cCell{h} = []; continue; end
+        U = zeros(nrows, size(J,2));
+        U(dstRows,:) = J(srcRows,:);                         % [w,x,y,z] interleaved, w=0
+        cCell{h} = manifold_ft(Phi, ax.Mass{h}, U);          % [Kh x nWin]
+    end
 end
 
 % Per-vertex dSPM/sLORETA scale SIR(v) = ||ImagingKernel_v|| / ||reconstruct(ImagingKernelMode)_v||.
@@ -1664,36 +1679,12 @@ function OnDesignFrame() %#ok<DEFNU>
 end
 
 %% ===== Dirac sensor forward (Task 3: filtered-SENSOR view for the Preview mode) =====
-% Dirac sensor forward: filter J in the Dirac eigenbasis and forward to sensors.
-%   ax   : i_atom_axes(st,'Dirac') (per-hemi Phi/Lambda/Mass/GlobalVertices; quaternion basis)
-%   Leig : eigenbasis leadfield [nCh x 2K] (L-then-R), from i_dirac_leadfield
-%   J    : source 3-vector field [3nV x nT]
-%   g    : gain handle g(lambda)
-% Returns Dfilt [nCh x nT], Jfilt [3nV x nT] (filtered 3-vector field), cfilt [2K x nT].
-function [Dfilt, Jfilt, cfilt] = i_dirac_forward(ax, Leig, J, g) %#ok<DEFNU>
-    nV = 0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV = max(nV, max(ax.GlobalVertices{h}(:))); end, end   % guard empty block (whole-brain single-block ax)
-    nT = size(J, 2);  Jfilt = zeros(3*nV, nT);  cfilt = [];
-    for h = 1:numel(ax.Phi)
-        Phi = ax.Phi{h};  if isempty(Phi), continue; end
-        idx = ax.GlobalVertices{h}(:);  n = numel(idx);  Lam = ax.Lambda{h}(:);
-        % embed the 3-vector source into the quaternion imag slots (w=0), per bst_eigenwavelet i_hemimap
-        gIn = reshape([(idx-1)*3+1, (idx-1)*3+2, (idx-1)*3+3].', [], 1);            % global 3-vec rows
-        lIn = reshape([(0:n-1)*4+2; (0:n-1)*4+3; (0:n-1)*4+4], [], 1);              % local quat imag slots
-        U = zeros(4*n, nT);  U(lIn, :) = J(gIn, :);
-        C  = manifold_ft(Phi, ax.Mass{h}, U);            % [K x nT] eigenmode coeffs
-        Ch = g(Lam) .* C;                                % gain
-        cfilt = [cfilt; Ch]; %#ok<AGROW>                 % stack L-then-R -> [2K x nT]
-        Uf = manifold_ift(Phi, Ch);                      % [4n x nT] filtered quaternion field
-        Jfilt(gIn, :) = Uf(lIn, :);                      % extract imag 3-vector
-    end
-    if ~isempty(Leig), Dfilt = Leig * cfilt;             % [nCh x nT]
-    else,              Dfilt = [];                       % basis mismatch -> no sensor view (cortex still previews)
-    end
-end
-
 % Dirac eigenbasis leadfield L_eig [nCh x 2K] via bst_dirac(HeadModel); cached per (headmodel,nModes,tau).
 function Leig = i_dirac_leadfield(st, ax) %#ok<DEFNU>
     Leig = [];
+    % Only the surface Dirac basis has a physical eigen-leadfield; Dirac-Connectome (fiber-spread) and the
+    % face/Hodge variants are source-space only -> no sensor forward.
+    if ~isfield(ax,'Variant') || ~strcmp(ax.Variant, 'Dirac'), return; end
     D = getappdata(st.hFig, 'DynamicsOverlay');  if isempty(D), return; end
     src = i_src_resultfile(D);  if isempty(src), return; end
     R = in_bst_results(src, 0, 'HeadModelFile');
