@@ -63,7 +63,7 @@ end
 
 
 %% ===== ATOM: realise ONE localised atom (static / ts / js), domain-aware =====
-function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DEFNU>
+function [W, gv, V3, isSigned] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DEFNU>
     % Drop a unit delta at seedVert and propagate it through the kernel over the eigenbasis.
     % Domain-aware (kernel registry 'domain' tag): static g(lambda) (constant in time) | ts g(lambda,t)
     % | js g(lambda,omega) (realised by inverse JOINT time-vertex transform). ax = bst_eigen('Axes', ...).
@@ -76,7 +76,7 @@ function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DE
     end
     if blk == 0, error('bst_eigenfilter(''Atom''): seed vertex %d not in the eigenbasis support.', seedVert); end
     Phi = ax.Phi{blk};  Lam = ax.Lambda{blk};  M = ax.Mass{blk};  gv = ax.GlobalVertices{blk};
-    [C, kind] = i_fiber(ax); %#ok<ASGLU>
+    [C, kind] = i_fiber(ax);
     nSrc = 0; for hh=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{hh}), nSrc = max(nSrc, max(ax.GlobalVertices{hh}(:))); end, end   % guard empty block (whole-brain single-block ax)
     switch kind
         case 'scalar'
@@ -114,6 +114,24 @@ function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DE
         otherwise
             error('bst_eigenfilter(''Atom''): unknown kernel domain ''%s''.', dom);
     end
+
+    % --- decode the realised atom for its fiber into an ambient 3-vector V3 (frame 1) ---
+    % Relocated from panel_bst_dynamics i_atom_realise_core so that realising an atom yields its
+    % physical vectors directly. Byte-equivalent to the former panel decode. Scalar fiber -> V3=[].
+    V3 = [];  isSigned = [];
+    switch kind
+        case 'quaternion'
+            n  = numel(gv);
+            im = reshape(manifold_quat_imag(W(:,1)), 3, n).';       % [n x 3] imag 3-vector, frame 1
+            V3 = zeros(nSrc, 3);  V3(gv,:) = im;
+            isSigned = false;                                       % magnitude render is one-signed
+        case 'tangent'
+            Fr = ax.Operator.Frame{blk};                           % operator frame for the seed's block
+            a  = real(W(:,1));  b = imag(W(:,1));
+            V3 = zeros(nSrc, 3);  V3(gv,:) = a.*Fr.e1 + b.*Fr.e2;   % ambient a*e1 + b*e2
+            isSigned = false;
+    end
+    if C == 1, V3 = []; isSigned = []; end                          % scalar guard
 end
 
 
