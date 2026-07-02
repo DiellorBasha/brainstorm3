@@ -76,6 +76,10 @@ if ischar(Data) && strcmpi(Data, 'Axes')          % ax = bst_eigen('Axes', OPTIO
     OutputFiles = BuildAxes(OPTIONS);  Messages = '';  isError = 0;
     return;
 end
+if (nargin >= 1) && ischar(Data) && strcmpi(Data, 'FieldSpec')
+    OutputFiles = i_field_spec(OPTIONS);   % OPTIONS = ax
+    return;
+end
 
 % ===== DEFAULT OPTIONS =====
 Def_OPTIONS.Comment       = '';
@@ -708,4 +712,35 @@ function ax = BuildAxes(OPTIONS)
     ax.EigenMat = EigenMat;  ax.Operator = Op;
     ax.Phi = EigenMat.Phi;   ax.Lambda = EigenMat.Lambda;  ax.Mass = Op.Mass;
     ax.GlobalVertices = EigenMat.GlobalVertices;
+end
+
+%% ===== FIELD SPEC: (field_type, domain) -> layout, from operator metadata =====
+function spec = i_field_spec(ax)
+    ft = '';  dom = '';
+    if isfield(ax,'Operator') && isstruct(ax.Operator) && isfield(ax.Operator,'Registry') ...
+            && ~isempty(ax.Operator.Registry) && isfield(ax.Operator.Registry,'Primary') ...
+            && ~isempty(ax.Operator.Registry.Primary)
+        P = ax.Operator.Registry.Primary;
+        if isfield(P,'field_type'), ft  = P.field_type; end
+        if isfield(P,'domain'),     dom = P.domain;     end
+    end
+    switch lower(ft)
+        case 'real',       C = 1;
+        case 'complex',    C = 2;
+        case 'quaternion', C = 4;
+        otherwise,         C = [];      % pre-registry -> infer below
+    end
+    if isempty(C)                        % guarded fallback: derive from the Phi row layout
+        nV = numel(ax.GlobalVertices{1});
+        C  = round(size(ax.Phi{1},1) / max(nV,1));
+        switch C, case 1, ft='real'; case 2, ft='complex'; case 4, ft='quaternion'; otherwise, ft='real'; C=1; end
+    end
+    if isempty(dom), dom = 'vertex'; end               % completeness default (vertex is universal)
+    switch C
+        case 1, kind='scalar';     width=1; nComp=1;
+        case 2, kind='tangent';    width=1; nComp=1;   % complex row per element
+        case 4, kind='quaternion'; width=4; nComp=3;
+        otherwise, kind='scalar';  width=1; nComp=1;
+    end
+    spec = struct('field_type',ft, 'domain',dom, 'width',width, 'nComponents',nComp, 'C',C, 'kind',kind);
 end
