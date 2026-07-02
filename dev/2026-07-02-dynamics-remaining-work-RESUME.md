@@ -1,5 +1,19 @@
 # Dynamics — Remaining Work RESUME STATE (2026-07-02)
 
+> **✅ STATUS 2026-07-02: BOTH ITEMS DONE + LIVE-VERIFIED, committed `c9b7b5fa` on `development`.**
+> - **Item 1 (Task 6 — Helmholtz filtered):** `OnHelmholtzFiltered` + toolbar button in
+>   `panel_bst_dynamics.m`. Live: filtered Curl differs from raw (corr 0.14, |Curl| 384 vs 195),
+>   Div/Curl finite, HarmFrac 0.089.
+> - **Item 2 (windowed scalogram):** user chose **A (Morlet full-time)**. `bst_eigenwavelet('ScalogramEnergy')`
+>   (coeff-space, per-hemi Euclidean Gram, no `W`; headless equivalence to `Scalogram` = 4e-16) +
+>   `OnAnalyzeWindow` now full-recording coeff-space (`i_project_fulltime` + `i_hemi_membership`). Live:
+>   62 s in 0.16 s, Time == recording (co-displays, no conflict), single-block LH/RH split fixed
+>   (LH 3.56e3 / RH 4.49e3, Global=LH+RH to 1e-10).
+> - Cosmetic follow-up (not a defect): the timefreq viewer labels the spatial scale-center as "Hz" and a
+>   1-member frame sits off the auto-scaled axis → design a multi-member frame for a filled scalogram.
+>
+> ---
+>
 > **Purpose:** hand off two remaining implementation items to a FRESH session. Read this top-to-bottom
 > before touching code. Baseline is fully committed on `development`; both items are additive.
 >
