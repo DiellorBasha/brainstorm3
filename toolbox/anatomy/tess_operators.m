@@ -173,6 +173,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             if ~isfield(OperatorMat,'Registry') || isempty(OperatorMat.Registry)
                 OperatorMat.Registry = struct('Primary', struct(), 'Components', []);
             end
+            % WARNING: field_type stamp is AUTHORITATIVE Brainstorm-semantic type, NOT nxr's value.
+            % For lifted variants (e.g., Hodge-Face), nxr publishes the RAW operator's field_type
+            % ('real' scalar Laplacian); Brainstorm must override with the LIFTED field_type
+            % ('quaternion' after Hodge lift). This override is REQUIRED and must always win —
+            % do NOT add a guard that skips stamping when field already exists, as that would
+            % silently regress to nxr's raw value.
             OperatorMat.Registry.Primary.field_type = fs.field_type;
             OperatorMat.Registry.Primary.domain     = fs.domain;
         end
@@ -493,6 +499,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         if ~isfield(OperatorMat,'Registry') || isempty(OperatorMat.Registry)
             OperatorMat.Registry = struct('Primary', struct(), 'Components', []);
         end
+        % WARNING: field_type stamp is AUTHORITATIVE Brainstorm-semantic type, NOT nxr's value.
+        % For lifted variants (e.g., Hodge-Face, Dirac-Connectome), nxr publishes the RAW
+        % operator's field_type ('real' scalar); Brainstorm must override with the LIFTED
+        % field_type ('quaternion' for Hodge-Face, 'dirac' vector for Dirac-Connectome).
+        % This override is REQUIRED and must always win — do NOT add a guard that skips
+        % stamping when field already exists, as that would silently regress to nxr's raw value.
         OperatorMat.Registry.Primary.field_type = fs.field_type;
         OperatorMat.Registry.Primary.domain     = fs.domain;
     end
