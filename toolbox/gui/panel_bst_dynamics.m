@@ -926,6 +926,12 @@ function [C, gvAll] = i_apply_projection(st, ax, D, iWin, nV)
         for h=1:numel(ax.GlobalVertices), gvAll=[gvAll; ax.GlobalVertices{h}(:)]; end %#ok<AGROW>
         return;
     end
+    if strcmp(i_atom_op(st),'Dirac-Connectome')
+        % Vector coefficients by reconstruct-then-project (no mode kernel): the fiber-spread field analog.
+        C = i_vector_coeffs(st, ax, D, iWin);  gvAll = ax.GlobalVertices{1}(:);
+        setappdata(0, 'DynamicsApplyCache', struct('key',key, 'C',{C}, 'gvAll',gvAll));
+        return;
+    end
     F = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
     Fr = i_paintable_scalar(F, nV);                       % scalar per-vertex magnitude field
     C = cell(1, numel(ax.Phi));  gvAll = [];
@@ -1154,8 +1160,8 @@ function OnAnalyzeWindow() %#ok<DEFNU>
         ctrl.jAtomInfo.setText('Analyze: no real source linked');  return;
     end
     variant = i_atom_op(st);
-    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
-        ctrl.jAtomInfo.setText(sprintf('%s: Analyze is scalar-only for now (use Geometric/Connectomic or a Dirac-dSPM source)', variant));  return;
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome','Dirac-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
+        ctrl.jAtomInfo.setText(sprintf('%s: Analyze is scalar-only for now (use Geometric/Connectomic, Dirac (connectome), or a Dirac-dSPM source)', variant));  return;
     end
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     fr = i_frame_response(st, ax);
@@ -1363,7 +1369,7 @@ function OnLocalizeBands() %#ok<DEFNU>
         ctrl.jAtomInfo.setText('Localize bands: no real source linked');  return;
     end
     variant = i_atom_op(st);
-    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome','Dirac-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
         ctrl.jAtomInfo.setText(sprintf('%s: Localize bands is scalar-only for now', variant));  return;
     end
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
