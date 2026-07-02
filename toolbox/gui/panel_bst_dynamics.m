@@ -675,23 +675,10 @@ function st = i_atom_ensure_axes(st)
 end
 
 % Pure realise-core: run the atom on ax at (seed,dir); return the raw field W [C*n x nT], its global
-% vertices gv, and the decoded full-surface ambient vectors V3 [nV x 3] ([] for scalar).
+% vertices gv, and the decoded full-surface ambient vectors V3 [nV x 3] ([] for scalar). The fiber
+% decode now lives in bst_eigenfilter('Atom') (SP2a); this is a thin passthrough. SP2b removes it.
 function [W, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir) %#ok<DEFNU>
-    [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed, seedDir);
-    [C, kind] = bst_eigenfilter('Fiber', ax);
-    nV = 0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV = max(nV, max(ax.GlobalVertices{h}(:))); end, end   % guard empty block (whole-brain single-block ax)
-    V3 = [];
-    switch kind
-        case 'quaternion'
-            n = numel(gv);  im = reshape(manifold_quat_imag(W(:,1)), 3, n).';   % [n x 3] imag 3-vector, frame 1
-            V3 = zeros(nV,3);  V3(gv,:) = im;
-        case 'tangent'
-            % complex (a+bi) in the operator frame -> ambient 3-vector a*e1 + b*e2 (Op.Frame per hemi)
-            blk = 1; for h=1:numel(ax.GlobalVertices), if any(ax.GlobalVertices{h}==seed), blk=h; break; end, end
-            Fr = ax.Operator.Frame{blk};  a = real(W(:,1));  b = imag(W(:,1));
-            V3 = zeros(nV,3);  V3(gv,:) = a.*Fr.e1 + b.*Fr.e2;
-    end
-    if C == 1, V3 = []; end
+    [W, gv, V3] = bst_eigenfilter('Atom', ax, kernel, kp, seed, seedDir);
 end
 
 % Realise the atom field on its operator's eigenbasis; reduce vector/complex bases to magnitude.
