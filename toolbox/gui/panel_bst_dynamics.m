@@ -949,6 +949,27 @@ function i_atom_apply() %#ok<DEFNU>
         end
         Leig = i_dirac_leadfield(st, ax);
         iWin = i_cursor_window(D.srcDS, D.srcResult, 4);  if isempty(iWin), ctrl.jAtomInfo.setText('Apply: no window'); return; end
+        % --- Dirac-dSPM: filter the INVERSE's own mode coefficients directly (free projection, full
+        %     mode count) instead of reconstructing the field and re-projecting it into a fresh basis. ---
+        if i_is_dirac_dspm(D)
+            [cCell,~] = i_mode_coeffs(st, D, iWin);
+            g = bst_eigfilter_kernel(kernel, kp);
+            cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
+            [V3, mag] = i_dirac_recon(ax, cf);                 % amplitude current
+            sir = i_dspm_scale(st, D);
+            magShow = mag;
+            if strcmpi(i_field(st,'atomMeasure','amplitude'),'dspm') && ~isempty(sir), magShow = mag .* sir(:); end
+            nVmode = size(mag,1);
+            if ~isempty(st.hFig) && ishandle(st.hFig)
+                view_dynamics('SetFilteredField', st.hFig, magShow, (1:nVmode)', iWin, false);
+                Vq = zeros(nVmode,3);  Vq(:,:) = V3(:,:,max(1,round(size(V3,3)/2)));  % mid-window frame for quivers
+                setappdata(st.hFig,'QuiverVectorOverride', Vq);
+                try, figure_3d('SetShowSourceVectors', st.hFig, D.iTess, 1); catch, end %#ok<CTCH>
+            end
+            Dfilt = i_dirac_forward_modes(ax, Leig, cf);
+            i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel);
+            return;
+        end
         J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] Dirac field
         g = bst_eigfilter_kernel(kernel, kp);
         bst_progress('start','Atom','Dirac filter -> sensors...');
@@ -959,20 +980,7 @@ function i_atom_apply() %#ok<DEFNU>
         pk = max(abs(Jmag(:))); if pk>0, Jmag = Jmag/pk; end
         if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('SetFilteredField', st.hFig, Jmag, (1:nV)', iWin, false); end
         % sensor: overlay Dfilt vs raw (only if L_eig available)
-        if ~isempty(Leig) && ~isempty(Dfilt)
-            hRec = i_rec_figure(st);
-            if isempty(hRec) || ~ishandle(hRec), try, hRec = view_timeseries(i_rec_datafile(st), 'MEG'); catch, hRec=[]; end, end %#ok<CTCH>
-            tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tWin = tv(iWin);
-            if ~isempty(hRec) && ishandle(hRec)
-                view_dynamics('SetFilteredSensors', hRec, Dfilt, tWin);
-                try, figure_timeseries('SetTimeSelectionManual', hRec, [tWin(1) tWin(end)]); catch, end %#ok<CTCH>  % mark the filtered window
-                ctrl.jAtomInfo.setText(sprintf('Dirac | %s [Preview: cortex + %d-sensor overlay]', kernel, size(Dfilt,1)));
-            else
-                ctrl.jAtomInfo.setText(sprintf('Dirac | %s [cortex filtered; open the recording for the sensor overlay]', kernel));
-            end
-        else
-            ctrl.jAtomInfo.setText('Dirac: cortex filtered (no Dirac-dSPM leadfield -> no sensor view)');
-        end
+        i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel);
         return;
     end
     % --- reduce the reconstructed field to the operator's expected row layout ---
@@ -1013,6 +1021,26 @@ function i_atom_apply() %#ok<DEFNU>
         view_dynamics('SetFilteredField', st.hFig, Ffilt, (1:nV)', iWin, false);
     end
     ctrl.jAtomInfo.setText(sprintf('%s | %s  [Preview: filtered source, %d-sample window]', variant, kernel, numel(iWin)));
+end
+
+% Sensor overlay for the Dirac Apply branch: draws Dfilt on the recording figure (opening it if needed),
+% or falls back to an info-only message when there's no leadfield/recording. Shared by the Dirac-dSPM
+% mode-coefficient path and the legacy reconstructed-J path (both compute Dfilt then call this).
+function i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel)
+    if ~isempty(Leig) && ~isempty(Dfilt)
+        hRec = i_rec_figure(st);
+        if isempty(hRec) || ~ishandle(hRec), try, hRec = view_timeseries(i_rec_datafile(st), 'MEG'); catch, hRec=[]; end, end %#ok<CTCH>
+        tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tWin = tv(iWin);
+        if ~isempty(hRec) && ishandle(hRec)
+            view_dynamics('SetFilteredSensors', hRec, Dfilt, tWin);
+            try, figure_timeseries('SetTimeSelectionManual', hRec, [tWin(1) tWin(end)]); catch, end %#ok<CTCH>  % mark the filtered window
+            ctrl.jAtomInfo.setText(sprintf('Dirac | %s [Preview: cortex + %d-sensor overlay]', kernel, size(Dfilt,1)));
+        else
+            ctrl.jAtomInfo.setText(sprintf('Dirac | %s [cortex filtered; open the recording for the sensor overlay]', kernel));
+        end
+    else
+        ctrl.jAtomInfo.setText('Dirac: cortex filtered (no Dirac-dSPM leadfield -> no sensor view)');
+    end
 end
 
 % The recording DataTimeSeries figure for this session (matches st.T.DataFile), or [] if none open.
