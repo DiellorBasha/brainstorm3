@@ -98,9 +98,16 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         % (Re)build the canonical axes (eigenbasis x time x temporal-frequency) for the chosen operator via
         % bst_eigen('Axes'), then refresh the physical-scale bounds. Works at init and on live operator switches.
         variant = newVar;
+        % Prefer the operator's ALREADY-PERSISTED eigenbasis: request the modes that exist so
+        % tess_eigen reuses the cached node (its stored nModes >= request) instead of forcing an
+        % expensive recompute. Only when no eigen node of this variant exists do we ask for the
+        % default nModes and let it compute a fresh basis. (A viewer/designer defers to what the
+        % analysis already computed rather than imposing an arbitrary mode count.)
+        nReq = i_existing_nmodes(SurfaceFile, variant);
+        if isempty(nReq), nReq = nModes; end
         bst_progress('start', 'Atom designer', sprintf('Building/loading %s eigenbasis...', variant));
         ax = bst_eigen('Axes', struct('SurfaceFile',SurfaceFile, 'Variant',variant, ...
-                       'nModes',nModes, 'TimeWindow',[0 (nFrames-1)/100], 'SampleRate',100));
+                       'nModes',nReq, 'TimeWindow',[0 (nFrames-1)/100], 'SampleRate',100));
         bst_progress('stop');
         lamAll = ax.Lambda{1}(:); if numel(ax.Lambda) > 1 && ~isempty(ax.Lambda{2}), lamAll = [lamAll; ax.Lambda{2}(:)]; end
         lmax = max(lamAll);  lminPos = min(lamAll(lamAll > 1e-9));
@@ -366,6 +373,24 @@ end
 
 % Reduce a real/complex/vector field [nc*nRows x nT] to per-row magnitude [nRows x nT] (mirrors the
 % Dynamics panel's i_paintable_scalar; scalar passes through).
+function n = i_existing_nmodes(SurfaceFile, variant)
+% Richest existing eigen-node mode count for (surface, variant), or [] if none — lets the atom
+% designer reuse a persisted eigenbasis instead of triggering a recompute. Reads the derived-anatomy
+% Eigen children of the surface via the DB cache (read-only). (Note: for 'Dirac-Connectome' the stored
+% nModes is the tripled output-column count, so re-requesting it would still recompute; harmless today
+% since no Dirac-Connectome node is persisted, and it simply falls back to the default in that case.)
+    n = [];
+    [sSubject, ~, iSurf] = bst_get('SurfaceFile', SurfaceFile);
+    if isempty(sSubject) || isempty(iSurf) || ~isfield(sSubject.Surface(iSurf),'Eigen'), return; end
+    E = sSubject.Surface(iSurf).Eigen;
+    for k = 1:numel(E)
+        if isfield(E(k),'Variant') && strcmpi(E(k).Variant, variant) ...
+                && isfield(E(k),'nModes') && ~isempty(E(k).nModes)
+            n = max([n, E(k).nModes]);
+        end
+    end
+end
+
 function s = i_field_mag(F, nRows)
     if ~isreal(F), F = abs(F); end
     if size(F,1) == nRows, s = F; return; end
