@@ -1014,23 +1014,23 @@ function i_atom_apply() %#ok<DEFNU>
         if strcmp(variant,'Dirac') && i_is_dirac_dspm(D)
             [cCell,~] = i_mode_coeffs(st, D, iWin);
             cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
-            [V3, mag] = i_dirac_recon(ax, cf);                 % amplitude current
+            [mag, V3mid] = i_dirac_recon_display(ax, cf);       % amplitude current (window mag + mid-frame quivers)
             sir = i_dspm_scale(st, D);
             magShow = mag;
             if strcmpi(i_field(st,'atomMeasure','amplitude'),'dspm') && ~isempty(sir), magShow = mag .* sir(:); end
         else
-            % Dirac-Connectome (fiber-spread) OR non-dSPM Dirac: reconstruct the source field, re-project
-            % into ax, filter g(lambda), reconstruct -> amplitude magnitude + quivers (peak-normalized).
+            % Dirac-Connectome (fiber-spread) OR non-dSPM Dirac: project the source onto ax via the cached
+            % mode kernel (no field reconstruction), filter g(lambda), then reconstruct only what the display
+            % needs -> amplitude magnitude + mid-frame quivers (peak-normalized).
             cCell = i_vector_coeffs(st, ax, D, iWin);
             cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
-            [V3, mag] = i_dirac_recon(ax, cf);
+            [mag, V3mid] = i_dirac_recon_display(ax, cf);
             magShow = mag;  pk = max(abs(magShow(:)));  if pk>0, magShow = magShow/pk; end
         end
         nVmode = size(mag,1);
         if ~isempty(st.hFig) && ishandle(st.hFig)
             view_dynamics('SetFilteredField', st.hFig, magShow, (1:nVmode)', iWin, false);
-            Vq = zeros(nVmode,3);  Vq(:,:) = V3(:,:,max(1,round(size(V3,3)/2)));  % mid-window frame for quivers
-            setappdata(st.hFig,'QuiverVectorOverride', Vq);
+            setappdata(st.hFig,'QuiverVectorOverride', V3mid);   % mid-window frame for quivers
             try, figure_3d('SetShowSourceVectors', st.hFig, D.iTess, 1); catch, end %#ok<CTCH>
         end
         Dfilt = i_dirac_forward_modes(ax, Leig, cf);           % [] when Leig is [] (Dirac-Connectome)
@@ -1142,9 +1142,9 @@ end
 
 %% ===== ANALYZE: decompose the current window's real source through the frame -> scalogram =====
 % Build a scalogram TimefreqMat [3 x nT x M] {Global,LH,RH} from a bst_eigenwavelet('Scalogram') result.
-function FileMat = i_scalogram_timefreq(scal, timeVec, surfaceFile, dataFile, comment)
+function FileMat = i_scalogram_timefreq(scal, timeVec, surfaceFile, dataFile, comment) %#ok<INUSD>
     FileMat = db_template('timefreqmat');
-    FileMat.TF        = scal.energy;                          % [3 x nT x M]
+    FileMat.TF        = scal.energy;                          % [3 x nT x M] -- only the recovered energies
     FileMat.Time      = timeVec(:)';
     FileMat.Freqs     = scal.centers(:);                      % sqrt(lambda) scale centers
     FileMat.RowNames  = {'Global','LH','RH'};
@@ -1153,7 +1153,11 @@ function FileMat = i_scalogram_timefreq(scal, timeVec, surfaceFile, dataFile, co
     FileMat.DataType  = 'matrix';
     FileMat.SurfaceFile = surfaceFile;
     FileMat.nAvg = 1;  FileMat.Leff = 1;
-    if ~isempty(dataFile), FileMat.DataFile = file_short(dataFile); end
+    % Deliberately NOT bound to the recording (no DataFile): this is a standalone 3-row (Global/LH/RH)
+    % energy summary over a short window. Binding it to the raw recording makes Brainstorm treat it as a
+    % source-of-that-recording and reject the display ("Time definition ... not compatible with the other
+    % files already loaded") because the window's time axis is a slice of the recording's. Standalone -> its
+    % own time axis, opens without conflict. (dataFile kept for signature compatibility / provenance only.)
     FileMat.Comment = comment;
 end
 
@@ -1227,21 +1231,56 @@ function [cCell, meta] = i_mode_coeffs(st, D, iWin) %#ok<DEFNU>
     setappdata(0,'DynamicsModeCoeffCache', struct('key',key,'cCell',{cCell},'meta',meta));
 end
 
-% Vector mode coefficients by reconstruct-then-project: pull the source's ambient 3-vector field
-% J [3nV x nWin], embed it into the quaternion source layout (imag x/y/z slots, w=0) via the ax's
-% RowMap, and project per block onto the (lifted) basis: cCell{h} = manifold_ft(Phi{h}, Mass{h}, U_h).
-% General for any vector ax (Dirac-Connectome; also non-dSPM Dirac) -- the field analog of i_mode_coeffs.
-function cCell = i_vector_coeffs(st, ax, D, iWin) %#ok<DEFNU>
-    cCell = cell(1, numel(ax.Phi));
-    J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin] ambient field
+% Cached "vector mode kernel" A_h = Phi_h' M_h P_h K_imaging  [K_h x nCh] per block. Folds the whole
+% reconstruct-then-project chain (J = K*data -> embed into the quaternion imag slots -> project onto the
+% lifted basis) into ONE small, DATA-INDEPENDENT operator, so the coefficients are c = A * data(goodChan)
+% with NO full-field [3nV x nT] / [4nV x nT] materialization (~500x less memory / faster; verified identical
+% to the reconstruct-then-project result to 1e-14). Cached per (srcResult, Variant, surface). [] when the
+% source carries no imaging kernel (e.g. a full ImageGridAmp map) -> caller reconstructs-then-projects.
+function [Acell, gc] = i_vector_modekernel(st, ax, D) %#ok<DEFNU>
+    Acell = {};  gc = [];
+    src = i_src_resultfile(D);  if isempty(src), return; end
+    key = sprintf('%s|%s|%s', src, ax.Variant, ax.SurfaceFile);
+    Mc = getappdata(0, 'DynamicsVectorModeKernel');
+    if ~isempty(Mc) && isstruct(Mc) && strcmp(Mc.key, key), Acell = Mc.Acell; gc = Mc.gc; return; end
+    R = in_bst_results(src, 0, 'ImagingKernel', 'GoodChannel');
+    if isempty(R.ImagingKernel), return; end                        % kernel-free source -> fallback path
+    K = double(R.ImagingKernel);                                    % [3nV x nCh]
+    gc = R.GoodChannel;  if isempty(gc), gc = 1:size(K,2); end
+    Acell = cell(1, numel(ax.Phi));
     for h = 1:numel(ax.Phi)
         Phi = ax.Phi{h};
-        if isempty(Phi), cCell{h} = []; continue; end
+        if isempty(Phi), Acell{h} = []; continue; end
+        [srcRows, dstRows, nrows, msg] = bst_eigenfilter('RowMap', K, ax, h);   % same embed as the field path
+        if ~isempty(msg), Acell{h} = []; continue; end
+        U = zeros(nrows, size(K,2));  U(dstRows,:) = K(srcRows,:);              % embed kernel columns, w=0
+        Acell{h} = manifold_ft(Phi, ax.Mass{h}, U);                            % [Kh x nCh]
+    end
+    setappdata(0, 'DynamicsVectorModeKernel', struct('key',key, 'Acell',{Acell}, 'gc',gc));
+end
+
+% Vector mode coefficients cCell{h} = [Kh x nWin] for a vector ax (Dirac-Connectome; also non-dSPM Dirac):
+% the field analog of i_mode_coeffs. Uses the cached mode kernel c = A * data (no field reconstruction);
+% falls back to reconstruct-then-project (GetResultsValues -> embed -> manifold_ft) for a kernel-free source.
+function cCell = i_vector_coeffs(st, ax, D, iWin) %#ok<DEFNU>
+    [Acell, gc] = i_vector_modekernel(st, ax, D);
+    if ~isempty(Acell)
+        data = double(bst_memory('GetRecordingsValues', D.srcDS, gc, iWin, 0));   % [nCh x nWin] raw (kernel is built for raw d)
+        cCell = cell(1, numel(Acell));
+        for h = 1:numel(Acell)
+            if isempty(Acell{h}), cCell{h} = []; else, cCell{h} = Acell{h} * data; end
+        end
+        return;
+    end
+    % --- fallback (no imaging kernel): reconstruct the ambient field then project ---
+    cCell = cell(1, numel(ax.Phi));
+    J = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));   % [3nV x nWin]
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};  if isempty(Phi), cCell{h} = []; continue; end
         [srcRows, dstRows, nrows, msg] = bst_eigenfilter('RowMap', J, ax, h);
         if ~isempty(msg), cCell{h} = []; continue; end
-        U = zeros(nrows, size(J,2));
-        U(dstRows,:) = J(srcRows,:);                         % [w,x,y,z] interleaved, w=0
-        cCell{h} = manifold_ft(Phi, ax.Mass{h}, U);          % [Kh x nWin]
+        U = zeros(nrows, size(J,2));  U(dstRows,:) = J(srcRows,:);                  % [w,x,y,z] interleaved, w=0
+        cCell{h} = manifold_ft(Phi, ax.Mass{h}, U);
     end
 end
 
@@ -1286,6 +1325,30 @@ function [V3, mag] = i_dirac_recon(ax, cCell) %#ok<DEFNU>
         V3(gv,:,:) = permute(Vr, [2 1 3]);                               % -> [nVh x 3 x nT]
     end
     mag = squeeze(sqrt(sum(V3.^2,2)));  if nT==1, mag=mag(:); end
+end
+
+% Memory-bounded reconstruction for the Apply DISPLAY: per-vertex magnitude over the whole window
+% mag[nV x nT] (reconstructed in time-blocks, so the [4nV x blk] quaternion intermediate never spans the
+% full window) plus the single mid-window 3-vector frame V3mid[nV x 3] for the quivers. Avoids i_dirac_recon's
+% [nV x 3 x nT] (~2.4 GB) and [4nV x nT] (~3.2 GB) full-window arrays -- the display only scrubs one frame at
+% a time (magnitude) and draws one frame of quivers.
+function [mag, V3mid] = i_dirac_recon_display(ax, cCell, midCol) %#ok<DEFNU>
+    nV=0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV=max(nV,max(ax.GlobalVertices{h}(:))); end, end
+    nT=0; for h=1:numel(cCell), if ~isempty(cCell{h}), nT=size(cCell{h},2); break; end, end
+    if (nargin < 3) || isempty(midCol), midCol = max(1, round(nT/2)); end
+    mag = zeros(nV, nT);  V3mid = zeros(nV, 3);  blk = 512;
+    for h = 1:numel(ax.Phi)
+        Ph = ax.Phi{h};  if isempty(Ph) || isempty(cCell{h}), continue; end
+        gv = ax.GlobalVertices{h}(:);  nVh = numel(gv);
+        for c0 = 1:blk:nT
+            cc = c0:min(c0+blk-1, nT);
+            Vr = reshape(manifold_quat_imag(Ph * cCell{h}(:, cc)), 3, nVh, numel(cc));   % [3 x nVh x |cc|]
+            mag(gv, cc) = reshape(sqrt(sum(Vr.^2, 1)), nVh, numel(cc));
+            hit = find(cc == midCol, 1);
+            if ~isempty(hit), V3mid(gv, :) = Vr(:, :, hit).'; end
+        end
+    end
+    if nT == 1, mag = mag(:); end
 end
 
 % Sensor forward from mode coefficients: stack cCell L-then-R and Dfilt = Leig * cstack. [] if no Leig.
@@ -1352,7 +1415,11 @@ function TfFile = i_save_scalogram(srcFile, FileMat, tag)
             if strncmp(sStudy.Timefreq(i).Comment, tag, numel(tag)), old = sStudy.Timefreq(i).FileName; iOld = i; break; end
         end
     end
-    if ~isempty(old)
+    % Reuse the registered file ONLY if it still exists on disk: file_fullpath() can't resolve a missing
+    % file and returns a RELATIVE path, which bst_save would then write relative to pwd (and fail, masked as
+    % "Disk full"). A dangling registration (file deleted, or a prior crashed save) falls through to a fresh
+    % absolute path; the stale tree slot (iOld) is still replaced below so the DB points at the new file.
+    if ~isempty(old) && (exist(file_fullpath(old), 'file') == 2)
         TfFile = file_fullpath(old);
     else
         TfFile = bst_process('GetNewFilename', bst_fileparts(file_fullpath(sStudy.FileName)), 'timefreq_framescalo');
