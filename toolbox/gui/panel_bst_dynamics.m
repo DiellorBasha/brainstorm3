@@ -505,6 +505,34 @@ end
 % Per-variant eigen-axes over a 4 s window at the recording Fs; cached (variant|surface) across the session.
 function ax = i_atom_axes(st, variant) %#ok<DEFNU>
     ax = [];
+    % Dirac-dSPM: use the INVERSE's own eigenbasis (DiracEigenFile) so atoms filter the mode kernel's
+    % coefficients directly, at the inverse's full mode count (not a fresh 60-mode canonical basis).
+    if strcmp(variant, 'Dirac')
+        D = getappdata(st.hFig, 'DynamicsOverlay');
+        if ~isempty(D) && i_is_dirac_dspm(D)
+            surf = i_atom_surface(st);
+            key  = ['dspm|' variant '|' surf];
+            Mc = getappdata(0,'DynamicsAtomAx');  if isempty(Mc)||~isa(Mc,'containers.Map'), Mc=containers.Map('KeyType','char','ValueType','any'); end
+            if isKey(Mc,key), ax = Mc(key); return; end
+            src = i_src_resultfile(D);
+            R = in_bst_results(src, 0, 'DiracEigenFile','Eigenvalues','ModeHemisphere','SurfaceFile');
+            E = in_bst_eigen(R.DiracEigenFile);
+            O = in_bst_operator(E.OperatorFile);
+            if isfield(E,'Phi') && ~isempty(E.Phi) && isfield(O,'Mass') && numel(O.Mass)==2
+                lam = double(R.Eigenvalues(:));  hemi = double(R.ModeHemisphere(:));
+                ax = struct('Variant','Dirac','SurfaceFile',R.SurfaceFile, ...
+                            'Phi',{E.Phi},'GlobalVertices',{E.GlobalVertices},'Mass',{O.Mass},'Operator',O);
+                for h = 1:2
+                    ord = find(hemi==h);  ls = sort(lam(ord),'ascend');  ax.Lambda{h} = ls;
+                end
+                Fs = 100; try, tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult); if numel(tv)>1, Fs=1/median(diff(tv)); end, catch, end %#ok<CTCH>
+                nF = max(2, round(4*Fs));  ax.nT = nF;  ax.tlag = (0:nF-1)/Fs;  ax.omega = (0:nF-1)*(Fs/nF);  ax.NFFT = nF;
+                Mc(key) = ax;  setappdata(0,'DynamicsAtomAx', Mc);
+                return;
+            end
+            % basis missing/malformed -> fall through to the canonical path
+        end
+    end
     surf = i_atom_surface(st);  if isempty(surf), return; end
     key = [variant '|' surf];
     M = getappdata(0, 'DynamicsAtomAx');
