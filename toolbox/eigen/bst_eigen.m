@@ -1,4 +1,4 @@
-function [OutputFiles, Messages, isError] = bst_eigen(Data, OPTIONS)
+function [OutputFiles, Messages, isError, varargout] = bst_eigen(Data, OPTIONS, varargin)
 % BST_EIGEN: Spatial-spectral / differential-geometry analysis of surface-mapped data
 %            in an operator eigenbasis. The spatial analogue of BST_TIMEFREQ.
 %
@@ -78,6 +78,14 @@ if ischar(Data) && strcmpi(Data, 'Axes')          % ax = bst_eigen('Axes', OPTIO
 end
 if (nargin >= 1) && ischar(Data) && strcmpi(Data, 'FieldSpec')
     OutputFiles = i_field_spec(OPTIONS);   % OPTIONS = ax
+    return;
+end
+if (nargin >= 1) && ischar(Data) && strcmpi(Data, 'ExtractHemiFieldTest')
+    % Thin test hook (dev/tests/test_eigen_metadata_routing.m):
+    %   bst_eigen('ExtractHemiFieldTest', F, EigenMat, OperatorMat, h)
+    %     -> [U_h, Phi_h, B_h, Lam_h, msg]  (identical outputs to the internal ExtractHemiField)
+    [OutputFiles, Messages, isError, varargout{1:max(nargout-3,0)}] = ...
+        ExtractHemiField(OPTIONS, varargin{1}, varargin{2}, varargin{3});
     return;
 end
 
@@ -221,7 +229,8 @@ for iData = 1:length(Data)
             end
             lrange = [min(cellfun(@min, lams)), max(cellfun(@max, lams))];
             frame = bst_eigenwavelet('Design', OPTIONS.KernelName, OPTIONS.Nf, lrange);
-            if strcmp(EigenMat.Variant, 'Connection Laplacian')
+            spec = i_field_spec(i_axfromeigen(EigenMat, OperatorMat));
+            if strcmp(spec.field_type, 'complex')
                 % The connection operator lives on the TANGENT bundle: a complex number per
                 % vertex in the canonical frame. Convert the physical 3-vector source to that
                 % complex field (z = <v,e1> + i<v,e2>) via the operator's own frame, analyze,
@@ -239,7 +248,7 @@ for iData = 1:length(Data)
                 % Dirac family: Analysis carries the FULL quaternion [4nV x nT x M]; project to
                 % the physical 3-vector for the saved source scalogram (the cortical viewer is
                 % 1/3-component). The full-quaternion transform stays available via bst_eigenwavelet.
-                if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
+                if strcmp(spec.field_type, 'quaternion')
                     W = bst_eigenwavelet('ToVec', W, EigenMat);
                 end
             end
@@ -285,10 +294,10 @@ bst_progress('stop');
                 FileMat    = BuildSpectrumTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile);
                 filePrefix = 'timefreq_eigenspectrum';
             case 'filter'
-                FileMat    = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVector, SurfaceFile);
+                FileMat    = BuildFilterResult(Result, OPTIONS, EigenMat, OperatorMat, DataFile, TimeVector, SurfaceFile);
                 filePrefix = 'results_eigenfilter';
             case 'wavelet'
-                FileMat    = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile);
+                FileMat    = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, OperatorMat, DataType, DataFile, TimeVector, SurfaceFile);
                 filePrefix = 'timefreq_eigenwavelet';
             otherwise
                 error('bst_eigen:OutputType', 'Unknown result type: %s', Result.Type);
@@ -393,16 +402,32 @@ function [U_h, Phi_h, B_h, Lam_h, msg] = ExtractHemiField(F, EigenMat, OperatorM
     % Returns this hemisphere's field U_h in the row layout that matches Phi_h / B_h, plus
     % the basis and eigenvalues. msg is '' on success, else an error string. The transform
     % C = Phi_h'*(B_h*U_h) is identical across variants; only U_h's construction differs.
+    %
+    % Dispatch is by FieldSpec (field_type/domain from the operator's Registry metadata), NOT
+    % by EigenMat.Variant name -- the row layout is a function of (field_type, domain) alone,
+    % so this generalizes to any operator that declares that metadata (see bst_nxr_registry
+    % 'fieldspec' and the eigen-metadata-routing design). The per-case bodies below are byte-
+    % identical to the old switch-on-Variant (same rows, same guards, same messages).
     msg   = '';
     U_h   = [];
     Phi_h = EigenMat.Phi{h};
     Lam_h = EigenMat.Lambda{h}(:);
     B_h   = OperatorMat.Mass{h};
     nT    = size(F, 2);
-    switch EigenMat.Variant
-        case 'Laplace-Beltrami'
+    spec  = i_field_spec(i_axfromeigen(EigenMat, OperatorMat));
+    isFace = strcmp(spec.domain, 'face');
+    if isFace
+        idx = EigenMat.GlobalFaces{h}(:);
+        if isempty(idx)
+            msg = sprintf('variant ''%s'' hemisphere %d has no GlobalFaces.', EigenMat.Variant, h);
+            return;
+        end
+    else
+        idx = EigenMat.GlobalVertices{h}(:);
+    end
+    switch spec.field_type
+        case 'real'
             % Scalar field: one row per vertex. F is [nVertices x nTime].
-            idx = EigenMat.GlobalVertices{h}(:);
             if max(idx) > size(F, 1)
                 msg = sprintf(['hemisphere %d indexes vertex %d but the source map has %d rows ' ...
                     '(expected a scalar [nVertices x nTime] map for Laplace-Beltrami).'], h, max(idx), size(F,1));
@@ -410,28 +435,11 @@ function [U_h, Phi_h, B_h, Lam_h, msg] = ExtractHemiField(F, EigenMat, OperatorM
             end
             U_h = F(idx, :);
 
-        case 'Dirac'
-            % 3D vector source map [3*nVertices x nTime], embedded as a pure-imaginary
-            % quaternion field [4*nVh x nTime]: per vertex block rows = [w=0; x; y; z]
-            % (matching bst_dirac.m). Mass B_h = kron(Mass_vertex, I4).
-            vH = EigenMat.GlobalVertices{h}(:);
-            if 3*max(vH) > size(F, 1)
-                msg = sprintf(['Dirac needs an unconstrained 3-vector source map [3*nVertices x nTime]; ' ...
-                    'hemisphere %d needs row %d but the map has %d rows.'], h, 3*max(vH), size(F,1));
-                return;
-            end
-            nVh = numel(vH);
-            U_h = zeros(4*nVh, nT);
-            U_h(2:4:end, :) = F((vH-1)*3 + 1, :);   % x  (quaternion i)
-            U_h(3:4:end, :) = F((vH-1)*3 + 2, :);   % y  (quaternion j)
-            U_h(4:4:end, :) = F((vH-1)*3 + 3, :);   % z  (quaternion k); w rows stay 0
-
-        case 'Connection Laplacian'
+        case 'complex'
             % Complex tangent field, one (complex) row per vertex, expressed in the operator's
             % intrinsic frame. The real-3D-tangent -> complex embedding needs that per-vertex
             % frame {e1,e2}, which is NOT persisted in the operator/eigen node yet, so we
             % require the caller to pass the field already complex (in the operator frame).
-            idx = EigenMat.GlobalVertices{h}(:);
             if max(idx) > size(F, 1)
                 msg = sprintf('hemisphere %d indexes vertex %d but the field has %d rows.', h, max(idx), size(F,1));
                 return;
@@ -444,24 +452,27 @@ function [U_h, Phi_h, B_h, Lam_h, msg] = ExtractHemiField(F, EigenMat, OperatorM
             end
             U_h = F(idx, :);
 
-        case {'Dirac-Face', 'Hodge-Face'}
-            % Face-domain quaternion field: 3-vector face map [3*nFaces x nTime] embedded as
-            % pure-imaginary quaternion [4*nFh x nTime], indexed by GlobalFaces.
-            fH = EigenMat.GlobalFaces{h}(:);
-            if isempty(fH)
-                msg = sprintf('variant ''%s'' hemisphere %d has no GlobalFaces.', EigenMat.Variant, h);
+        case 'quaternion'
+            % 3D vector source map [3*nElement x nTime], embedded as a pure-imaginary
+            % quaternion field [4*nElementH x nTime]: per-element block rows = [w=0; x; y; z]
+            % (matching bst_dirac.m). Mass B_h = kron(Mass_element, I4). Vertex domain (Dirac):
+            % nElement = nVertices; face domain (Dirac-Face/Hodge-Face): nElement = nFaces,
+            % indexed by GlobalFaces.
+            if 3*max(idx) > size(F, 1)
+                if isFace
+                    msg = sprintf(['%s needs a 3-vector face map [3*nFaces x nTime]; hemisphere %d needs row %d ' ...
+                        'but the map has %d rows.'], EigenMat.Variant, h, 3*max(idx), size(F,1));
+                else
+                    msg = sprintf(['Dirac needs an unconstrained 3-vector source map [3*nVertices x nTime]; ' ...
+                        'hemisphere %d needs row %d but the map has %d rows.'], h, 3*max(idx), size(F,1));
+                end
                 return;
             end
-            if 3*max(fH) > size(F, 1)
-                msg = sprintf(['%s needs a 3-vector face map [3*nFaces x nTime]; hemisphere %d needs row %d ' ...
-                    'but the map has %d rows.'], EigenMat.Variant, h, 3*max(fH), size(F,1));
-                return;
-            end
-            nFh = numel(fH);
-            U_h = zeros(4*nFh, nT);
-            U_h(2:4:end, :) = F((fH-1)*3 + 1, :);
-            U_h(3:4:end, :) = F((fH-1)*3 + 2, :);
-            U_h(4:4:end, :) = F((fH-1)*3 + 3, :);
+            n = numel(idx);
+            U_h = zeros(4*n, nT);
+            U_h(2:4:end, :) = F((idx-1)*3 + 1, :);   % x  (quaternion i)
+            U_h(3:4:end, :) = F((idx-1)*3 + 2, :);   % y  (quaternion j)
+            U_h(4:4:end, :) = F((idx-1)*3 + 3, :);   % z  (quaternion k); w rows stay 0
 
         otherwise
             msg = sprintf('unsupported eigen variant ''%s''.', EigenMat.Variant);
@@ -539,14 +550,14 @@ end
 
 
 %% ===== BUILD THE EIGEN-FILTER RESULTS FILE =====
-function FileMat = BuildFilterResult(Result, OPTIONS, EigenMat, DataFile, TimeVector, SurfaceFile)
+function FileMat = BuildFilterResult(Result, OPTIONS, EigenMat, OperatorMat, DataFile, TimeVector, SurfaceFile)
     % Filtered source map -> results_ file. Unconstrained (3-vector, nComponents=3) for the
-    % Dirac/face variants; scalar (nComponents=1) otherwise (Connection stays complex).
-    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face'}))
-        nComp = 3;
-    else
-        nComp = 1;
-    end
+    % Dirac/face (quaternion) variants; scalar (nComponents=1) otherwise (Connection stays
+    % complex -- the filtered field itself is not decoded to ambient here, unlike the wavelet
+    % scalogram). nComponents = spec.nComponents since Result.Field is still in the FieldSpec's
+    % native row layout (real: 1, complex: 1, quaternion: 3).
+    spec  = i_field_spec(i_axfromeigen(EigenMat, OperatorMat));
+    nComp = spec.nComponents;
     nT = size(Result.Field, 2);
     if ischar(OPTIONS.KernelName)
         kstr = OPTIONS.KernelName;
@@ -584,17 +595,24 @@ end
 
 
 %% ===== BUILD THE EIGEN-WAVELET (SCALOGRAM) TIMEFREQMAT =====
-function FileMat = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, DataType, DataFile, TimeVector, SurfaceFile)
+function FileMat = BuildWaveletTimefreq(Result, OPTIONS, EigenMat, OperatorMat, DataType, DataFile, TimeVector, SurfaceFile)
     % Spatial graph-wavelet scalogram W [nSrc x nTime x M] -> source TimefreqMat, with the
     % per-member centroid sqrt(lambda) as the (spatial-)frequency axis (reuses the cortical
     % time-freq viewer). 3-vector for Dirac/face + Connection Laplacian (decoded to ambient
     % tangent vectors); scalar otherwise.
+    %
+    % NOTE this is NOT spec.nComponents: by this point the wavelet dispatch (above) has already
+    % decoded BOTH the quaternion family (via 'ToVec') and the complex/Connection-Laplacian
+    % family (via ComplexToTangent) down to an ambient ("physical") ROW REPRESENTATION of 3
+    % real components; only 'real' fields stay scalar. So nComp is 1 iff field_type=='real',
+    % else 3 -- covering both the quaternion and (decoded) complex cases identically.
     W = Result.W;                          % [nSrc x nTime x M]
     [~, nT, M] = size(W);
-    if any(strcmp(EigenMat.Variant, {'Dirac', 'Dirac-Face', 'Hodge-Face', 'Connection Laplacian'}))
-        nComp = 3;
-    else
+    spec = i_field_spec(i_axfromeigen(EigenMat, OperatorMat));
+    if strcmp(spec.field_type, 'real')
         nComp = 1;
+    else
+        nComp = 3;
     end
     FileMat = db_template('timefreqmat');
     FileMat.TF          = W;
@@ -743,4 +761,16 @@ function spec = i_field_spec(ax)
         otherwise, kind='scalar';  width=1; nComp=1;
     end
     spec = struct('field_type',ft, 'domain',dom, 'width',width, 'nComponents',nComp, 'C',C, 'kind',kind);
+end
+
+%% ===== ax adapter: (EigenMat, OperatorMat) pair -> the minimal ax i_field_spec expects =====
+function ax = i_axfromeigen(EigenMat, OperatorMat)
+    % ExtractHemiField/BuildFilterResult/BuildWaveletTimefreq/the wavelet-method dispatch all
+    % load EigenMat and OperatorMat as SEPARATE structs (see GetEigenBasis); i_field_spec reads
+    % the Registry off ax.Operator, so wrap OperatorMat as ax.Operator here (Registry.Primary is
+    % stamped onto the OPERATOR file, not the eigen file -- see tess_operators.m). Phi and
+    % GlobalVertices come from EigenMat, needed only by i_field_spec's pre-registry fallback.
+    % Cell-array fields are wrapped in an extra {} so struct() stores them as-is (not expanded
+    % into a struct array).
+    ax = struct('Operator', OperatorMat, 'Phi', {EigenMat.Phi}, 'GlobalVertices', {EigenMat.GlobalVertices});
 end

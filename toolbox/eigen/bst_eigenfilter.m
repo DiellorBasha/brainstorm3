@@ -209,25 +209,10 @@ function [C, kind] = Fiber(ax) %#ok<DEFNU>
     [C, kind] = i_fiber(ax);
 end
 function [C, kind] = i_fiber(ax)
-    C = [];  ft = '';
-    if isfield(ax,'Operator') && isstruct(ax.Operator) && isfield(ax.Operator,'Registry') ...
-            && ~isempty(ax.Operator.Registry) && isfield(ax.Operator.Registry,'Primary') ...
-            && ~isempty(ax.Operator.Registry.Primary) && isfield(ax.Operator.Registry.Primary,'field_type')
-        ft = ax.Operator.Registry.Primary.field_type;
-    end
-    switch lower(ft)
-        case 'real',       C = 1;
-        case 'complex',    C = 2;
-        case 'quaternion', C = 4;
-    end
-    if isempty(C)                                   % pre-registry binary -> derive from the Phi layout
-        nV = numel(ax.GlobalVertices{1});
-        C  = round(size(ax.Phi{1},1) / max(nV,1));
-    end
-    switch C
-        case 1, kind = 'scalar';
-        case 2, kind = 'tangent';
-        case 4, kind = 'quaternion';
-        otherwise, kind = 'scalar';
-    end
+    % Delegate to the shared FieldSpec resolver (bst_eigen.m i_field_spec): same registry read
+    % (ax.Operator.Registry.Primary.field_type) + the same pre-registry Phi-layout fallback,
+    % now a single source of truth for both bst_eigen and bst_eigenfilter.
+    spec = bst_eigen('FieldSpec', ax);
+    C    = spec.C;
+    kind = spec.kind;
 end
