@@ -166,6 +166,16 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
     %     whole-brain operators in Brainstorm (tess_eigen then produces a single whole-brain basis). ---
     if ismember(Variant, {'Connectome Laplacian','LB-Connectome'})
         OperatorMat = local_build_connectome_operator(SurfaceFile, Variant);
+        % --- field_type/domain metadata (additive; guarded): the connectome family has
+        %     no nxr registry id, so stamp it from the local fieldspec table directly. ---
+        fs = bst_nxr_registry('fieldspec', Variant);
+        if ~isempty(fs)
+            if ~isfield(OperatorMat,'Registry') || isempty(OperatorMat.Registry)
+                OperatorMat.Registry = struct('Primary', struct(), 'Components', []);
+            end
+            OperatorMat.Registry.Primary.field_type = fs.field_type;
+            OperatorMat.Registry.Primary.domain     = fs.domain;
+        end
         if ~NoSave
             [~, iSubjectSave] = bst_get('SurfaceFile', SurfaceFile);
             db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, sprintf('%s operator', Variant));
@@ -473,6 +483,18 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         end
         Reg.Components = compMeta;
         OperatorMat.Registry = Reg;
+    end
+
+    % --- field_type/domain metadata (additive; guarded): stamp from the local fieldspec
+    %     table too, so the descriptor is present even on a pre-registry nxr binary
+    %     (primMeta empty above) that never populated OperatorMat.Registry. ---
+    fs = bst_nxr_registry('fieldspec', Variant);
+    if ~isempty(fs)
+        if ~isfield(OperatorMat,'Registry') || isempty(OperatorMat.Registry)
+            OperatorMat.Registry = struct('Primary', struct(), 'Components', []);
+        end
+        OperatorMat.Registry.Primary.field_type = fs.field_type;
+        OperatorMat.Registry.Primary.domain     = fs.domain;
     end
 
     % --- save / register in DB ---

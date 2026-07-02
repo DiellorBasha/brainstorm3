@@ -7,10 +7,16 @@ function out = bst_nxr_registry(action, varargin)
 %   meta = bst_nxr_registry('field',    id)            % fieldInfo struct or []
 %   id   = bst_nxr_registry('idForVariant', Variant)   % primary registry id or ''
 %   ids  = bst_nxr_registry('componentsForVariant', Variant)  % cellstr or {}
+%   fs   = bst_nxr_registry('fieldspec', Variant)      % struct('field_type','domain') or []
 %
 % The operator/field calls are guarded: a pre-registry nxr binary or an unknown
 % id yields [] (never an error), so callers can adopt the registry without a
 % hard dependency on it.
+%
+% 'fieldspec' is a LOCAL declaration (not backed by the nxr binary): it covers
+% every Brainstorm operator Variant, including the connectome family (LB-Connectome,
+% Connectome Laplacian, Dirac-Connectome) which has no nxr registry id at all.
+% This is the single source of truth eigen routing (bst_eigen 'FieldSpec') reads.
 %
 % Authors: Diellor Basha, 2026
 
@@ -25,6 +31,8 @@ function out = bst_nxr_registry(action, varargin)
         case 'componentsforvariant'
             [~, comps] = local_map(varargin{1});
             out = comps;
+        case 'fieldspec'
+            out = local_fieldspec(varargin{1});
         otherwise
             error('bst_nxr_registry:badAction', 'Unknown action: %s', action);
     end
@@ -57,5 +65,21 @@ function [pid, comps] = local_map(Variant)
             pid = 'faceLaplacianGreenGauss';       comps = {'faceGradient'};
         case 'Covariant'
             pid = 'flatCovariantLaplacian';        comps = {'laplaceBeltrami','massGalerkin'};
+    end
+end
+
+function fs = local_fieldspec(Variant)
+% Local (field_type, domain) for EVERY Brainstorm operator variant — including the
+% connectome family that has no nxr binary id. Single source of truth for eigen routing.
+    fs = [];
+    switch Variant
+        case {'Laplace-Beltrami','LB-Connectome','Connectome Laplacian'}
+            fs = struct('field_type','real',       'domain','vertex');
+        case {'Dirac','Dirac-Connectome'}
+            fs = struct('field_type','quaternion', 'domain','vertex');
+        case {'Dirac-Face','Hodge-Face'}
+            fs = struct('field_type','quaternion', 'domain','face');
+        case 'Connection Laplacian'
+            fs = struct('field_type','complex',    'domain','vertex');
     end
 end

@@ -28,3 +28,17 @@ s = bst_eigen('FieldSpec', axFb);  assert(s.C==4 && strcmp(s.kind,'quaternion'))
 fprintf('PASS\n');
 end
 function p = i_prim(ft,dom), p = struct('field_type',ft,'domain',dom); end
+
+function test_registry_fieldspec()
+addpath(genpath(fullfile(pwd,'toolbox')));
+fprintf('--- bst_nxr_registry fieldspec ---\n');
+want = {'Laplace-Beltrami','real','vertex'; 'LB-Connectome','real','vertex'; ...
+        'Dirac','quaternion','vertex'; 'Dirac-Connectome','quaternion','vertex'; ...
+        'Dirac-Face','quaternion','face'; 'Connection Laplacian','complex','vertex'};
+for i=1:size(want,1)
+    fs = bst_nxr_registry('fieldspec', want{i,1});
+    assert(~isempty(fs), 'no fieldspec for %s', want{i,1});
+    assert(strcmp(fs.field_type, want{i,2}) && strcmp(fs.domain, want{i,3}), 'wrong for %s', want{i,1});
+end
+fprintf('PASS\n');
+end
