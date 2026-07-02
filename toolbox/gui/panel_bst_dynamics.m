@@ -1082,6 +1082,39 @@ function rf = i_src_resultfile(D)
     try, rf = GlobalData.DataSet(D.srcDS).Results(D.srcResult).FileName; catch, end %#ok<CTCH>
 end
 
+% True when the linked source is a Dirac-dSPM inverse (carries the mode kernel + its eigenbasis file).
+function tf = i_is_dirac_dspm(D) %#ok<DEFNU>
+    tf = false;  src = i_src_resultfile(D);  if isempty(src), return; end
+    try
+        R = in_bst_results(src, 0, 'ImagingKernelMode', 'DiracEigenFile');
+        tf = isfield(R,'ImagingKernelMode') && ~isempty(R.ImagingKernelMode) ...
+          && isfield(R,'DiracEigenFile')   && ~isempty(R.DiracEigenFile);
+    catch %#ok<CTCH>
+    end
+end
+
+% Mode coefficients c = ImagingKernelMode * recordings(GoodChannel, iWin), split per hemisphere and
+% ordered ascending-lambda (mirrors view_eigen_timeseries). Free vs projecting the reconstructed field.
+function [cCell, meta] = i_mode_coeffs(st, D, iWin) %#ok<DEFNU>
+    cCell = {[],[]};  meta = struct('Eigenvalues',{{[],[]}},'DiracEigenFile','');
+    src = i_src_resultfile(D);  if isempty(src), return; end
+    R = in_bst_results(src, 0, 'ImagingKernelMode','Eigenvalues','ModeHemisphere','GoodChannel','DiracEigenFile');
+    if isempty(R.ImagingKernelMode), return; end
+    key = sprintf('%s|%s|%d-%d', R.DiracEigenFile, src, iWin(1), iWin(end));
+    M = getappdata(0,'DynamicsModeCoeffCache');
+    if ~isempty(M) && isstruct(M) && strcmp(M.key,key), cCell = M.cCell; meta = M.meta; return; end
+    gc = R.GoodChannel;  if isempty(gc), gc = 1:size(R.ImagingKernelMode,2); end
+    d  = double(bst_memory('GetRecordingsValues', D.srcDS, gc, iWin));   % [nGoodChan x nWin]
+    cAll = double(R.ImagingKernelMode) * d;                             % [nMode x nWin]
+    lam  = double(R.Eigenvalues(:));  hemi = double(R.ModeHemisphere(:));
+    for h = 1:2
+        ord = find(hemi==h);  [ls, s] = sort(lam(ord),'ascend');  ord = ord(s);
+        cCell{h} = cAll(ord,:);  meta.Eigenvalues{h} = ls;
+    end
+    meta.DiracEigenFile = R.DiracEigenFile;
+    setappdata(0,'DynamicsModeCoeffCache', struct('key',key,'cCell',{cCell},'meta',meta));
+end
+
 % Which operators a source with nComponents supports (order = ctrl.opVariants):
 %   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
 % Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
