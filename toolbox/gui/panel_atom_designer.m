@@ -9,10 +9,12 @@ function varargout = panel_atom_designer(varargin)
 %
 % API (macro_method):
 %   bstPanel = panel_atom_designer('CreatePanel')
-%   panel_atom_designer('Configure', cb, bounds, kernel0, variant0)   % cb = struct(Kernel/Operator/Param/Fibers/Save handles)
+%   panel_atom_designer('Configure', cb, bounds, kernel0, variant0)   % cb = struct(Kernel/Operator/Param/Direction/Fibers/Save handles)
 %   vals = panel_atom_designer('ReadVals')                            % [s1 s2 s3]
 %   k    = panel_atom_designer('CurrentKernel')
-%   v    = panel_atom_designer('CurrentOperator')                     % 'LB-Connectome' | 'Laplace-Beltrami'
+%   v    = panel_atom_designer('CurrentOperator')                     % 'Laplace-Beltrami'|'LB-Connectome'|'Dirac'|'Dirac-Connectome'
+%   d    = panel_atom_designer('CurrentDirection')                    % 'Normal'|'+X'|'+Y'|'+Z'|'Pick-on-surface'
+%   panel_atom_designer('ShowDirection', tf)                          % show/hide the seed-direction control
 %   panel_atom_designer('RebuildSliders', kernel, bounds)
 %   panel_atom_designer('SetStatus', text)
 %
@@ -47,7 +49,6 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     [atomKeys, atomDisp] = panel_eigenfilter_design('AtomKernelsGrouped');
     BUTTON_WIDTH   = java_scaled('value', 56);
     DEFAULT_HEIGHT = java_scaled('value', 22);
-    OP_WIDTH       = java_scaled('value', 90);
 
     % options stack: one bordered sub-panel per group, pinned to the top (panel_surface convention)
     jPanelOptions = gui_component('Panel');
@@ -56,19 +57,24 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     % ===== FILTER DESIGN: operator + filter + contextual parameter sliders =====
     jDes = gui_river([1,1], [1,8,1,4], 'Filter design');
-        % Operator: mutually-exclusive toggle buttons (Connectomic | Geometric)
+        % Operator: combobox over the SP1-routable operators (Connection Laplacian is out — unpersisted frame)
         gui_component('label', jDes, 'br', 'Operator:');
-        jbgOp = ButtonGroup();
-        jConn = gui_component('toggle', jDes, 'tab', 'Connectomic', [], 'LB + connectome eigenbasis',  @(h,e) bst_call(@OnOperatorCb));
-        jGeom = gui_component('toggle', jDes, '',    'Geometric',   [], 'Laplace-Beltrami eigenbasis', @(h,e) bst_call(@OnOperatorCb));
-        jConn.setPreferredSize(Dimension(OP_WIDTH, DEFAULT_HEIGHT));  jGeom.setPreferredSize(Dimension(OP_WIDTH, DEFAULT_HEIGHT));
-        jbgOp.add(jConn);  jbgOp.add(jGeom);
+        opItems = {'Geometric','Connectomic','Dirac','Dirac (connectome)'};
+        jOperator = gui_component('combobox', jDes, 'tab hfill', [], {opItems}, [], [], []);
+        java_setcb(jOperator, 'ActionPerformedCallback', @(h,e) bst_call(@OnOperatorCb));
         % Filter: grouped combobox (Dynamic / Static headers; headers are not selectable)
         gui_component('label', jDes, 'br', 'Filter:');
         jKernel = gui_component('combobox', jDes, 'tab hfill', [], {atomDisp}, [], [], []);
         java_setcb(jKernel, 'ActionPerformedCallback', @(h,e) bst_call(@OnKernelCb));
         jParams = gui_river([1,1], [2,0,0,0]);                 % contextual sliders (own rows; removeAll-safe)
         jDes.add('br hfill', jParams);
+        % Seed-direction control (quaternion/Dirac fibers): preset combobox, hidden for scalar operators.
+        jDirRow = gui_river([0 0], [0 2 0 2]);
+        gui_component('label', jDirRow, [], 'Direction: ');
+        jDirCombo = gui_component('combobox', jDirRow, 'hfill', [], {{'Normal','+X','+Y','+Z','Pick-on-surface'}}, [], [], []);
+        java_setcb(jDirCombo, 'ActionPerformedCallback', @(h,e) bst_call(@OnDirCb));
+        jDirRow.setVisible(false);                               % no vector operator selected yet -> hidden
+        jDes.add('br hfill', jDirRow);
     jPanelOptions.add(jDes);
 
     % ===== ACTIONS: connectome overlay + save (explicitly sized -> side by side) =====
@@ -90,7 +96,8 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
 
     jPanelNew = gui_component('Panel');
     jPanelNew.add(jPanelOptions, BorderLayout.NORTH);
-    ctrl = struct('jConn',jConn, 'jGeom',jGeom, 'jKernel',jKernel, 'jParams',jParams, ...
+    ctrl = struct('jOperator',jOperator, 'jDirRow',jDirRow, 'jDirCombo',jDirCombo, ...
+                  'jKernel',jKernel, 'jParams',jParams, ...
                   'jFibers',jFibers, 'jStatus',jStatus, 'atomKeys',{atomKeys});
     bstPanelNew = BstPanel(panelName, jPanelNew, ctrl);
 end
@@ -100,7 +107,7 @@ end
 function Configure(cb, bounds, kernel0, variant0) %#ok<DEFNU>
     ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
     setappdata(0, 'AtomDesignerCB', cb);
-    if strcmpi(variant0, 'Laplace-Beltrami'), ctrl.jGeom.setSelected(1); else, ctrl.jConn.setSelected(1); end
+    ctrl.jOperator.setSelectedItem(i_item_for_variant(variant0));
     iK = find(strcmp(ctrl.atomKeys, kernel0), 1);  if isempty(iK), iK = i_first_kernel_idx(ctrl.atomKeys); end
     ctrl.jKernel.setSelectedIndex(iK - 1);
     setappdata(0, 'AtomDesignerKIdx', iK);
@@ -127,9 +134,48 @@ function k = CurrentKernel() %#ok<DEFNU>
 end
 
 function v = CurrentOperator() %#ok<DEFNU>
-    v = 'Laplace-Beltrami';                                                  % geometric
+    v = 'Laplace-Beltrami';
     ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
-    if ctrl.jConn.isSelected(), v = 'LB-Connectome'; end                     % connectomic
+    v = i_variant_for_item(char(ctrl.jOperator.getSelectedItem()));
+end
+
+% Pure display->variant map (also used by Configure and the headless test).
+function v = i_variant_for_item(name) %#ok<DEFNU>
+    switch name
+        case 'Connectomic',        v = 'LB-Connectome';
+        case 'Dirac',              v = 'Dirac';
+        case 'Dirac (connectome)', v = 'Dirac-Connectome';
+        otherwise,                 v = 'Laplace-Beltrami';   % 'Geometric' / unknown
+    end
+end
+
+% Pure variant->display map.
+function nm = i_item_for_variant(variant) %#ok<DEFNU>
+    switch variant
+        case 'LB-Connectome',    nm = 'Connectomic';
+        case 'Dirac',            nm = 'Dirac';
+        case 'Dirac-Connectome', nm = 'Dirac (connectome)';
+        otherwise,               nm = 'Geometric';
+    end
+end
+
+% Selected seed-direction preset.
+function v = CurrentDirection() %#ok<DEFNU>
+    v = 'Normal';
+    ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
+    v = char(ctrl.jDirCombo.getSelectedItem());
+end
+
+% Show/hide the seed-direction control (vector fiber -> show; scalar -> hide).
+function ShowDirection(tf) %#ok<DEFNU>
+    ctrl = bst_get('PanelControls', 'AtomDesigner');  if isempty(ctrl), return; end
+    ctrl.jDirRow.setVisible(logical(tf));
+end
+
+% Relay the direction-combo change to the designer.
+function OnDirCb()
+    cb = getappdata(0, 'AtomDesignerCB');
+    if ~isempty(cb) && isfield(cb,'Direction'), cb.Direction(); end
 end
 
 function ix = i_first_kernel_idx(atomKeys)
