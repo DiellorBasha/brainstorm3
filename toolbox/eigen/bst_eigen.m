@@ -17,7 +17,9 @@ function [OutputFiles, Messages, isError, varargout] = bst_eigen(Data, OPTIONS, 
 %     from an eigen_ file: the operator eigenvalues Lambda (the spatial-frequency axis) and
 %     eigenvectors Phi (the spatial modes). It is general over the operator family carried
 %     in the eigen_ metadata -- Laplace-Beltrami (scalar), Connection Laplacian (tangent
-%     vector), Dirac (3D embedded vector) -- dispatching on EigenMat.Variant.
+%     vector), Dirac (3D embedded vector) -- routing on (field_type, domain) resolved by
+%     'FieldSpec' (authoritative fieldspec table keyed by Variant, with Registry.Primary
+%     and Phi-layout fallbacks; see i_field_spec), not a raw switch on EigenMat.Variant.
 %
 %     Module boundary (see also the eigen-module-reorg memory):
 %       - tess_eigen / tess_operators : structural PRE-COMPUTATION of the eigenbasis
@@ -735,7 +737,17 @@ end
 %% ===== FIELD SPEC: (field_type, domain) -> layout, from operator metadata =====
 function spec = i_field_spec(ax)
     ft = '';  dom = '';
-    if isfield(ax,'Operator') && isstruct(ax.Operator) && isfield(ax.Operator,'Registry') ...
+    % Stage 0: the local fieldspec table, keyed by Variant, is the AUTHORITATIVE
+    % Brainstorm-semantic source of truth (bst_nxr_registry.m). It wins over any
+    % persisted Registry.Primary.field_type, which can be stale: an operator NODE
+    % built before this table existed (or before a field_type correction, e.g.
+    % Hodge-Face's lifted quaternion field vs. the nxr binary's raw 'real') is
+    % reused as-is by tess_operators' find-or-reuse (no re-stamp on load).
+    if isfield(ax,'Variant') && ~isempty(ax.Variant)
+        fs = bst_nxr_registry('fieldspec', ax.Variant);
+        if ~isempty(fs), ft = fs.field_type; dom = fs.domain; end
+    end
+    if isempty(ft) && isfield(ax,'Operator') && isstruct(ax.Operator) && isfield(ax.Operator,'Registry') ...
             && ~isempty(ax.Operator.Registry) && isfield(ax.Operator.Registry,'Primary') ...
             && ~isempty(ax.Operator.Registry.Primary)
         P = ax.Operator.Registry.Primary;
@@ -773,4 +785,5 @@ function ax = i_axfromeigen(EigenMat, OperatorMat)
     % Cell-array fields are wrapped in an extra {} so struct() stores them as-is (not expanded
     % into a struct array).
     ax = struct('Operator', OperatorMat, 'Phi', {EigenMat.Phi}, 'GlobalVertices', {EigenMat.GlobalVertices});
+    ax.Variant = EigenMat.Variant;
 end

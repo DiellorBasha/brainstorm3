@@ -27,6 +27,23 @@ s = bst_eigen('FieldSpec', axNoDom);  assert(strcmp(s.domain,'vertex'));
 axFb = struct('Phi',{{randn(4*50,5),[]}}, 'GlobalVertices',{{(1:50)',[]}});
 s = bst_eigen('FieldSpec', axFb);  assert(s.C==4 && strcmp(s.kind,'quaternion'));
 
+% stale-node regression: a Hodge-Face operator node persisted BEFORE this branch carries the
+% nxr raw field_type='real' (the nxr binary's raw type for the lifted quaternion field), and
+% tess_operators' find-or-reuse returns such cached nodes AS-IS (no re-stamp). The Variant
+% fieldspec table must win over this stale persisted value and resolve to 'quaternion'/'face'.
+axStale = struct('Variant','Hodge-Face', ...
+    'Operator', struct('Registry', struct('Primary', i_prim('real','face'))), ...
+    'Phi', {{randn(4*50,5), []}}, 'GlobalVertices', {{(1:50)',[]}});
+s = bst_eigen('FieldSpec', axStale);
+assert(strcmp(s.field_type,'quaternion') && strcmp(s.domain,'face') && s.width==4 && s.nComponents==3 && s.C==4 && strcmp(s.kind,'quaternion'));
+
+% backward-compat: an ax with NO Variant field still resolves from Registry.Primary (the
+% existing synthetic cases above must keep passing unchanged).
+axNoVariant = mk('real','vertex',1,50);
+assert(~isfield(axNoVariant,'Variant'));
+s = bst_eigen('FieldSpec', axNoVariant);
+assert(strcmp(s.field_type,'real') && strcmp(s.domain,'vertex') && s.C==1 && strcmp(s.kind,'scalar'));
+
 i_registry_fieldspec();     % every operator variant declares field_type/domain
 fprintf('PASS\n');
 end

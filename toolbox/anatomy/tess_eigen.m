@@ -187,10 +187,9 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     %     the number of BASE (LB-Connectome) modes, matching the shipped panel recipe
     %     (bst_lift_connectome_dirac triples each scalar mode into 3 quaternion modes: w=0, x, y,
     %     z), so the output Phi has 3*K columns, NOT K -- unlike every other variant, where K is
-    %     the literal output column count. (A stale cached Dirac-Connectome node from a prior
-    %     request would satisfy the generic nModes>=K reuse check above under this tripled count;
-    %     this mirrors the panel's own single-session cache, which never re-requests a different
-    %     K, and is not tightened further here.)
+    %     the literal output column count. (The generic nModes>=K reuse check above IS tightened
+    %     for this case: it is called with KReq=3*K, not K, so a cached node is only reused when
+    %     its stored nModes covers the tripled output-column count.)
     if strcmpi(Variant, 'Dirac-Connectome')
         base = tess_eigen(SurfaceFile, 'LB-Connectome', 'nModes', K, 'Tau', Tau, ...
                           'ForceRecompute', ForceRecompute);
