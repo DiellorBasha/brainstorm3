@@ -275,7 +275,8 @@ end
 %% ===== atom-field preview: paint a realised W[nGv x nT] through the overlay =====
 % The panel's live preview. W is the realised atom field on the eigenbasis support gv (global
 % vertex indices), already normalized; isSigned picks the colormap (peak/diverging vs density/seq).
-function SetAtomField(hFig, W, gv, isSigned)
+function SetAtomField(hFig, W, gv, isSigned, V3)
+    if nargin < 5, V3 = []; end
     if isempty(hFig) || ~ishandle(hFig), return; end
     D = getappdata(hFig, 'DynamicsOverlay');  if isempty(D), return; end
     D.AtomField  = W;  D.AtomGV = gv(:);  D.AtomSigned = logical(isSigned);  D.Op = 'atom';  D.AtomWin = [];
@@ -283,6 +284,14 @@ function SetAtomField(hFig, W, gv, isSigned)
     if isSigned, bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     else,        bst_colormaps('AddColormapToFigure', hFig, 'source'); end
     i_dynamics_overlay(hFig);
+    % Append quiver block: if V3 is non-empty and 3-column, set override and enable source vectors
+    if (nargin >= 5) && ~isempty(V3) && (size(V3,2) == 3)
+        setappdata(hFig, 'QuiverVectorOverride', V3);
+        try, figure_3d('SetShowSourceVectors', hFig, D.iTess, 1); catch, end %#ok<CTCH>
+    else
+        setappdata(hFig, 'QuiverVectorOverride', []);
+        try, figure_3d('SetShowSourceVectors', hFig, D.iTess, 0); catch, end %#ok<CTCH>
+    end
 end
 
 % Preview: paint the filtered real source Ffilt[nV x nWin] over the recording window `win` (sample
@@ -312,6 +321,9 @@ function ClearAtomField(hFig)
     bst_colormaps('AddColormapToFigure', hFig, 'source');
     panel_surface('UpdateSurfaceData', hFig, D.iTess);
     panel_surface('UpdateSurfaceColormap', hFig);
+    % Clear quiver override and disable source vectors
+    setappdata(hFig, 'QuiverVectorOverride', []);
+    try, D = getappdata(hFig,'DynamicsOverlay'); if ~isempty(D) && isfield(D,'iTess'), figure_3d('SetShowSourceVectors', hFig, D.iTess, 0); end, catch, end %#ok<CTCH>
 end
 
 %% ===== filtered-sensor overlay: stash Dfilt on the recording figure + trigger the draw hook =====
