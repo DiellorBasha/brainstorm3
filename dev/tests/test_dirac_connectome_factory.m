@@ -8,12 +8,13 @@ surf = 'sub-MTL0005/tess_cortex_pial_low.mat';
 
 % Reference: build the LB-Connectome basis directly, then lift it by hand (the pre-refactor
 % panel recipe).
-axc = bst_eigen('Axes', struct('SurfaceFile',surf,'Variant','LB-Connectome','nModes',60));
+axOpt = @(v) struct('SurfaceFile',surf,'Variant',v,'nModes',60,'TimeWindow',[0 0.99],'SampleRate',100);
+axc = bst_eigen('Axes', axOpt('LB-Connectome'));
 [Pq, Lq, Mq] = bst_lift_connectome_dirac(axc.Phi{1}, axc.Lambda{1}(:), axc.Mass{1});
 
 % Factory: tess_operators/tess_eigen build+lift 'Dirac-Connectome' internally; the panel now
 % only calls bst_eigen('Axes','Dirac-Connectome') (no inline bst_lift_connectome_dirac call).
-axd = bst_eigen('Axes', struct('SurfaceFile',surf,'Variant','Dirac-Connectome','nModes',60));
+axd = bst_eigen('Axes', axOpt('Dirac-Connectome'));
 
 assert(isequal(size(axd.Phi{1}), size(Pq)) && max(abs(axd.Phi{1}(:)-Pq(:)))<1e-10, 'Phi mismatch');
 assert(isequal(size(axd.Lambda{1}), size(Lq)) && max(abs(axd.Lambda{1}(:)-Lq(:)))<1e-10, 'Lambda mismatch');
