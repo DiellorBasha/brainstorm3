@@ -539,6 +539,9 @@ function ax = i_atom_axes(st, variant) %#ok<DEFNU>
                 for h = 1:2
                     ord = find(hemi==h);  ls = sort(lam(ord),'ascend');  ax.Lambda{h} = ls;
                 end
+                if isfield(E,'Provenance') && isstruct(E.Provenance) && isfield(E.Provenance,'Tau') && ~isempty(E.Provenance.Tau)
+                    ax.DiracTau = E.Provenance.Tau;   % the eigen node's Tau -> i_dirac_leadfield builds L_eig on THIS basis
+                end
                 Fs = 100; try, tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult); if numel(tv)>1, Fs=1/median(diff(tv)); end, catch, end %#ok<CTCH>
                 nF = max(2, round(4*Fs));  ax.nT = nF;  ax.tlag = (0:nF-1)/Fs;  ax.omega = (0:nF-1)*(Fs/nF);  ax.NFFT = nF;
                 Mc(key) = ax;  setappdata(0,'DynamicsAtomAx', Mc);
@@ -656,7 +659,7 @@ function [W, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir) %#ok<D
     V3 = [];
     switch kind
         case 'quaternion'
-            n = numel(gv);  im = [W(2:4:end,1) W(3:4:end,1) W(4:4:end,1)];   % imag 3-vector at frame 1
+            n = numel(gv);  im = reshape(manifold_quat_imag(W(:,1)), 3, n).';   % [n x 3] imag 3-vector, frame 1
             V3 = zeros(nV,3);  V3(gv,:) = im;
         case 'tangent'
             % complex (a+bi) in the operator frame -> ambient 3-vector a*e1 + b*e2 (Op.Frame per hemi)
@@ -1207,7 +1210,8 @@ function sir = i_dspm_scale(st, D) %#ok<DEFNU>
     for h=1:2
         ord=find(hemi==h);[~,s]=sort(lam(ord),'ascend');ord=ord(s);
         Ph=double(E.Phi{h}); gv=E.GlobalVertices{h}(:); Uf=Ph*Km(ord,:);
-        Krec((gv-1)*3+1,:)=Uf(2:4:end,:);Krec((gv-1)*3+2,:)=Uf(3:4:end,:);Krec((gv-1)*3+3,:)=Uf(4:4:end,:);
+        grows = reshape([(gv-1)*3+1, (gv-1)*3+2, (gv-1)*3+3].', [], 1);   % global [x,y,z] rows per vertex
+        Krec(grows,:) = manifold_quat_imag(Uf);                          % [3n x nCh] imag 3-vector
     end
     Kv=double(R.ImagingKernel);  sir=ones(nV,1);
     for v=1:nV
@@ -1227,9 +1231,8 @@ function [V3, mag] = i_dirac_recon(ax, cCell) %#ok<DEFNU>
     for h=1:numel(ax.Phi)
         Ph=ax.Phi{h}; if isempty(Ph)||isempty(cCell{h}), continue; end
         gv=ax.GlobalVertices{h}(:);  Uf = Ph * cCell{h};                  % [4Vh x nT]
-        V3(gv,1,:)=reshape(Uf(2:4:end,:),numel(gv),1,nT);
-        V3(gv,2,:)=reshape(Uf(3:4:end,:),numel(gv),1,nT);
-        V3(gv,3,:)=reshape(Uf(4:4:end,:),numel(gv),1,nT);
+        Vr = reshape(manifold_quat_imag(Uf), 3, numel(gv), nT);           % [3 x nVh x nT] imag 3-vector
+        V3(gv,:,:) = permute(Vr, [2 1 3]);                               % -> [nVh x 3 x nT]
     end
     mag = squeeze(sqrt(sum(V3.^2,2)));  if nT==1, mag=mag(:); end
 end
@@ -1669,7 +1672,9 @@ function Leig = i_dirac_leadfield(st, ax) %#ok<DEFNU>
     % nModes/Tau MUST match the atom's Dirac eigenbasis (ax) so L_eig's eigenmode ordering aligns with
     % c_filt; pull Tau from the eigen node ax resolved to (ax is built any-Tau) rather than hardcoding it.
     K = size(ax.Lambda{1},1);  tau = 0.5;
-    if isfield(ax,'EigenMat') && isstruct(ax.EigenMat) && isfield(ax.EigenMat,'Provenance') ...
+    if isfield(ax,'DiracTau') && ~isempty(ax.DiracTau)              % Dirac-dSPM session: the inverse's own Tau
+        tau = ax.DiracTau;
+    elseif isfield(ax,'EigenMat') && isstruct(ax.EigenMat) && isfield(ax.EigenMat,'Provenance') ...
             && isstruct(ax.EigenMat.Provenance) && isfield(ax.EigenMat.Provenance,'Tau') ...
             && ~isempty(ax.EigenMat.Provenance.Tau)
         tau = ax.EigenMat.Provenance.Tau;
