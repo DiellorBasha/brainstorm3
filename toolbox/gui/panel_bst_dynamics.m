@@ -556,8 +556,10 @@ function ax = i_atom_axes(st, variant) %#ok<DEFNU>
             % basis missing/malformed -> fall through to the canonical path
         end
     end
-    % Dirac-Connectome: lift the scalar LB-Connectome eigenbasis (whole-brain, single-block) to a
-    % quaternion basis via bst_lift_connectome_dirac, so RowMap/Fiber treat it like Dirac.
+    % Dirac-Connectome: the lift (scalar LB-Connectome eigenbasis -> quaternion) is now a
+    % structure-aware factory path (tess_operators/tess_eigen 'Dirac-Connectome'), reached
+    % here via bst_eigen('Axes', ...) exactly like every other variant below -- no inline
+    % bst_lift_connectome_dirac call in the panel any more.
     if strcmp(variant, 'Dirac-Connectome')
         surf = i_atom_surface(st);  key = ['dconn|' surf];
         Mc = getappdata(0,'DynamicsAtomAx');  if isempty(Mc)||~isa(Mc,'containers.Map'), Mc=containers.Map('KeyType','char','ValueType','any'); end
@@ -567,12 +569,8 @@ function ax = i_atom_axes(st, variant) %#ok<DEFNU>
             try, tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult); if numel(tv)>1, Fs=1/median(diff(tv)); end, catch, end %#ok<CTCH>
         end
         nF = max(2, round(4*Fs));
-        axs = bst_eigen('Axes', struct('SurfaceFile',surf,'Variant','LB-Connectome','nModes',60,'TimeWindow',[0 (nF-1)/Fs],'SampleRate',Fs));
-        if isempty(axs) || isempty(axs.Phi{1}), return; end
-        [Phiq,Lamq,Mq] = bst_lift_connectome_dirac(axs.Phi{1}, axs.Lambda{1}(:), axs.Mass{1});
-        ax = struct('Variant','Dirac-Connectome','SurfaceFile',surf, ...
-                    'Phi',{{Phiq,[]}}, 'GlobalVertices',{axs.GlobalVertices}, 'Mass',{{Mq,[]}}, 'Lambda',{{Lamq,[]}});
-        ax.nT = nF;  ax.tlag = (0:nF-1)/Fs;  ax.omega = (0:nF-1)*(Fs/nF);  ax.NFFT = nF;
+        ax = bst_eigen('Axes', struct('SurfaceFile',surf,'Variant','Dirac-Connectome','nModes',60,'TimeWindow',[0 (nF-1)/Fs],'SampleRate',Fs));
+        if isempty(ax) || isempty(ax.Phi{1}), return; end
         Mc(key) = ax;  setappdata(0,'DynamicsAtomAx', Mc);
         return;
     end

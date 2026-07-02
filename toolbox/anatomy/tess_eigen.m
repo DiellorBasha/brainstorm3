@@ -116,15 +116,26 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
             Variant = 'Connectome Laplacian';
         case {'lb-connectome','lbconnectome','laplace-beltrami-connectome'}
             Variant = 'LB-Connectome';
+        case {'dirac-connectome','diracconnectome'}
+            Variant = 'Dirac-Connectome';
         otherwise
             error('tess_eigen:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Connectome Laplacian'', ''LB-Connectome''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Connectome Laplacian'', ''LB-Connectome'', ''Dirac-Connectome''.'], OperatorName);
     end
     isDiracFace = strcmpi(Variant, 'Dirac-Face');
     isHodgeFace = strcmpi(Variant, 'Hodge-Face');           % scalar lapFace eigensolve + Hodge vector lift
     isFace  = isDiracFace || isHodgeFace;                   % face-domain (modes on faces)
     isDirac = strcmpi(Variant, 'Dirac') || isDiracFace;     % quaternion Dirac-type: over-fetch + Rayleigh-Ritz + Tau
+    isDiracConn = strcmpi(Variant, 'Dirac-Connectome');
+    % Dirac-Connectome is the one variant where K is NOT the output column count: it is the
+    % number of BASE (LB-Connectome) modes, and the lift triples it (w=0,x,y,z per mode) into
+    % 3*K output columns (see the Dirac-Connectome branch below). KReq is the actual output
+    % column count, so the generic cache-reuse check right below compares apples-to-apples
+    % (a cached node's stored nModes IS an output-column count for every variant) and truncates
+    % correctly on a cache hit (columns are ordered in complete mode-triples, so truncating the
+    % lifted Phi to its first 3*K columns == re-lifting the base truncated to its first K modes).
+    KReq = K; if isDiracConn, KReq = 3 * K; end
 
     % --- guard: nxr-compute plugin (operators reach nxr transitively) ---
     [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
@@ -147,7 +158,7 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
     %     more modes is truncated to its first K columns. ForceRecompute skips this.
     %     bst_get resolves the match from the cache (no file load); we then load the file.
     if ~ForceRecompute
-        [sCached, ~, iSurfCached, iEigCached] = bst_get('EigenFileForSurface', SurfaceFile, Variant, K, Tau);
+        [sCached, ~, iSurfCached, iEigCached] = bst_get('EigenFileForSurface', SurfaceFile, Variant, KReq, Tau);
         if ~isempty(iEigCached)
             existEntry = sCached.Surface(iSurfCached).Eigen(iEigCached);
             if Interactive
@@ -158,15 +169,54 @@ function EigenMat = tess_eigen(SurfaceFile, OperatorName, varargin)
                     '[No keeps and reuses the existing one.]'], ...
                     Variant, existEntry.nModes, local_tau_str(existEntry.Tau));
                 if ~java_dialog('confirm', msg, 'Compute eigenmodes')
-                    EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), K);
+                    EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), KReq);
                     return;
                 end
                 db_delete_surface_node(existEntry.FileName, 1);   % overwrite: drop the old node
             else
-                EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), K);
+                EigenMat = local_truncate_eigen(in_bst_eigen(existEntry.FileName), KReq);
                 return;
             end
         end
+    end
+
+    % --- Dirac-Connectome: STRUCTURE-AWARE lift -- never eigendecompose the (large) lifted
+    %     quaternion operator directly. Find-or-create the (small) LB-Connectome eigenbasis,
+    %     then lift its Phi/Lambda via bst_lift_connectome_dirac -- the SAME recipe the
+    %     Dirac-Connectome OPERATOR node (tess_operators) used to lift its Mass. NOTE: K here is
+    %     the number of BASE (LB-Connectome) modes, matching the shipped panel recipe
+    %     (bst_lift_connectome_dirac triples each scalar mode into 3 quaternion modes: w=0, x, y,
+    %     z), so the output Phi has 3*K columns, NOT K -- unlike every other variant, where K is
+    %     the literal output column count. (A stale cached Dirac-Connectome node from a prior
+    %     request would satisfy the generic nModes>=K reuse check above under this tripled count;
+    %     this mirrors the panel's own single-session cache, which never re-requests a different
+    %     K, and is not tightened further here.)
+    if strcmpi(Variant, 'Dirac-Connectome')
+        base = tess_eigen(SurfaceFile, 'LB-Connectome', 'nModes', K, 'Tau', Tau, ...
+                          'ForceRecompute', ForceRecompute);
+        Op = in_bst_operator(base.OperatorFile);                        % LB-Connectome (scalar) mass
+        [Pq, Lq] = bst_lift_connectome_dirac(base.Phi{1}, base.Lambda{1}(:), Op.Mass{1});
+        % Find-or-create the Dirac-Connectome OPERATOR node (carries the lifted Mass Mq).
+        tess_operators(SurfaceFile, 'Dirac-Connectome', 'Tau', Tau);
+        OperatorFileDC = local_operator_file(SurfaceFile, 'Dirac-Connectome', Tau);
+        if isempty(OperatorFileDC)
+            error('tess_eigen:operatorCreateFailed', ...
+                'tess_operators did not produce a ''Dirac-Connectome'' operator node under %s.', SurfaceFile);
+        end
+        EigenMat                = base;                                 % clone the whole-brain structure
+        EigenMat.Variant        = 'Dirac-Connectome';
+        EigenMat.Phi            = {Pq, []};
+        EigenMat.Lambda         = {Lq, []};
+        EigenMat.nModes         = size(Pq, 2);
+        EigenMat.OperatorFile   = file_short(OperatorFileDC);
+        EigenMat.Provenance     = struct('Backend','lift', 'Base','LB-Connectome', 'Variant','Dirac-Connectome', ...
+                                         'nModes', size(Pq,2), 'Ortho', 'lift of B-orthonormal base (x3 per mode)', ...
+                                         'ComputeDate', datestr(now,'yyyy-mm-dd HH:MM:SS'));
+        if ~NoSave
+            Comment = sprintf('Dirac-Connectome eigenmodes (K=%d)', EigenMat.nModes);
+            db_add_eigen(iSubject, SurfaceFile, EigenMat, Comment);
+        end
+        return;
     end
 
     % --- progress feedback: indeterminate bar so the user can see the

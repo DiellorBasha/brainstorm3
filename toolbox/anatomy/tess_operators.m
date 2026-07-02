@@ -114,10 +114,12 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
             Variant = 'Connectome Laplacian';
         case {'lb-connectome','lbconnectome','laplace-beltrami-connectome'}
             Variant = 'LB-Connectome';
+        case {'dirac-connectome','diracconnectome'}
+            Variant = 'Dirac-Connectome';
         otherwise
             error('tess_operators:badVariant', ...
                 ['Unknown operator ''%s''. Valid options: ' ...
-                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant'', ''Connectome Laplacian'', ''LB-Connectome''.'], OperatorName);
+                 '''Laplace-Beltrami'', ''Connection Laplacian'', ''Dirac'', ''Dirac-Face'', ''Hodge-Face'', ''Covariant'', ''Connectome Laplacian'', ''LB-Connectome'', ''Dirac-Connectome''.'], OperatorName);
     end
 
     % --- find-or-reuse a cached operator node before the (expensive) nxr build ---
@@ -185,6 +187,34 @@ function OperatorMat = tess_operators(SurfaceFile, OperatorName, varargin)
         if ~NoSave
             [~, iSubjectSave] = bst_get('SurfaceFile', SurfaceFile);
             db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, sprintf('%s operator', Variant));
+        end
+        return;
+    end
+
+    % --- Dirac-Connectome: LIFT of the whole-brain LB-Connectome operator to a quaternion
+    %     (Dirac-type) operator node. Find-or-create the (small) LB-Connectome base -- never
+    %     built independently here -- then lift its Mass to Mq = kron(scalarMass, I4), the SAME
+    %     lift bst_lift_connectome_dirac produces, so this operator node's .Mass IS the reference
+    %     lift that bst_eigen('Axes','Dirac-Connectome') must return as ax.Mass{1}. The mode lift
+    %     itself (Phi/Lambda) happens in tess_eigen (structure-aware eigen path); this node exists
+    %     to carry the lifted Mass + the 'quaternion'/'vertex' FieldSpec metadata. The base Operator
+    %     (stiffness) matrix is reused UNLIFTED (reference/provenance only -- no consumer solves an
+    %     eigenproblem on this node directly; see the global "never eigendecompose the large lifted
+    %     operator" constraint). ---
+    if strcmpi(Variant, 'Dirac-Connectome')
+        baseOp = tess_operators(SurfaceFile, 'LB-Connectome', 'Tau', Tau);   % find-or-create base
+        OperatorMat            = baseOp;                                     % reuse mass/geometry
+        OperatorMat.Variant    = 'Dirac-Connectome';
+        OperatorMat.Comment    = 'Dirac-Connectome operator';
+        OperatorMat.Mass       = {kron(baseOp.Mass{1}, speye(4)), []};       % lifted quaternion mass Mq
+        OperatorMat.Provenance = struct('Backend','lift', 'Base','LB-Connectome', ...
+                                        'ComputeDate',datestr(now,'yyyy-mm-dd HH:MM:SS'));
+        fs = bst_nxr_registry('fieldspec', 'Dirac-Connectome');
+        OperatorMat.Registry = struct('Primary', struct('field_type',fs.field_type,'domain',fs.domain), ...
+                                      'Components', []);
+        if ~NoSave
+            [~, iSubjectSave] = bst_get('SurfaceFile', SurfaceFile);
+            db_add_operator(iSubjectSave, SurfaceFile, OperatorMat, 'Dirac-Connectome operator');
         end
         return;
     end
