@@ -53,7 +53,9 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     else
         gv1 = ax.GlobalVertices{1};  [~,j] = min(sum((V(gv1,:) - mean(V(gv1,:),1)).^2, 2));  seedVtx = gv1(j);
     end
-    W = i_eval_atom(seedVtx, ax, kernel, struct('lmax',lmax), V, nV);   % init frame from kernel defaults (sliders not built yet); Generate() recomputes with the slider params at the end
+    seedDir = bst_atom_default_dir(ax, seedVtx);     % app-side default (1 for scalar; seed normal for Dirac)
+    pickMode = 'seed';       % 'seed' = clicks move the seed; 'dir' = next click sets the impulse direction
+    [W, ~] = i_eval_atom(seedVtx, ax, kernel, struct('lmax',lmax), V, nV, seedDir);   % init frame from kernel defaults (sliders not built yet); Generate() recomputes with the slider params at the end
 
     % --- working results file -> display through the managed SOURCE overlay (native colormap/bar/stepper) ---
     [sSubj] = bst_get('SurfaceFile', SurfaceFile);
@@ -69,15 +71,17 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     TI     = getappdata(hFig, 'Surface');  iTess = find(~cellfun('isempty', {TI.SurfaceFile}), 1);
 
     % --- design controls live in a DOCKED panel (panel_atom_designer), NOT on the figure ---
-    cb = struct('Kernel',   @()bst_call(@KernelChanged), ...
-                'Operator', @()bst_call(@OperatorChanged), ...
-                'Param',    @()bst_call(@ParamChanged), ...
-                'Fibers',   @(s)bst_call(@()OnToggleConnectome(s)), ...
-                'Save',     @()bst_call(@SaveAtom));
+    cb = struct('Kernel',    @()bst_call(@KernelChanged), ...
+                'Operator',  @()bst_call(@OperatorChanged), ...
+                'Param',     @()bst_call(@ParamChanged), ...
+                'Direction', @()bst_call(@OnDirectionChanged), ...
+                'Fibers',    @(s)bst_call(@()OnToggleConnectome(s)), ...
+                'Save',      @()bst_call(@SaveAtom));
     try, gui_hide('AtomDesigner'); catch, end %#ok<CTCH>
     bstPanelDes = panel_atom_designer('CreatePanel');
     gui_show(bstPanelDes, 'BrainstormTab', 'tools');
     panel_atom_designer('Configure', cb, i_bounds(), kernel, variant);
+    i_sync_dir_control();
     Status();
 
     % --- vertex picking: use figure_3d's native WaveletDesignerPick hook (select3d-based via
@@ -114,6 +118,9 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         gv = ax.GlobalVertices{1};                                 % keep the seed if still supported, else recenter
         if ~ismember(seedVtx, gv), [~,j] = min(sum((V(gv,:)-mean(V(gv,:),1)).^2,2)); seedVtx = gv(j); end
         panel_atom_designer('RebuildSliders', kernel, i_bounds());  % new spectrum -> refresh slider ranges
+        i_reset_dir();
+        pickMode = 'seed';                             % operator switch cancels any armed pick
+        i_sync_dir_control();
         Regen();  i_reset_time();                                  % new basis -> diffuse anew from t=0
     end
     function KernelChanged()
@@ -166,13 +173,20 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
     function Regen(), if ~isempty(seedVtx), Generate(); end, end
     function Generate()
         try
-            W = i_eval_atom(seedVtx, ax, kernel, i_phys2kernel(), V, nV);
-            [W, isSigned] = i_normalize(W);                              % one-signed (density) vs signed (peak)
-            if isSigned, i_set_cmap('stat2'); else, i_set_cmap('source'); end   % diverging-symmetric vs sequential
-            GlobalData.DataSet(iDS).Results(iRes).ImageGridAmp = W;       % in-place update, no file I/O
+            [W, V3] = i_eval_atom(seedVtx, ax, kernel, i_phys2kernel(), V, nV, seedDir);
+            if isempty(V3)                                          % scalar fiber: density/peak by kernel class
+                [W, isSigned] = i_normalize(W);
+                if isSigned, i_set_cmap('stat2'); else, i_set_cmap('source'); end
+                i_clear_quiver();
+            else                                                    % vector fiber: magnitude + quivers
+                pk = max(abs(W(:)));  if pk > 0, W = W / pk; end    % peak-normalize the magnitude
+                i_set_cmap('source');
+                i_set_quiver(V3);
+            end
+            GlobalData.DataSet(iDS).Results(iRes).ImageGridAmp = W;  % in-place update, no file I/O
             T2 = getappdata(hFig,'Surface');  T2(iTess).DataMinMax = [min(W(:)) max(W(:))];  setappdata(hFig,'Surface',T2);
             panel_surface('UpdateSurfaceData', hFig, iTess);  panel_surface('UpdateSurfaceColormap', hFig);
-            if showFib, i_recolor_fibers(); end                          % keep the fiber overlay in sync with the atom
+            if showFib, i_recolor_fibers(); end                     % keep the fiber overlay in sync with the atom
             Status();
         catch ME
             panel_atom_designer('SetStatus',['Could not propagate: ' regexprep(ME.message,'\s+',' ')]);
@@ -268,9 +282,48 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
         other = 'source'; if strcmpi(cmapType,'source'), other = 'stat2'; end
         try, bst_colormaps('AddColormapToFigure', hFig, cmapType);  bst_colormaps('RemoveColormapFromFigure', hFig, other); catch, end
     end
+    function i_set_quiver(V3)
+        setappdata(hFig, 'QuiverVectorOverride', V3);
+        try, figure_3d('SetShowSourceVectors', hFig, iTess, 1); catch, end %#ok<CTCH>
+    end
+    function i_clear_quiver()
+        setappdata(hFig, 'QuiverVectorOverride', []);
+        try, figure_3d('SetShowSourceVectors', hFig, iTess, 0); catch, end %#ok<CTCH>
+    end
+    function i_reset_dir()
+        seedDir = bst_atom_default_dir(ax, seedVtx);  % recompute the default whenever ax or the seed changes
+    end
+    function OnDirectionChanged()
+        name = panel_atom_designer('CurrentDirection');
+        if strcmpi(name, 'Pick-on-surface')
+            pickMode = 'dir';                          % arm a one-shot direction pick
+            panel_atom_designer('SetStatus', 'Click the cortex to point the impulse from the seed.');
+            return;
+        end
+        pickMode = 'seed';                             % an explicit preset cancels any armed pick
+        seedDir = i_resolve_dir(name);
+        Generate();
+    end
+    function d = i_resolve_dir(name)
+        switch name
+            case '+X', d = [1 0 0];
+            case '+Y', d = [0 1 0];
+            case '+Z', d = [0 0 1];
+            otherwise, d = bst_atom_default_dir(ax, seedVtx);   % 'Normal'
+        end
+    end
+    function i_sync_dir_control()                       % show the control only for the vector (quaternion) fiber
+        [~, kind] = bst_eigenfilter('Fiber', ax);
+        panel_atom_designer('ShowDirection', strcmp(kind, 'quaternion'));
+    end
     function i_seed(vi)                          % figure_3d native pick callback: clicked cortical vertex -> seed
         if ~strcmpi(state,'design') || isempty(vi), return; end
-        seedVtx = vi;  Generate();  i_reset_time();       % new seed -> diffuse anew from t=0
+        if strcmp(pickMode, 'dir')               % armed by 'Pick-on-surface': point from seed to the click
+            v = V(vi,:) - V(seedVtx,:);  nv = norm(v);
+            if nv > 0, seedDir = v / nv; end
+            pickMode = 'seed';  Generate();  return;
+        end
+        seedVtx = vi;  i_reset_dir();  Generate();  i_reset_time();   % new seed -> default dir + diffuse anew
     end
     function i_reset_time()                       % rewind the global time cursor to the start of the atom (t=0)
         try, panel_time('SetCurrentTime', ax.tlag(1)); catch, end
@@ -299,9 +352,29 @@ function hFig = view_atom_designer(SurfaceFile, variant, nModes, seed0)
 end
 
 % ===== helpers (local) =====
-function W = i_eval_atom(s, ax, kernel, kp, V, nV) %#ok<INUSL>
-    [Wloc, gv] = bst_eigenfilter('Atom', ax, kernel, kp, s);   % V unused now; signature kept for callers
-    W = zeros(nV, ax.nT);  W(gv,:) = Wloc;
+function [W, V3] = i_eval_atom(s, ax, kernel, kp, V, nV, seedDir) %#ok<INUSL>
+    if nargin < 7, seedDir = []; end
+    [Wloc, gv, V3] = bst_eigenfilter('Atom', ax, kernel, kp, s, seedDir);
+    if isempty(V3)                                   % scalar fiber: paint the modal field directly
+        W = zeros(nV, ax.nT);  W(gv,:) = Wloc;
+    else                                             % vector fiber: paint per-frame |field| magnitude
+        Wmag = i_field_mag(Wloc, numel(gv));         % [nGv x nT] RMS over components
+        W = zeros(nV, ax.nT);  W(gv,:) = Wmag;
+        if size(V3,1) < nV, V3(end+1:nV, :) = 0; end % pad to the displayed patch vertex count (quiver guard)
+    end
+end
+
+% Reduce a real/complex/vector field [nc*nRows x nT] to per-row magnitude [nRows x nT] (mirrors the
+% Dynamics panel's i_paintable_scalar; scalar passes through).
+function s = i_field_mag(F, nRows)
+    if ~isreal(F), F = abs(F); end
+    if size(F,1) == nRows, s = F; return; end
+    if mod(size(F,1), nRows) == 0
+        nc = size(F,1) / nRows;
+        s  = reshape(sqrt(sum(reshape(F, nc, nRows, []).^2, 1)), nRows, []);
+    else
+        s = F;
+    end
 end
 function i_call(fcn,h,ev)
     if isempty(fcn), return; end
