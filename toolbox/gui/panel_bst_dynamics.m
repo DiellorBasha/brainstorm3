@@ -878,6 +878,12 @@ function [C, gvAll] = i_apply_projection(st, ax, D, iWin, nV)
     if ~isempty(M) && isstruct(M) && isfield(M,'key') && strcmp(M.key, key)
         C = M.C;  gvAll = M.gvAll;  return;
     end
+    if strcmp(i_atom_op(st),'Dirac') && i_is_dirac_dspm(D)
+        [cCell,~] = i_mode_coeffs(st, D, iWin);
+        C = cCell;  gvAll = [];
+        for h=1:numel(ax.GlobalVertices), gvAll=[gvAll; ax.GlobalVertices{h}(:)]; end %#ok<AGROW>
+        return;
+    end
     F = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iWin, 0));
     Fr = i_paintable_scalar(F, nV);                       % scalar per-vertex magnitude field
     C = cell(1, numel(ax.Phi));  gvAll = [];
