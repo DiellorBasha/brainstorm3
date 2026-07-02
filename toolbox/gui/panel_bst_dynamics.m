@@ -591,21 +591,42 @@ function st = i_atom_ensure_axes(st)
     setappdata(0, 'DynamicsTarget', st);
 end
 
+% Pure realise-core: run the atom on ax at (seed,dir); return the raw field W [C*n x nT], its global
+% vertices gv, and the decoded full-surface ambient vectors V3 [nV x 3] ([] for scalar).
+function [W, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir) %#ok<DEFNU>
+    [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed, seedDir);
+    [C, kind] = bst_eigenfilter('Fiber', ax);
+    nV = 0; for h=1:numel(ax.GlobalVertices), nV = max(nV, max(ax.GlobalVertices{h}(:))); end
+    V3 = [];
+    switch kind
+        case 'quaternion'
+            n = numel(gv);  im = [W(2:4:end,1) W(3:4:end,1) W(4:4:end,1)];   % imag 3-vector at frame 1
+            V3 = zeros(nV,3);  V3(gv,:) = im;
+        case 'tangent'
+            % complex (a+bi) in the operator frame -> ambient 3-vector a*e1 + b*e2 (Op.Frame per hemi)
+            blk = 1; for h=1:numel(ax.GlobalVertices), if any(ax.GlobalVertices{h}==seed), blk=h; break; end, end
+            Fr = ax.Operator.Frame{blk};  a = real(W(:,1));  b = imag(W(:,1));
+            V3 = zeros(nV,3);  V3(gv,:) = a.*Fr.e1 + b.*Fr.e2;
+    end
+    if C == 1, V3 = []; end
+end
+
 % Realise the atom field on its operator's eigenbasis; reduce vector/complex bases to magnitude.
-function [W, gv, isSigned] = i_atom_realise(st, kernel, kp, seed, variant)
+function [W, gv, isSigned, V3] = i_atom_realise(st, kernel, kp, seed, variant, seedDir)
     if (nargin < 5) || isempty(variant), variant = 'Laplace-Beltrami'; end
-    W = [];  gv = [];  isSigned = false;
+    W = [];  gv = [];  isSigned = false;  V3 = [];
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     if ~isstruct(kp), kp = struct(); end
     if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(ax.Lambda{1}(:)); end
+    if (nargin < 6) || isempty(seedDir), seedDir = i_atom_default_dir(ax, seed); end
     try
-        [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed);
+        [Wraw, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir);
     catch %#ok<CTCH>
-        W = [];  gv = [];  return;                                  % operator not realisable -> caller guards
+        W = [];  gv = [];  V3 = [];  return;                        % operator not realisable -> caller guards
     end
     nGv = numel(gv);
-    W = i_paintable_scalar(W, nGv);
-    if size(W,1) ~= nGv, W = [];  return; end                       % unexpected shape -> not paintable (guarded)
+    W = i_paintable_scalar(Wraw, nGv);
+    if size(W,1) ~= nGv, W = [];  V3 = [];  return; end              % unexpected shape -> not paintable (guarded)
     if any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))   % scalar basis: density/peak by kernel class
         [W, isSigned] = i_atom_normalize(W, ax.Mass{i_seed_block(ax, seed)});
     else                                                            % magnitude: peak-normalized, sequential
@@ -654,14 +675,14 @@ function i_atom_preview_impulse()
     variant = i_atom_op(st);
     axk = i_atom_axes(st, variant);  lmax = 1;  if ~isempty(axk), lmax = max(axk.Lambda{1}(:)); end
     [k, kp] = i_selected_generator(st, ctrl, lmax);
-    [W, gv, isSigned] = i_atom_realise(st, k, kp, seed, variant);
+    [W, gv, isSigned, V3] = i_atom_realise(st, k, kp, seed, variant, i_field(st,'atomSeedDir',[]));
     if isempty(W)                                                   % operator not realisable -> guard
         ctrl.jAtomInfo.setText(sprintf('%s: not realisable for this atom', variant));
         if ~isempty(st.hFig) && ishandle(st.hFig), view_dynamics('ClearAtomField', st.hFig); end
         return;
     end
     if ~isempty(st.hFig) && ishandle(st.hFig)
-        view_dynamics('SetAtomField', st.hFig, W, gv, isSigned);
+        view_dynamics('SetAtomField', st.hFig, W, gv, isSigned, V3);
     end
 end
 % The selected atom's operator (Variant), default Laplace-Beltrami.
@@ -1060,7 +1081,9 @@ function OnCreateAtom() %#ok<DEFNU>
     S  = bst_eigfilter_controls('Sliders', 'diffusion', i_atom_bounds(ax));
     vals = [0 0 0];  for i = 1:3, if ~isempty(S(i).def), vals(i) = S(i).def; end, end
     kp = bst_eigfilter_controls('ToKernel', 'diffusion', vals, lmax);  kp.vals = vals;
+    sdir = i_atom_default_dir(ax, seed);
     G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1), op);
+    G.SeedDir = sdir;
     st.T = bst_dynamics('AddGroup', st.T, G);  setappdata(0,'DynamicsTarget', st);
     UpdateAtomList();  SetSelectedAtom(numel(st.T.Groups));
     i_frame_refresh();
