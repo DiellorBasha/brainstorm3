@@ -1115,8 +1115,8 @@ function OnAnalyzeWindow() %#ok<DEFNU>
         ctrl.jAtomInfo.setText('Analyze: no real source linked');  return;
     end
     variant = i_atom_op(st);
-    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
-        ctrl.jAtomInfo.setText(sprintf('%s: Analyze is scalar-only for now (use Geometric/Connectomic)', variant));  return;
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
+        ctrl.jAtomInfo.setText(sprintf('%s: Analyze is scalar-only for now (use Geometric/Connectomic or a Dirac-dSPM source)', variant));  return;
     end
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     fr = i_frame_response(st, ax);
@@ -1305,7 +1305,7 @@ function OnLocalizeBands() %#ok<DEFNU>
         ctrl.jAtomInfo.setText('Localize bands: no real source linked');  return;
     end
     variant = i_atom_op(st);
-    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'}))
+    if ~any(strcmp(variant, {'Laplace-Beltrami','LB-Connectome'})) && ~(strcmp(variant,'Dirac') && i_is_dirac_dspm(D))
         ctrl.jAtomInfo.setText(sprintf('%s: Localize bands is scalar-only for now', variant));  return;
     end
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
