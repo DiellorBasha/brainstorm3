@@ -701,7 +701,7 @@ function [W, gv, isSigned, V3] = i_atom_realise(st, kernel, kp, seed, variant, s
     ax = i_atom_axes(st, variant);  if isempty(ax), return; end
     if ~isstruct(kp), kp = struct(); end
     if ~isfield(kp,'lmax') || isempty(kp.lmax), kp.lmax = max(ax.Lambda{1}(:)); end
-    if (nargin < 6) || isempty(seedDir), seedDir = i_atom_default_dir(ax, seed); end
+    if (nargin < 6) || isempty(seedDir), seedDir = bst_atom_default_dir(ax, seed); end
     try
         [Wraw, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir);
     catch %#ok<CTCH>
@@ -723,22 +723,6 @@ function blk = i_seed_block(ax, seed)
     end
 end
 
-% Default impulse direction per operator dimensionality: Dirac -> seed surface normal (unit 3-vector);
-% tangent/scalar -> 1 (frame e1 / amplitude). See atom-operator-applicability.
-function dir = i_atom_default_dir(ax, seedVert) %#ok<DEFNU>
-    [~, kind] = bst_eigenfilter('Fiber', ax);
-    if ~strcmp(kind, 'quaternion'), dir = 1; return; end
-    dir = [0 0 1];                                       % fallback if normals are missing
-    try
-        S = in_tess_bst(ax.SurfaceFile, 0);
-        if isfield(S,'VertNormals') && ~isempty(S.VertNormals) && seedVert <= size(S.VertNormals,1)
-            n = S.VertNormals(seedVert, :);  if norm(n) > 0, dir = n / norm(n); end
-        end
-    catch %#ok<CTCH>
-    end
-    dir = dir(:)';
-end
-
 %% ===== impulse-direction control (Task 7): pure model + GUI wiring =====
 % Direction-control model for an operator's Fiber kind: scalar -> hidden; tangent -> an angle field
 % (theta -> complex(cos theta, sin theta) in the operator frame); quaternion -> a preset dropdown
@@ -750,7 +734,7 @@ function s = i_dir_control_spec(kind) %#ok<DEFNU>
         otherwise,         s = struct('show',false,'type','none','presets',{{}});
     end
 end
-% Named preset -> ambient 3-vector; 'Normal' resolves to the seed normal by the caller (i_atom_default_dir).
+% Named preset -> ambient 3-vector; 'Normal' resolves to the seed normal by the caller (bst_atom_default_dir).
 function d = i_preset_dir(name) %#ok<DEFNU>
     switch name
         case 'Normal', d = [];                 % resolved to the seed normal by the caller
@@ -821,7 +805,7 @@ function OnPickSeedDir(pickedVertex) %#ok<DEFNU>
                     end
                     return;
                 elseif strcmp(name, 'Normal')
-                    dir = i_atom_default_dir(ax, seed);
+                    dir = bst_atom_default_dir(ax, seed);
                 else
                     dir = i_preset_dir(name);
                 end
@@ -1585,7 +1569,7 @@ function OnCreateAtom() %#ok<DEFNU>
     S  = bst_eigfilter_controls('Sliders', 'diffusion', i_atom_bounds(ax));
     vals = [0 0 0];  for i = 1:3, if ~isempty(S(i).def), vals(i) = S(i).def; end, end
     kp = bst_eigfilter_controls('ToKernel', 'diffusion', vals, lmax);  kp.vals = vals;
-    sdir = i_atom_default_dir(ax, seed);
+    sdir = bst_atom_default_dir(ax, seed);
     G  = i_default_atom('diffusion', kp, seed, ax.SurfaceFile, sprintf('atom%d', numel(st.T.Groups)+1), op);
     G.SeedDir = sdir;
     st.T = bst_dynamics('AddGroup', st.T, G);  setappdata(0,'DynamicsTarget', st);
