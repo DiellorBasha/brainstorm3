@@ -154,6 +154,19 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     java_setcb(jDirAngle, 'StateChangedCallback', @(h,e)bst_call(@OnPickSeedDir));
     jRowD.setVisible(false);                                    % no atom selected yet -> hidden
     jAtom.add(jRowD);
+    % Cortex-magnitude measure toggle (Task 7): amplitude (raw source current) vs dSPM (per-vertex
+    % SIR-rescaled) for a filtered Dirac-dSPM atom (Preview/Apply). (Re)built by i_build_measure_control,
+    % called from i_select_atom_load (which OnSetOperator also routes through), so it only shows for a
+    % Dirac-dSPM session; hidden otherwise. OnSetMeasure writes st.atomMeasure and re-previews.
+    jRowM = gui_river([0 0], [0 2 0 2]);
+    gui_component('label', jRowM, [], 'Measure: ');
+    bgMeasure = javax.swing.ButtonGroup();
+    jMeasureAmp  = gui_component('radio', jRowM, [], 'Amplitude', [], [], @(h,e)bst_call(@()OnSetMeasure('amplitude')));
+    jMeasureDspm = gui_component('radio', jRowM, [], 'dSPM',      [], [], @(h,e)bst_call(@()OnSetMeasure('dspm')));
+    bgMeasure.add(jMeasureAmp);  bgMeasure.add(jMeasureDspm);
+    jMeasureAmp.setSelected(true);
+    jRowM.setVisible(false);                                    % no Dirac-dSPM session loaded yet -> hidden
+    jAtom.add(jRowM);
     jRowI = gui_river([0 0], [0 2 0 2]);                        % selected-atom readout (kernel . seed . params)
     jAtomInfo = gui_component('label', jRowI, 'hfill', '');
     jAtom.add(jRowI);
@@ -184,6 +197,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         'jApply',jApply, 'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
         'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems, ...
         'jDirRow',jRowD, 'jDirCombo',jDirCombo, 'jDirAngle',jDirAngle, ...
+        'jMeasureRow',jRowM, 'jMeasureAmp',jMeasureAmp, 'jMeasureDspm',jMeasureDspm, ...
         'jFrameA',jFrameA, 'jFrameB',jFrameB, 'jFrameT',jFrameT, 'jFrameN',jFrameN, 'jFrameShow',jFrameShow));
 end
 
@@ -1412,6 +1426,7 @@ function i_select_atom_load(iAtom)
     setappdata(0, 'DynamicsTarget', st);
     kind = 'scalar';  if ~isempty(ax), [~, kind] = bst_eigenfilter('Fiber', ax); end
     i_build_dir_control(ctrl, kind, st.hFig);                       % show/hide + refresh to match this atom's operator
+    i_build_measure_control(ctrl, st);                              % show/hide amplitude|dSPM toggle (Dirac-dSPM only); also covers OnSetOperator (routes through here)
     ctrl.jAtomInfo.setText(i_atom_detail(G));
     i_atom_preview();
     i_frame_refresh();
@@ -1471,6 +1486,37 @@ function i_select_op_radio(variant)
     ctrl = bst_get('PanelControls', 'Dynamics');  if isempty(ctrl) || ~isfield(ctrl,'jOpItems'), return; end
     k = find(strcmp(ctrl.opVariants, variant), 1);
     if ~isempty(k), ctrl.jOpItems(k).setSelected(1); end
+end
+
+%% ===== cortex-magnitude measure toggle (Task 7): amplitude | dSPM =====
+% Pure model: default measure, valid options, and the setter that the toggle's callback invokes.
+function d = i_measure_default(), d = 'amplitude'; end %#ok<DEFNU>
+function o = i_measure_options(), o = {'amplitude','dspm'}; end %#ok<DEFNU>
+function OnSetMeasure(name) %#ok<DEFNU>
+    st = getappdata(0,'DynamicsTarget');  if isempty(st), return; end
+    if ~ismember(name, i_measure_options()), return; end
+    st.atomMeasure = name;  setappdata(0,'DynamicsTarget', st);  i_atom_preview();
+end
+
+% (Re)build the measure-toggle row: shown only for a Dirac-dSPM session with a non-trivial dSPM scale
+% (i_is_dirac_dspm + i_dspm_scale non-empty); hidden otherwise (scalar source, non-dSPM Dirac inverse,
+% or no source linked). Reflects the session's current st.atomMeasure (default 'amplitude').
+function i_build_measure_control(ctrl, st)
+    if isempty(ctrl) || ~isfield(ctrl,'jMeasureRow') || isempty(ctrl.jMeasureRow), return; end
+    show = false;
+    if ~isempty(st) && isfield(st,'hFig') && ~isempty(st.hFig) && ishandle(st.hFig)
+        D = getappdata(st.hFig, 'DynamicsOverlay');
+        if ~isempty(D) && i_is_dirac_dspm(D) && ~isempty(i_dspm_scale(st, D)), show = true; end
+    end
+    ctrl.jMeasureRow.setVisible(show);
+    if ~show, return; end
+    name = i_field(st, 'atomMeasure', i_measure_default());
+    if strcmpi(name, 'dspm') && isfield(ctrl,'jMeasureDspm') && ~isempty(ctrl.jMeasureDspm)
+        ctrl.jMeasureDspm.setSelected(true);
+    elseif isfield(ctrl,'jMeasureAmp') && ~isempty(ctrl.jMeasureAmp)
+        ctrl.jMeasureAmp.setSelected(true);
+    end
+    ctrl.jMeasureRow.revalidate();  ctrl.jMeasureRow.repaint();
 end
 function s = i_str(x)
     if isempty(x), s = '-'; else, s = char(x); end
