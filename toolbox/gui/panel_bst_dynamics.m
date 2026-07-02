@@ -1143,6 +1143,33 @@ function [cCell, meta] = i_mode_coeffs(st, D, iWin) %#ok<DEFNU>
     setappdata(0,'DynamicsModeCoeffCache', struct('key',key,'cCell',{cCell},'meta',meta));
 end
 
+% Per-vertex dSPM/sLORETA scale SIR(v) = ||ImagingKernel_v|| / ||reconstruct(ImagingKernelMode)_v||.
+% Data-independent (from the stored kernels); [] when the source is amplitude-measure (ratios ~1) or has
+% no vertex kernel. Lets the cortex magnitude toggle between amplitude and the source's dSPM measure.
+function sir = i_dspm_scale(st, D) %#ok<DEFNU>
+    sir = [];  src = i_src_resultfile(D);  if isempty(src), return; end
+    R = in_bst_results(src, 0, 'ImagingKernel','ImagingKernelMode','Eigenvalues','ModeHemisphere','DiracEigenFile');
+    if isempty(R.ImagingKernel) || isempty(R.ImagingKernelMode), return; end
+    key = sprintf('%s|%s|sir', R.DiracEigenFile, src);
+    Mc = getappdata(0,'DynamicsDspmScale');
+    if ~isempty(Mc) && isstruct(Mc) && strcmp(Mc.key,key), sir = Mc.sir; return; end
+    E = in_bst_eigen(R.DiracEigenFile);  lam=double(R.Eigenvalues(:)); hemi=double(R.ModeHemisphere(:));
+    nV=0; for h=1:2, nV=max(nV,max(E.GlobalVertices{h}(:))); end
+    Km=double(R.ImagingKernelMode); Krec=zeros(3*nV,size(Km,2));
+    for h=1:2
+        ord=find(hemi==h);[~,s]=sort(lam(ord),'ascend');ord=ord(s);
+        Ph=double(E.Phi{h}); gv=E.GlobalVertices{h}(:); Uf=Ph*Km(ord,:);
+        Krec((gv-1)*3+1,:)=Uf(2:4:end,:);Krec((gv-1)*3+2,:)=Uf(3:4:end,:);Krec((gv-1)*3+3,:)=Uf(4:4:end,:);
+    end
+    Kv=double(R.ImagingKernel);  sir=ones(nV,1);
+    for v=1:nV
+        a=Krec((v-1)*3+(1:3),:); b=Kv((v-1)*3+(1:3),:);  na=norm(a,'fro');
+        if na>0, sir(v)=norm(b,'fro')/na; end
+    end
+    if max(abs(sir-1)) < 1e-6, sir = []; end     % amplitude source: no renorm needed
+    setappdata(0,'DynamicsDspmScale', struct('key',key,'sir',sir));
+end
+
 % Which operators a source with nComponents supports (order = ctrl.opVariants):
 %   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
 % Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
