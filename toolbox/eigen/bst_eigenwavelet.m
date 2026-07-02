@@ -11,7 +11,8 @@ function varargout = bst_eigenwavelet(varargin)
 %   Wq    = bst_eigenwavelet('Steer', W, q0, EigenMat)       % right-quaternion steer (Dirac family)
 %   V     = bst_eigenwavelet('ToVec',  W, EigenMat)          % full-quaternion -> physical 3-vector
 %   W     = bst_eigenwavelet('ToQuat', V, EigenMat)          % physical 3-vector -> pure quaternion (w=0)
-%   scal  = bst_eigenwavelet('Scalogram', ax, gCell, C)      % per-member energy [3 x nT x M] + dual residual
+%   scal  = bst_eigenwavelet('Scalogram', ax, gCell, C)      % per-member energy [3 x nT x M] + dual residual (+ W)
+%   scal  = bst_eigenwavelet('ScalogramEnergy', ax, gCell, C, hemi)  % coeff-space energies (no W; full-time safe)
 %
 % DESCRIPTION:
 %     GSPBox-style spectral graph wavelet frame (Perraudin et al., GSPBOX, arXiv:1408.5781,
@@ -219,6 +220,77 @@ function scal = Scalogram(ax, gCell, C) %#ok<DEFNU>
     for m = 1:M, gm = abs(gCell{m}(lg)); if sum(gm)>0, centers(m) = sqrt(sum(lg.*gm)/sum(gm)); end, end
     scal = struct('energy',energy, 'residual',residual, 'resScalar',mean(residual), ...
                   'centers',centers, 'A',A, 'W',W);
+end
+
+
+%% ===== SCALOGRAM ENERGY: coefficient-space energies (Morlet-style, full-time, no per-vertex field) =====
+% Coefficient-space analog of Scalogram: returns the SAME per-member energies [3 x nT x M] {Global,LH,RH}
+% + tightness residual, but WITHOUT ever materialising the [nV x nT x M] field -> analyses an arbitrarily
+% long extent (e.g. the whole recording) from the mode coefficients alone (the [nV x nT x M] path is
+% ~97 GB over a 62 s recording; this is ~300 MB). Energies are reproduced EXACTLY (unweighted vertex-sum
+% of squared magnitude, matching Scalogram) via per-hemi Euclidean Gram matrices
+%   G = Phi(rows)' * Phi(rows)   [K x K]     so that   sum_v |field_v(t)|^2 = d(:,t)' G d(:,t)
+% with d = g_m(lambda).*c(:,t) (Parseval). For the Dirac quaternion basis the ENERGY Gram uses the
+% imaginary (x,y,z) rows only (the physical current magnitude), while the RESIDUAL Gram uses the full
+% [w,x,y,z] rows (matching Scalogram's full-field reconstruction).
+% hemi : optional struct('isL',logical[nVsurf],'isR',logical[nVsurf]) splitting each block's vertices into
+%        hemispheres (needed to split a whole-brain single-block ax). [] -> block-based fallback (block 1 ->
+%        LH, blocks >=2 -> RH), which reproduces Scalogram's min(h,2) hemisphere assignment exactly.
+function scal = ScalogramEnergy(ax, gCell, C, hemi) %#ok<DEFNU>
+    if nargin < 4, hemi = []; end
+    M  = numel(gCell);
+    idx = find(~cellfun(@isempty, C), 1);
+    if isempty(idx)
+        scal = struct('energy',zeros(3,0,M), 'residual',[], 'resScalar',0, 'centers',zeros(1,M), 'A',1);  return;
+    end
+    nT = size(C{idx}, 2);
+    % frame lower bound A + canonical-dual coverage tol (identical to Scalogram)
+    lamAll = []; for h=1:numel(ax.Lambda), lamAll=[lamAll; ax.Lambda{h}(:)]; end %#ok<AGROW>
+    lg = linspace(max(min(lamAll),eps), max(lamAll), 512)';  Sg = zeros(size(lg));
+    for m=1:M, v=gCell{m}(lg); Sg = Sg + real(v(:)).^2; end
+    A = min(Sg);  if ~(A>0), A = 1; end
+    tol = 1e-3 * max(Sg);
+    hasHemi = ~isempty(hemi) && isstruct(hemi) && isfield(hemi,'isL') && isfield(hemi,'isR');
+    eHemi = zeros(2, nT, M);  Fmod2 = 0;  Res2 = 0;                % LH(1), RH(2)
+    for h = 1:numel(ax.Phi)
+        Phi = ax.Phi{h};  if isempty(Phi) || isempty(C{h}), continue; end
+        Lam = ax.Lambda{h}(:);  gv = ax.GlobalVertices{h}(:);  Cf = C{h};  nGv = numel(gv);
+        isQuat = (size(Phi,1) == 4*nGv);
+        if isQuat, rpv = 4;  imagOff = [2 3 4];  else, rpv = 1;  imagOff = 1;  end
+        rowsE = reshape(((0:nGv-1)*rpv).' + imagOff, [], 1);       % imag (energy) rows: x,y,z per vertex
+        PhiE  = Phi(rowsE, :);
+        Gfull = Phi' * Phi;                                        % residual: full field (incl. quaternion w)
+        % LH/RH energy Grams
+        if hasHemi
+            vL = logical(hemi.isL(gv));  vR = logical(hemi.isR(gv));
+            eL = reshape(repmat(vL(:).', numel(imagOff), 1), [], 1);
+            eR = reshape(repmat(vR(:).', numel(imagOff), 1), [], 1);
+            GL = PhiE(eL,:)' * PhiE(eL,:);
+            GR = PhiE(eR,:)' * PhiE(eR,:);
+        else
+            GE = PhiE' * PhiE;
+            if h == 1, GL = GE;  GR = [];  else, GL = [];  GR = GE;  end
+        end
+        Sg2 = zeros(numel(Lam), 1);
+        for m = 1:M
+            gm = real(gCell{m}(Lam));  gm = gm(:);
+            Dm = gm .* Cf;                                         % [K x nT]
+            if ~isempty(GL), eHemi(1,:,m) = eHemi(1,:,m) + sum(Dm .* (GL*Dm), 1); end
+            if ~isempty(GR), eHemi(2,:,m) = eHemi(2,:,m) + sum(Dm .* (GR*Dm), 1); end
+            Sg2 = Sg2 + gm.^2;
+        end
+        dual = Sg2 ./ max(Sg2, tol);
+        Fmod2 = Fmod2 + sum(Cf .* (Gfull*Cf), 1);
+        eRc   = (1 - dual) .* Cf;
+        Res2  = Res2 + sum(eRc .* (Gfull*eRc), 1);
+    end
+    energy = zeros(3, nT, M);
+    energy(2,:,:) = eHemi(1,:,:);  energy(3,:,:) = eHemi(2,:,:);
+    energy(1,:,:) = eHemi(1,:,:) + eHemi(2,:,:);
+    residual = sqrt(Res2) ./ sqrt(max(Fmod2, eps));
+    centers = zeros(1, M);
+    for m = 1:M, gm = abs(gCell{m}(lg)); if sum(gm)>0, centers(m) = sqrt(sum(lg.*gm)/sum(gm)); end, end
+    scal = struct('energy',energy, 'residual',residual, 'resScalar',mean(residual), 'centers',centers, 'A',A);
 end
 
 

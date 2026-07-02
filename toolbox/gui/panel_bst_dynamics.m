@@ -119,6 +119,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jApply = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_TS_DISPLAY, TB_DIM}, 'Apply: filter the REAL source through the selected atom over a 4 s window (Preview); OFF = impulse response (Design)', @(h,e)bst_call(@OnApply));
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_TIMEFREQ, TB_DIM}, 'Analyze: decompose the current window''s source through the frame -> spatial scalogram + residual', @(h,e)bst_call(@OnAnalyzeWindow));
     gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_SCOUT_SEL, TB_DIM}, 'Localize bands: localize each frame band into a marker atom -> a separate dynamics table', @(h,e)bst_call(@OnLocalizeBands));
+    gui_component('ToolbarButton', jToolbar2, [], '', {IconLoader.ICON_PROPERTIES, TB_DIM}, 'Helmholtz (filtered): Hodge decomposition of the atom-FILTERED current field at the cursor frame (Dirac / Dirac-connectome) -> divergence & curl', @(h,e)bst_call(@OnHelmholtzFiltered));
     jToolbar2.addSeparator();
     % --- legacy detection / differential maps (untouched this step) ---
     jShow = gui_component('ToolbarToggle', jToolbar2, [], '', {IconLoader.ICON_SCOUT_ALL, TB_DIM}, 'Show all atom phases', @(h,e)bst_call(@OnShowAll));
@@ -1154,10 +1155,10 @@ function FileMat = i_scalogram_timefreq(scal, timeVec, surfaceFile, dataFile, co
     FileMat.SurfaceFile = surfaceFile;
     FileMat.nAvg = 1;  FileMat.Leff = 1;
     % Deliberately NOT bound to the recording (no DataFile): this is a standalone 3-row (Global/LH/RH)
-    % energy summary over a short window. Binding it to the raw recording makes Brainstorm treat it as a
-    % source-of-that-recording and reject the display ("Time definition ... not compatible with the other
-    % files already loaded") because the window's time axis is a slice of the recording's. Standalone -> its
-    % own time axis, opens without conflict. (dataFile kept for signature compatibility / provenance only.)
+    % energy summary. The Morlet-style Analyze now spans the recording's OWN full time base, so its Time
+    % already matches the loaded recording and it co-displays without Brainstorm's global-time conflict
+    % ("Time definition ... not compatible ..."); standalone just keeps it from being treated as a
+    % source-of-that-recording. (dataFile kept for signature compatibility / provenance only.)
     FileMat.Comment = comment;
 end
 
@@ -1176,20 +1177,129 @@ function OnAnalyzeWindow() %#ok<DEFNU>
     fr = i_frame_response(st, ax);
     if fr.nMembers < 1, ctrl.jAtomInfo.setText('Analyze: no static frame members'); return; end
     nV = i_overlay_nv(ax);
-    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
-    if isempty(iWin), ctrl.jAtomInfo.setText('Analyze: no recording window'); return; end
-    bst_progress('start', 'Frame', 'Analyzing the source through the frame...');
-    [C, ~] = i_apply_projection(st, ax, D, iWin, nV);          % reuse B's cache
-    scal = bst_eigenwavelet('Scalogram', ax, fr.gCell, C);
-    tv = bst_memory('GetTimeVector', D.srcDS, D.srcResult);  tv = tv(iWin);
-    surf = ax.SurfaceFile;  srcFile = i_src_resultfile(D);   % D.srcResult is an INDEX; resolve the results filename
-    FileMat = i_scalogram_timefreq(scal, tv, surf, srcFile, sprintf('Frame scalogram (window) | %d members', scal_nmembers(scal)));
-    TfFile = i_save_scalogram(srcFile, FileMat, 'Frame scalogram (window)');   % find-or-replace in the source study
+    % --- Morlet-style full-time scalogram: analyse the WHOLE loaded recording in COEFFICIENT space
+    %     (energies via per-hemi Gram, never the [nV x nT x M] field). Time == the recording's own
+    %     time base -> the saved timefreq co-displays without Brainstorm's global-time conflict. ---
+    tvFull = bst_memory('GetTimeVector', D.srcDS, D.srcResult);
+    if isempty(tvFull) || numel(tvFull) < 2, ctrl.jAtomInfo.setText('Analyze: no recording time'); return; end
+    iAll = 1:numel(tvFull);
+    bst_progress('start', 'Frame', 'Analyzing the recording through the frame (coefficient space)...');
+    C = i_project_fulltime(st, ax, D, iAll, nV);                % [K x N] coeffs, memory-bounded
+    hemi = i_hemi_membership(ax);                               % LH/RH vertex split (splits single-block ax)
+    scal = bst_eigenwavelet('ScalogramEnergy', ax, fr.gCell, C, hemi);
+    surf = ax.SurfaceFile;  srcFile = i_src_resultfile(D);      % D.srcResult is an INDEX; resolve the results filename
+    FileMat = i_scalogram_timefreq(scal, tvFull, surf, srcFile, sprintf('Frame scalogram (recording) | %d members', scal_nmembers(scal)));
+    TfFile = i_save_scalogram(srcFile, FileMat, 'Frame scalogram (recording)');   % find-or-replace in the source study
     bst_progress('stop');
     if ~isempty(TfFile), try, view_timefreq(TfFile, 'SingleSensor'); catch, end, end %#ok<CTCH>
-    ctrl.jAtomInfo.setText(sprintf('Analyze: residual %.1f%% (frame completeness)', 100*scal.resScalar));
+    ctrl.jAtomInfo.setText(sprintf('Analyze: residual %.1f%% over %.1fs (coeff-space, full time)', 100*scal.resScalar, tvFull(end)-tvFull(1)));
 end
 function n = scal_nmembers(scal), n = size(scal.energy, 3); end
+
+% LH/RH vertex membership over the atom's surface (for the scalogram's per-hemisphere energy split;
+% correctly splits a whole-brain single-block ax). [] if the surface can't be read (falls back to the
+% block-based hemisphere assignment inside ScalogramEnergy).
+function hemi = i_hemi_membership(ax)
+    hemi = [];
+    try
+        Surf = in_tess_bst(ax.SurfaceFile, 0);
+        [iR, iL] = tess_hemisplit(Surf);
+        n = size(Surf.Vertices, 1);
+        isL = false(n,1);  isL(iL) = true;
+        isR = false(n,1);  isR(iR) = true;
+        hemi = struct('isL', isL, 'isR', isR);
+    catch %#ok<CTCH>
+    end
+end
+
+% Source mode coefficients C{h} [K_h x N] over the FULL loaded extent iAll, memory-bounded:
+%  - Dirac-dSPM       -> the inverse's own mode coefficients (i_mode_coeffs; c = KernelMode*data)
+%  - Dirac / Dirac-Connectome -> the cached vector mode kernel (i_vector_coeffs; c = A*data, no field)
+%  - scalar (LBO / LB-Connectome) -> reconstruct the per-vertex magnitude in TIME BLOCKS and project
+%    each block, so the [nV x N] field never materialises (a full-recording [nV x N] would be tens of GB).
+function C = i_project_fulltime(st, ax, D, iAll, nV)
+    if strcmp(ax.Variant,'Dirac') && i_is_dirac_dspm(D)
+        [C,~] = i_mode_coeffs(st, D, iAll);  return;
+    end
+    if any(strcmp(ax.Variant, {'Dirac','Dirac-Connectome'}))
+        C = i_vector_coeffs(st, ax, D, iAll);  return;
+    end
+    % scalar: block-wise reconstruct-magnitude-project (bounded [nV x blk] intermediate)
+    N = numel(iAll);  blk = 4096;
+    C = cell(1, numel(ax.Phi));
+    for h = 1:numel(ax.Phi)
+        if ~isempty(ax.Phi{h}), C{h} = zeros(size(ax.Phi{h},2), N); end
+    end
+    for c0 = 1:blk:N
+        cc  = c0 : min(c0+blk-1, N);
+        F   = double(bst_memory('GetResultsValues', D.srcDS, D.srcResult, [], iAll(cc), 0));
+        Fr  = i_paintable_scalar(F, nV);
+        for h = 1:numel(ax.Phi)
+            if isempty(ax.Phi{h}), continue; end
+            gv = ax.GlobalVertices{h}(:);
+            C{h}(:,cc) = manifold_ft(ax.Phi{h}, ax.Mass{h}, Fr(gv,:));
+        end
+    end
+end
+
+%% ===== HELMHOLTZ (filtered): Hodge decomposition of the atom-FILTERED current field =====
+% Take the cursor frame of the current vector atom's FILTERED field (Dirac / Dirac-Connectome),
+% run the Hodge-Helmholtz decomposition (process_helmholtz), and paint the chosen scalar (Div/Curl/
+% Phi/Psi) on the cortex. This is the FILTERED analog of the raw-source differential map wired through
+% OnMeasureMenu -> i_dynamics_overlay: same Cov engine, but on g(lambda)-filtered coefficients rather
+% than the raw reconstructed current -> the fiber-spread (Dirac-Connectome) or band-limited field.
+function OnHelmholtzFiltered() %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    D = getappdata(st.hFig, 'DynamicsOverlay');
+    if isempty(D) || ~isfield(D,'srcDS') || ~isfield(D,'srcResult') || isempty(D.srcResult)
+        ctrl.jAtomInfo.setText('Helmholtz: no real source linked');  return;
+    end
+    if ~isfield(D,'Cov') || isempty(D.Cov)
+        ctrl.jAtomInfo.setText('Helmholtz: no Covariant operator on this session');  return;
+    end
+    variant = i_atom_op(st);
+    if ~any(strcmp(variant, {'Dirac','Dirac-Connectome'}))
+        ctrl.jAtomInfo.setText(sprintf('%s: Helmholtz (filtered) needs a Dirac / Dirac (connectome) atom (3-vector field)', variant));  return;
+    end
+    ax = i_atom_axes(st, variant);  if isempty(ax), return; end
+    % --- static-kernel gate (mirror Apply: a dynamic g(lambda,t|omega) has no single filtered frame) ---
+    lmax = max(ax.Lambda{1}(:));
+    [kernel, kp] = i_selected_generator(st, ctrl, lmax);
+    meta = bst_eigfilter_kernel('info', kernel);
+    dom = 'static';  if isfield(meta,'domain') && ~isempty(meta.domain), dom = meta.domain; end
+    if any(strcmpi(dom, {'ts','js'}))
+        ctrl.jAtomInfo.setText(sprintf('Helmholtz: %s is dynamic; use a static kernel', kernel));  return;
+    end
+    iWin = i_cursor_window(D.srcDS, D.srcResult, 4);
+    if isempty(iWin), ctrl.jAtomInfo.setText('Helmholtz: no recording window'); return; end
+    % cursor's column within the window (same mapping the overlay uses: global time index -> window col)
+    [~, iT] = bst_memory('GetTimeVector', D.srcDS, D.srcResult, 'CurrentTimeIndex');
+    midCol = find(iWin == iT, 1);  if isempty(midCol), midCol = 1; end
+    bst_progress('start', 'Helmholtz', 'Filtering the source field + Hodge decomposition...');
+    % --- filter in the quaternion eigenbasis (cheap: mode kernel), reconstruct ONE frame ---
+    g = bst_eigfilter_kernel(kernel, kp);
+    if strcmp(variant,'Dirac') && i_is_dirac_dspm(D)
+        [cCell,~] = i_mode_coeffs(st, D, iWin);          % Dirac-dSPM: inverse's own mode coeffs
+    else
+        cCell = i_vector_coeffs(st, ax, D, iWin);        % Dirac-Connectome / non-dSPM Dirac: A*data
+    end
+    cf = cCell;  for h=1:numel(cf), if ~isempty(cf{h}), cf{h} = g(ax.Lambda{h}(:)) .* cf{h}; end, end
+    [~, V3mid] = i_dirac_recon_display(ax, cf, midCol);  % [nV x 3], the cursor frame only
+    bst_progress('stop');
+    nV = size(V3mid,1);
+    if nV == 0 || ~any(V3mid(:)), ctrl.jAtomInfo.setText('Helmholtz: empty filtered field at this frame'); return; end
+    V3col = reshape(V3mid.', [], 1);                     % [3nV x 1] interleaved x,y,z (process_helmholtz layout)
+    Ht = process_helmholtz('Compute', V3col, D.Cov);     % Hodge-Helmholtz: Div/Curl/Phi/Psi/...
+    % --- paint the chosen scalar (respect the current Measure selection; default Curl for the vortex work) ---
+    op = i_field(st, 'curOp', 'none');
+    if strcmpi(op,'none') || ~any(strcmpi(op, {'Divergence','Curl','Potential','Stream'})), op = 'Curl'; end
+    scal = view_dynamics('PickScalar', Ht, op);  scal = scal(:);
+    if ~isempty(st.hFig) && ishandle(st.hFig)
+        view_dynamics('SetFilteredField', st.hFig, scal, (1:numel(scal))', iWin(midCol), true);   % signed -> stat2
+    end
+    ctrl.jAtomInfo.setText(sprintf('Helmholtz (filtered) | %s | %s | |Div|max=%.2g |Curl|max=%.2g HarmFrac=%.2g', ...
+        kernel, op, max(abs(Ht.Div(:))), max(abs(Ht.Curl(:))), Ht.HarmFrac));
+end
 
 % Save (find-or-replace by Comment) a timefreq FileMat into the source result's study; return its path.
 % Resolve the results FILE name from the overlay's dataset/result INDICES (D.srcResult is an index).
