@@ -1170,6 +1170,29 @@ function sir = i_dspm_scale(st, D) %#ok<DEFNU>
     setappdata(0,'DynamicsDspmScale', struct('key',key,'sir',sir));
 end
 
+% Reconstruct a per-hemi mode-coefficient set to the full-surface ambient 3-vector (imag quaternion slots)
+% + per-vertex magnitude (amplitude current). cCell{h} = [Kh x nT].
+function [V3, mag] = i_dirac_recon(ax, cCell) %#ok<DEFNU>
+    nV=0; for h=1:numel(ax.GlobalVertices), nV=max(nV,max(ax.GlobalVertices{h}(:))); end
+    nT = 0; for h=1:numel(cCell), if ~isempty(cCell{h}), nT=size(cCell{h},2); break; end, end
+    V3 = zeros(nV,3,nT);
+    for h=1:numel(ax.Phi)
+        Ph=ax.Phi{h}; if isempty(Ph)||isempty(cCell{h}), continue; end
+        gv=ax.GlobalVertices{h}(:);  Uf = Ph * cCell{h};                  % [4Vh x nT]
+        V3(gv,1,:)=reshape(Uf(2:4:end,:),numel(gv),1,nT);
+        V3(gv,2,:)=reshape(Uf(3:4:end,:),numel(gv),1,nT);
+        V3(gv,3,:)=reshape(Uf(4:4:end,:),numel(gv),1,nT);
+    end
+    mag = squeeze(sqrt(sum(V3.^2,2)));  if nT==1, mag=mag(:); end
+end
+
+% Sensor forward from mode coefficients: stack cCell L-then-R and Dfilt = Leig * cstack. [] if no Leig.
+function Dfilt = i_dirac_forward_modes(ax, Leig, cCell) %#ok<DEFNU>
+    Dfilt = [];  if isempty(Leig), return; end
+    cstack = [];  for h=1:numel(cCell), cstack = [cstack; cCell{h}]; end %#ok<AGROW>
+    Dfilt = Leig * cstack;
+end
+
 % Which operators a source with nComponents supports (order = ctrl.opVariants):
 %   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
 % Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
