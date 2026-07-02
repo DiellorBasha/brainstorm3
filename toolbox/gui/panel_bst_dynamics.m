@@ -1104,7 +1104,7 @@ function [cCell, meta] = i_mode_coeffs(st, D, iWin) %#ok<DEFNU>
     M = getappdata(0,'DynamicsModeCoeffCache');
     if ~isempty(M) && isstruct(M) && strcmp(M.key,key), cCell = M.cCell; meta = M.meta; return; end
     gc = R.GoodChannel;  if isempty(gc), gc = 1:size(R.ImagingKernelMode,2); end
-    d  = double(bst_memory('GetRecordingsValues', D.srcDS, gc, iWin));   % [nGoodChan x nWin]
+    d  = double(bst_memory('GetRecordingsValues', D.srcDS, gc, iWin, 0));   % [nGoodChan x nWin] RAW (no gradmag scaling; the Dirac kernel is built for raw d_raw)
     cAll = double(R.ImagingKernelMode) * d;                             % [nMode x nWin]
     lam  = double(R.Eigenvalues(:));  hemi = double(R.ModeHemisphere(:));
     for h = 1:2
