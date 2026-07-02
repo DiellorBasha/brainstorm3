@@ -4,12 +4,16 @@ function dir = bst_atom_default_dir(ax, seedVert)
 %   Quaternion (Dirac) fiber -> the seed vertex surface normal (unit row 3-vector).
 %   Tangent/scalar fiber     -> 1 (frame e1 / scalar amplitude).
 % App-side default: orchestrators (the library realisers) carry no defaults; the GUI supplies them.
-% Shared by view_atom_designer and (SP2b) panel_bst_dynamics. See atom-operator-applicability.
+% Shared by the Dynamics panel and the atom designer. See atom-operator-applicability.
 %
 % @=============================================================================
 % This function is part of the Brainstorm software:
 % https://neuroimage.usc.edu/brainstorm
+% Copyright (c) University of Southern California & McGill University
+% Distributed under the terms of the GNU General Public License (GPLv3).
 % =============================================================================@
+%
+% Authors: Diellor Basha, 2026
 
     [~, kind] = bst_eigenfilter('Fiber', ax);
     if ~strcmp(kind, 'quaternion'), dir = 1; return; end
