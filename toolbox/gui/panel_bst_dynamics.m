@@ -141,6 +141,19 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jAtom.add(jRowK);
     jAtomParams = gui_river([0 0], [0 2 0 2]);                  % contextual per-kernel sliders live here
     jAtom.add(jAtomParams);
+    % Impulse-direction control (Task 7): a preset combobox for a quaternion (Dirac) operator, an angle
+    % spinner for a tangent (connection-Laplacian) operator, hidden for a scalar operator. Built from
+    % i_dir_control_spec(kind); (re)shown by i_build_dir_control, called from i_select_atom_load /
+    % OnSetOperator so it always matches the SELECTED atom's operator.
+    jRowD = gui_river([0 0], [0 2 0 2]);
+    gui_component('label', jRowD, [], 'Direction: ');
+    jDirCombo = gui_component('combobox', jRowD, 'hfill', [], {{'Normal','+X','+Y','+Z','Pick-on-surface'}}, [], [], []);
+    java_setcb(jDirCombo, 'ActionPerformedCallback', @(h,e)bst_call(@OnPickSeedDir));
+    jDirAngle = gui_component('spinner', jRowD, 'tab', []);
+    jDirAngle.setModel(javax.swing.SpinnerNumberModel(0, 0, 359, 5));
+    java_setcb(jDirAngle, 'StateChangedCallback', @(h,e)bst_call(@OnPickSeedDir));
+    jRowD.setVisible(false);                                    % no atom selected yet -> hidden
+    jAtom.add(jRowD);
     jRowI = gui_river([0 0], [0 2 0 2]);                        % selected-atom readout (kernel . seed . params)
     jAtomInfo = gui_component('label', jRowI, 'hfill', '');
     jAtom.add(jRowI);
@@ -170,6 +183,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
         'jKernel',jKernel, 'jAtomParams',jAtomParams, 'jLocalize',jLocalize, 'jAtomInfo',jAtomInfo, ...
         'jApply',jApply, 'jOpItems',jOpItems, 'opVariants',{opDefs(:,2)'}, ...
         'atomKeys',{atomKeys}, 'jShow',jShow, 'jPhaseItems',jPhaseItems, ...
+        'jDirRow',jRowD, 'jDirCombo',jDirCombo, 'jDirAngle',jDirAngle, ...
         'jFrameA',jFrameA, 'jFrameB',jFrameB, 'jFrameT',jFrameT, 'jFrameN',jFrameN, 'jFrameShow',jFrameShow));
 end
 
@@ -654,6 +668,107 @@ function dir = i_atom_default_dir(ax, seedVert) %#ok<DEFNU>
     catch %#ok<CTCH>
     end
     dir = dir(:)';
+end
+
+%% ===== impulse-direction control (Task 7): pure model + GUI wiring =====
+% Direction-control model for an operator's Fiber kind: scalar -> hidden; tangent -> an angle field
+% (theta -> complex(cos theta, sin theta) in the operator frame); quaternion -> a preset dropdown
+% (ambient 3-vector dipole direction) with a Pick-on-surface option for an arbitrary target vertex.
+function s = i_dir_control_spec(kind) %#ok<DEFNU>
+    switch kind
+        case 'tangent',    s = struct('show',true,'type','angle','presets',{{}});
+        case 'quaternion', s = struct('show',true,'type','preset','presets',{{'Normal','+X','+Y','+Z','Pick-on-surface'}});
+        otherwise,         s = struct('show',false,'type','none','presets',{{}});
+    end
+end
+% Named preset -> ambient 3-vector; 'Normal' resolves to the seed normal by the caller (i_atom_default_dir).
+function d = i_preset_dir(name) %#ok<DEFNU>
+    switch name
+        case 'Normal', d = [];                 % resolved to the seed normal by the caller
+        case '+X', d = [1 0 0];  case '+Y', d = [0 1 0];  case '+Z', d = [0 0 1];
+        otherwise, d = [];
+    end
+end
+
+% (Re)build the direction control for the given operator Fiber kind: show/hide the row, and swap
+% between the preset combobox (quaternion) and the angle spinner (tangent). Disarms any pending
+% one-shot cortex pick (WaveletDesignerPick) left over from a previous atom/operator selection.
+function i_build_dir_control(ctrl, kind, hFig) %#ok<DEFNU>
+    if isempty(ctrl) || ~isfield(ctrl,'jDirRow') || isempty(ctrl.jDirRow), return; end
+    if (nargin >= 3) && ~isempty(hFig) && ishandle(hFig) && isappdata(hFig, 'WaveletDesignerPick')
+        rmappdata(hFig, 'WaveletDesignerPick');
+    end
+    spec = i_dir_control_spec(kind);
+    ctrl.jDirRow.setVisible(spec.show);
+    if ~spec.show, return; end
+    isPreset = strcmp(spec.type, 'preset');
+    if isfield(ctrl,'jDirCombo') && ~isempty(ctrl.jDirCombo)
+        ctrl.jDirCombo.setVisible(isPreset);
+        if isPreset                                            % refresh the model, suppress the change callback
+            cb = java_getcb(ctrl.jDirCombo, 'ActionPerformedCallback');
+            java_setcb(ctrl.jDirCombo, 'ActionPerformedCallback', []);
+            ctrl.jDirCombo.setModel(javax.swing.DefaultComboBoxModel(spec.presets));
+            ctrl.jDirCombo.setSelectedItem('Normal');
+            java_setcb(ctrl.jDirCombo, 'ActionPerformedCallback', cb);
+        end
+    end
+    if isfield(ctrl,'jDirAngle') && ~isempty(ctrl.jDirAngle)
+        ctrl.jDirAngle.setVisible(strcmp(spec.type, 'angle'));
+    end
+    ctrl.jDirRow.revalidate();  ctrl.jDirRow.repaint();
+end
+
+% Direction-control callback. No-arg (combobox / angle-spinner change) resolves the direction from the
+% control's current value; a numeric arg is a cortex vertex resolved by the one-shot Pick-on-surface
+% hook (figure_3d's native WaveletDesignerPick: dir = unit(target - seed)). Either way, stores the
+% result on st.atomSeedDir + the selected atom's SeedDir and re-previews (i_atom_preview).
+function OnPickSeedDir(pickedVertex) %#ok<DEFNU>
+    [ctrl, st] = i_cs();  if isempty(ctrl) || isempty(st), return; end
+    ia = i_field(st, 'curAtom', 0);  if (ia < 1) || (ia > numel(st.T.Groups)), return; end
+    seed = i_field(st, 'atomSeed', []);  if isempty(seed), return; end
+    ax = i_atom_axes(st, i_atom_op(st));  if isempty(ax), return; end
+    dir = [];
+    if (nargin >= 1) && ~isempty(pickedVertex)
+        if ~isempty(st.hFig) && ishandle(st.hFig) && isappdata(st.hFig, 'WaveletDesignerPick')
+            rmappdata(st.hFig, 'WaveletDesignerPick');                     % one-shot: disarm on first use
+        end
+        try, Surf = in_tess_bst(ax.SurfaceFile, 0); catch, return; end     %#ok<CTCH>
+        v = Surf.Vertices(double(pickedVertex),:) - Surf.Vertices(seed,:);
+        n = norm(v);  if n <= 0, return; end
+        dir = v / n;
+    else
+        [~, kind] = bst_eigenfilter('Fiber', ax);
+        spec = i_dir_control_spec(kind);
+        switch spec.type
+            case 'preset'
+                if ~isfield(ctrl,'jDirCombo') || isempty(ctrl.jDirCombo), return; end
+                name = char(ctrl.jDirCombo.getSelectedItem());
+                if strcmp(name, 'Pick-on-surface')
+                    if ~isempty(st.hFig) && ishandle(st.hFig)
+                        setappdata(st.hFig, 'WaveletDesignerPick', @OnPickSeedDir);   % arm one-shot pick
+                    end
+                    if isfield(ctrl,'jAtomInfo') && ~isempty(ctrl.jAtomInfo)
+                        ctrl.jAtomInfo.setText('Click a cortex vertex to set the impulse direction');
+                    end
+                    return;
+                elseif strcmp(name, 'Normal')
+                    dir = i_atom_default_dir(ax, seed);
+                else
+                    dir = i_preset_dir(name);
+                end
+            case 'angle'
+                if ~isfield(ctrl,'jDirAngle') || isempty(ctrl.jDirAngle), return; end
+                th  = double(ctrl.jDirAngle.getValue()) * pi / 180;
+                dir = complex(cos(th), sin(th));
+            otherwise
+                return;
+        end
+    end
+    if isempty(dir), return; end
+    st.atomSeedDir = dir;
+    st.T.Groups(ia).SeedDir = dir;
+    setappdata(0, 'DynamicsTarget', st);
+    i_atom_preview();
 end
 
 % Live preview dispatcher: Apply OFF -> impulse response (Design); Apply ON -> filtered real source (Preview).
@@ -1147,7 +1262,11 @@ function i_select_atom_load(iAtom)
         ctrl.jAtomParams.revalidate();  ctrl.jAtomParams.repaint();
     end
     i_select_op_radio(op);                                         % check the matching operator radio
-    st.atomSeed = G.vertices;  setappdata(0, 'DynamicsTarget', st);
+    st.atomSeed = G.vertices;
+    st.atomSeedDir = [];  if isfield(G,'SeedDir') && ~isempty(G.SeedDir), st.atomSeedDir = G.SeedDir; end
+    setappdata(0, 'DynamicsTarget', st);
+    kind = 'scalar';  if ~isempty(ax), [~, kind] = bst_eigenfilter('Fiber', ax); end
+    i_build_dir_control(ctrl, kind, st.hFig);                       % show/hide + refresh to match this atom's operator
     ctrl.jAtomInfo.setText(i_atom_detail(G));
     i_atom_preview();
     i_frame_refresh();
