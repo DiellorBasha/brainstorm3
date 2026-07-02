@@ -95,6 +95,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     jListAtoms = java_create('org.brainstorm.list.BstClusterList');
     jListAtoms.setCellRenderer(java_create('org.brainstorm.list.BstClusterListRenderer', 'I', fontSize));
     java_setcb(jListAtoms, 'ValueChangedCallback', @(h,e)bst_call(@AtomsListValueChanged_Callback,h,e));
+    java_setcb(jListAtoms, 'KeyTypedCallback',      @(h,e)bst_call(@AtomsListKeyTyped_Callback,h,e));   % Delete key -> delete selected atom (scout-like)
     jScrollList = JScrollPane(jListAtoms);  jScrollList.setBorder(java_scaled('titledborder',''));
     jScrollList.setPreferredSize(java_scaled('dimension', 360, 300));
 
@@ -417,6 +418,10 @@ function AtomDeleteGroup()
     kill = strcmpi({st.T.Groups.parent}, lbl);  kill(g) = true;   % the band + its children
     st.T.Groups(kill) = [];  st.T.nGroups = numel(st.T.Groups);  st.curAtom = 0;
     i_apply(st);
+    % persist the deletion to the on-disk table so it doesn't reload on the next launch (AtomsFromResult
+    % auto-loads the newest dynamics_*.mat).
+    f = ''; if ~isempty(st.hFig) && ishandle(st.hFig), f = getappdata(st.hFig, 'DynamicsFile'); end
+    if ~isempty(f), try, bst_dynamics('Save', f, st.T); catch, end, end %#ok<CTCH>
     i_frame_refresh();
 end
 function AtomSetColor()
@@ -1401,6 +1406,14 @@ function AtomsListValueChanged_Callback(h, ev) %#ok<DEFNU,INUSL>
     st.curAtom = iSel;  setappdata(0,'DynamicsTarget', st);
     i_select_atom_load(iSel);
     i_frame_refresh();
+end
+
+% Delete/Backspace on the atom list deletes the selected atom (scout-like); mirrors panel_scout.
+function AtomsListKeyTyped_Callback(h, ev) %#ok<DEFNU,INUSL>
+    switch uint8(ev.getKeyChar())
+        case {ev.VK_DELETE, ev.VK_BACK_SPACE}
+            AtomDeleteGroup();
+    end
 end
 
 % Load the selected atom's generator into the Atom section (combobox + sliders + seed) and preview.

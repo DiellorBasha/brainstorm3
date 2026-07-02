@@ -383,6 +383,8 @@ function hFig = i_open_source_figure(SrcResult)
     if iTess <= numel(TI)
         TI(iTess).DataThreshold = 0;
         TI(iTess).Data = zeros(size(TI(iTess).Data,1), 1);   % flat -> the real source is not shown
+        TI(iTess).DataMinMax = [0 1];                        % valid (non-degenerate) scale for the blank -> no "Invalid scale" on hemisphere resect
+        if isfield(TI, 'DataLimitValue'), TI(iTess).DataLimitValue = [0 1]; end
         setappdata(hFig,'Surface',TI);
     end
     D = struct('Cov',Cov, 'Op','none', 'AtomField',[], 'AtomGV',[], 'AtomSigned',false, 'AtomWin',[], ...
