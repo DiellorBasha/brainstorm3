@@ -2,7 +2,7 @@ function test_atom_fiber_decode
 % Byte-equivalence: bst_eigenfilter('Atom') V3 output == the panel's former i_atom_realise_core decode,
 % for the scalar (Laplace-Beltrami) and quaternion (Dirac) fibers. V3=[] for scalar; imag-3-vec for Dirac.
     surf = getenv('BST_TEST_SURF');
-    assert(~isempty(surf), 'Set BST_TEST_SURF to a cortex surface file (skips if unset).');
+    if isempty(surf), fprintf('SKIP test_atom_fiber_decode: set BST_TEST_SURF to a cortex surface file.\n'); return; end
 
     kp = struct('lmax', []);
     % ---- scalar fiber ----
