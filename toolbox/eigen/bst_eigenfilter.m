@@ -77,7 +77,7 @@ function [W, gv] = Atom(ax, KernelName, KernelParams, seedVert, seedDir) %#ok<DE
     if blk == 0, error('bst_eigenfilter(''Atom''): seed vertex %d not in the eigenbasis support.', seedVert); end
     Phi = ax.Phi{blk};  Lam = ax.Lambda{blk};  M = ax.Mass{blk};  gv = ax.GlobalVertices{blk};
     [C, kind] = i_fiber(ax); %#ok<ASGLU>
-    nSrc = 0; for hh=1:numel(ax.GlobalVertices), nSrc = max(nSrc, max(ax.GlobalVertices{hh}(:))); end
+    nSrc = 0; for hh=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{hh}), nSrc = max(nSrc, max(ax.GlobalVertices{hh}(:))); end, end   % guard empty block (whole-brain single-block ax)
     switch kind
         case 'scalar'
             if isempty(seedDir), seedDir = 1; end

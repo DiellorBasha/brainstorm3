@@ -680,7 +680,7 @@ end
 function [W, gv, V3] = i_atom_realise_core(ax, kernel, kp, seed, seedDir) %#ok<DEFNU>
     [W, gv] = bst_eigenfilter('Atom', ax, kernel, kp, seed, seedDir);
     [C, kind] = bst_eigenfilter('Fiber', ax);
-    nV = 0; for h=1:numel(ax.GlobalVertices), nV = max(nV, max(ax.GlobalVertices{h}(:))); end
+    nV = 0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV = max(nV, max(ax.GlobalVertices{h}(:))); end, end   % guard empty block (whole-brain single-block ax)
     V3 = [];
     switch kind
         case 'quaternion'
@@ -1250,7 +1250,7 @@ end
 % Reconstruct a per-hemi mode-coefficient set to the full-surface ambient 3-vector (imag quaternion slots)
 % + per-vertex magnitude (amplitude current). cCell{h} = [Kh x nT].
 function [V3, mag] = i_dirac_recon(ax, cCell) %#ok<DEFNU>
-    nV=0; for h=1:numel(ax.GlobalVertices), nV=max(nV,max(ax.GlobalVertices{h}(:))); end
+    nV=0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV=max(nV,max(ax.GlobalVertices{h}(:))); end, end   % guard empty block (whole-brain single-block ax)
     nT = 0; for h=1:numel(cCell), if ~isempty(cCell{h}), nT=size(cCell{h},2); break; end, end
     V3 = zeros(nV,3,nT);
     for h=1:numel(ax.Phi)
@@ -1670,7 +1670,7 @@ end
 %   g    : gain handle g(lambda)
 % Returns Dfilt [nCh x nT], Jfilt [3nV x nT] (filtered 3-vector field), cfilt [2K x nT].
 function [Dfilt, Jfilt, cfilt] = i_dirac_forward(ax, Leig, J, g) %#ok<DEFNU>
-    nV = 0; for h=1:numel(ax.GlobalVertices), nV = max(nV, max(ax.GlobalVertices{h}(:))); end
+    nV = 0; for h=1:numel(ax.GlobalVertices), if ~isempty(ax.GlobalVertices{h}), nV = max(nV, max(ax.GlobalVertices{h}(:))); end, end   % guard empty block (whole-brain single-block ax)
     nT = size(J, 2);  Jfilt = zeros(3*nV, nT);  cfilt = [];
     for h = 1:numel(ax.Phi)
         Phi = ax.Phi{h};  if isempty(Phi), continue; end
