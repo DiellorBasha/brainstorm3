@@ -65,7 +65,7 @@ function bstPanelNew = CreatePanel() %#ok<DEFNU>
     % Set operator: per-atom eigenbasis (mirrors the Scout panel's "Set function")
     jMenuOp = gui_component('Menu', jMenuAtoms, [], 'Set operator', IconLoader.ICON_PROPERTIES, [], []); %#ok<NASGU>
     bgOp = javax.swing.ButtonGroup();
-    opDefs = {'Geometric','Laplace-Beltrami'; 'Connectomic','LB-Connectome'; 'Tangent (connection Laplacian)','Connection Laplacian'; 'Dirac','Dirac'};
+    opDefs = {'Geometric','Laplace-Beltrami'; 'Connectomic','LB-Connectome'; 'Tangent (connection Laplacian)','Connection Laplacian'; 'Dirac','Dirac'; 'Dirac (connectome)','Dirac-Connectome'};
     jOpItems = javaArray('javax.swing.JRadioButtonMenuItem', size(opDefs,1));
     for io = 1:size(opDefs,1)
         opv = opDefs{io,2};
@@ -1270,16 +1270,17 @@ function Dfilt = i_dirac_forward_modes(ax, Leig, cCell) %#ok<DEFNU>
 end
 
 % Which operators a source with nComponents supports (order = ctrl.opVariants):
-%   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac'}.
-% Scalar source (1) -> only the two scalar operators; vector (3) -> all; unknown -> permissive.
+%   {'Laplace-Beltrami','LB-Connectome','Connection Laplacian','Dirac','Dirac-Connectome'}.
+% Scalar source (1) -> only the scalar operators; vector (3) -> the vector operators; unknown -> permissive.
 function m = i_gate_mask(nComponents) %#ok<DEFNU>
-    % Order: {Laplace-Beltrami, LB-Connectome, Connection Laplacian, Dirac}. Applicability follows the
-    % inverse type: constrained (scalar) supports the two scalar bases + the tangent operator (for the
-    % gradient of the scalar map), but not Dirac. Unconstrained (vector) supports Dirac (native) + the
-    % two scalar bases (on the norm |J|), but not the tangent-only Connection Laplacian.
-    m = true(1,4);
-    if     isequal(nComponents, 1), m = logical([1 1 1 0]);   % constrained: LBO, LB-Connectome, Connection Laplacian
-    elseif isequal(nComponents, 3), m = logical([1 1 0 1]);   % unconstrained: LBO, LB-Connectome, Dirac
+    % Order: {Laplace-Beltrami, LB-Connectome, Connection Laplacian, Dirac, Dirac-Connectome}. Applicability
+    % follows the inverse type: constrained (scalar) supports the two scalar bases + the tangent operator (for
+    % the gradient of the scalar map), but neither Dirac variant. Unconstrained (vector) supports the two Dirac
+    % variants (surface-native Dirac + fiber-spread Dirac-Connectome) + the two scalar bases (on the norm |J|),
+    % but not the tangent-only Connection Laplacian.
+    m = true(1,5);
+    if     isequal(nComponents, 1), m = logical([1 1 1 0 0]);   % constrained: LBO, LB-Connectome, Connection Laplacian
+    elseif isequal(nComponents, 3), m = logical([1 1 0 1 1]);   % unconstrained: LBO, LB-Connectome, Dirac, Dirac-Connectome
     end
 end
 
