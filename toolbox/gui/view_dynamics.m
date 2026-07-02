@@ -305,6 +305,10 @@ function SetFilteredField(hFig, W, gv, win, isSigned)
     if isSigned, bst_colormaps('AddColormapToFigure', hFig, 'stat2');
     else,        bst_colormaps('AddColormapToFigure', hFig, 'source'); end
     i_dynamics_overlay(hFig);
+    % Apply paints a scalar filtered-magnitude map -> clear any Design-mode impulse quivers so they
+    % don't leak on top of the filtered real source (mirrors ClearAtomField).
+    setappdata(hFig, 'QuiverVectorOverride', []);
+    try, figure_3d('SetShowSourceVectors', hFig, D.iTess, 0); catch, end %#ok<CTCH>
 end
 
 % Drop the atom field and restore the native source paint (the 'none' state).
