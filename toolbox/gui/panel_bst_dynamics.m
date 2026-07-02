@@ -915,18 +915,21 @@ end
 % whole field). Scalar operators only (F reduced to per-vertex magnitude).
 function [C, gvAll] = i_apply_projection(st, ax, D, iWin, nV)
     C = {};  gvAll = [];
-    key = sprintf('%s|%d-%d|%s', D.srcResult, iWin(1), iWin(end), i_atom_op(st));
+    % Dispatch on the PASSED basis (ax.Variant), not the global i_atom_op(st): the two always agree in
+    % the GUI (ax is built from i_atom_op) but keying off ax keeps the projection self-consistent with the
+    % basis it was handed (and lets callers/tests pass any ax).
+    key = sprintf('%s|%d-%d|%s', D.srcResult, iWin(1), iWin(end), ax.Variant);
     M = getappdata(0, 'DynamicsApplyCache');
     if ~isempty(M) && isstruct(M) && isfield(M,'key') && strcmp(M.key, key)
         C = M.C;  gvAll = M.gvAll;  return;
     end
-    if strcmp(i_atom_op(st),'Dirac') && i_is_dirac_dspm(D)
+    if strcmp(ax.Variant,'Dirac') && i_is_dirac_dspm(D)
         [cCell,~] = i_mode_coeffs(st, D, iWin);
         C = cCell;  gvAll = [];
         for h=1:numel(ax.GlobalVertices), gvAll=[gvAll; ax.GlobalVertices{h}(:)]; end %#ok<AGROW>
         return;
     end
-    if strcmp(i_atom_op(st),'Dirac-Connectome')
+    if strcmp(ax.Variant,'Dirac-Connectome')
         % Vector coefficients by reconstruct-then-project (no mode kernel): the fiber-spread field analog.
         C = i_vector_coeffs(st, ax, D, iWin);  gvAll = ax.GlobalVertices{1}(:);
         setappdata(0, 'DynamicsApplyCache', struct('key',key, 'C',{C}, 'gvAll',gvAll));
@@ -1089,6 +1092,8 @@ function i_dirac_sensor_overlay(st, ctrl, D, iWin, Leig, Dfilt, kernel)
         else
             ctrl.jAtomInfo.setText(sprintf('Dirac | %s [cortex filtered; open the recording for the sensor overlay]', kernel));
         end
+    elseif strcmp(i_atom_op(st), 'Dirac-Connectome')
+        ctrl.jAtomInfo.setText(sprintf('Dirac-Connectome | %s [Preview: fiber-spread cortex + quivers; source-space only, no sensor]', kernel));
     else
         ctrl.jAtomInfo.setText('Dirac: cortex filtered (no Dirac-dSPM leadfield -> no sensor view)');
     end
