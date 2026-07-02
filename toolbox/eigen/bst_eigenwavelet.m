@@ -195,7 +195,11 @@ function scal = Scalogram(ax, gCell, C) %#ok<DEFNU>
         Sg2 = zeros(numel(Lam),1);
         for m = 1:M
             gm = gCell{m}(Lam);  gm = real(gm(:));
-            Wm = manifold_ift(Phi, gm .* C{h});               % [nGv x nT]
+            Wm = manifold_ift(Phi, gm .* C{h});               % [nGv x nT] (scalar) | [4*nGv x nT] (quaternion)
+            if size(Wm,1) == 4*numel(gv)                      % Dirac quaternion basis -> per-vertex current magnitude
+                im = reshape(Wm, 4, numel(gv), []);           % [4 x nGv x nT] (w,x,y,z)
+                Wm = reshape(sqrt(sum(im(2:4,:,:).^2, 1)), numel(gv), []);   % imag 3-vector magnitude [nGv x nT]
+            end
             W(gv,:,m) = Wm;
             eHemi(min(h,2),:,m) = sum(Wm.^2, 1);
             Sg2 = Sg2 + gm.^2;
