@@ -33,6 +33,11 @@ embed/stack (`psi(2:4:end)=Jx …`, stacked L-then-R per `ModeHemisphere`). We r
   the filter actually applied. One basis per session.
 - **All Dirac real-source operations** switch to the mode-kernel coefficients: cortex Apply, sensor
   forward, Analyze-window scalogram, Localize-bands (they all consume one shared `c`).
+- **Cortex magnitude measure = amplitude default + dSPM toggle.** Filtering happens in the amplitude mode
+  domain (dSPM is a vertex-space per-vertex renormalization, not a mode object). The filtered cortex
+  magnitude shows the amplitude current by default, with a toggle to re-apply the recovered per-vertex
+  dSPM scale `SIR(v)` so it matches the launched dSPM view. Direction/quiver/differential/sensor are
+  measure-invariant (identical direction), so the toggle affects only the cortex magnitude colormap.
 - **Scope-out (unchanged, fall back to today's path):** scalar-magnitude atoms (`|J|`, LB / LB-Connectome
   — nonlinear in `c`, cannot use the linear mode kernel); non-Dirac-dSPM sources (no `ImagingKernelMode`).
 
@@ -72,8 +77,10 @@ Non-Dirac operators, and Dirac with a non-dSPM source, keep the canonical `bst_e
 3. `c_filt{h} = g(λ_h) .* c{h}` with `g = bst_eigfilter_kernel(kernel, kp)` on `ax.Lambda`.
 4. Views from the single `c_filt`:
    - **cortex:** `Uf_h = Φ_h · c_filt{h}` → extract imag 3-vector (rows `2:4:end/3:4:end/4:4:end`) →
-     full-surface `V3` + per-vertex magnitude → `SetFilteredField` + quiver `V3` (reuse dimensional-atoms
-     decode + Task-6 display).
+     full-surface `V3` (amplitude current) + per-vertex magnitude → `SetFilteredField` + quiver `V3`
+     (reuse dimensional-atoms decode + Task-6 display). **Magnitude measure toggle** (decision §2): default
+     **amplitude** `‖V3_v‖`; optional **dSPM** `SIR(v)·‖V3_v‖` where `SIR(v)` is recovered once from the
+     stored kernels (§4). The quiver `V3` (direction) is measure-independent and unchanged by the toggle.
    - **sensor:** `Dfilt = L_eig · c_filt_stacked`; `L_eig` from `i_dirac_leadfield` built to the **inverse
      basis** (Tau/nModes from `ax`), asserting `CompHM.Eigenvalues == [Eigenvalues]` (reuse the D guard);
      on mismatch skip the sensor view, cortex still previews.
@@ -92,18 +99,29 @@ Because `i_atom_axes(st,'Dirac')` now returns the inverse basis, the existing di
 (delta projection stays cheap — sparse; reconstruction at the inverse's mode count). No separate change;
 the impulse preview now matches the Apply resolution.
 
-## 4. Correctness anchor (drives the tests)
+## 4. Correctness anchor (VERIFIED live — drives the tests)
 
-The inverse's vertex kernel is the reconstructed mode kernel: `ImagingKernel[3nV×nCh] = Φ_imag · Imaging
-KernelMode`. Therefore **reconstructing from the mode-kernel `c` reproduces `GetResultsValues` exactly**
-(to numerical precision) when using the DiracEigenFile's full mode set:
+`reconstruct(Φ_imag, ImagingKernelMode) = KvtxW = the **amplitude** (min-norm physical current) vertex
+kernel`. The result's `ImagingKernel` adds a **per-vertex** measure normalization (`dspm2018`/`sloreta`:
+`Knorm = SIR ⊙ KvtxW`) *in vertex space after reconstruction* — dSPM/sLORETA are **not** mode-space
+objects. **Verified live** on a real Dirac-dSPM result (`Function=dspm2018`, 400 modes/hemi):
+
+- per-vertex cosine similarity between `reconstruct(ImagingKernelMode)` and `ImagingKernel` = **1.0000 at
+  100% of vertices** — identical direction everywhere;
+- they differ only by a **per-vertex positive scalar** `SIR(v)` (the dSPM z-score).
+
+So the invariant the tests assert:
 
 ```
-reconstruct(Φ, ImagingKernelMode · d)   ==   GetResultsValues(src, iWin)   (imag 3-vector)
+reconstruct(Φ, ImagingKernelMode · d)   ==   amplitude min-norm current   (imag 3-vector, exact)
+      == GetResultsValues(dSPM) in DIRECTION per vertex (cos = 1), differing only by SIR(v)
 ```
 
-This is the lossless-projection test — it proves the free path drops nothing and that `Φ`, `ModeHemisphere`,
-and the mode kernel are mutually aligned. A truncated basis would differ by exactly the dropped modes.
+Consequences: the mode-kernel path is **lossless for the amplitude current**; **all direction-based
+analysis (div/curl/Helmholtz/flow/quivers/sensor forward) is measure-invariant** (direction is identical
+to dSPM); only the cortex **magnitude** differs by `SIR(v)`. `SIR(v)` is **data-independent** and
+recoverable once as `‖ImagingKernel_v‖ / ‖reconstruct(ImagingKernelMode)_v‖` (per vertex, from stored
+kernels alone), so the dSPM magnitude can be re-applied on demand.
 
 ## 5. Components & files
 
@@ -114,6 +132,10 @@ and the mode kernel are mutually aligned. A truncated basis would differ by exac
   - `i_atom_apply` Dirac branch — consume `c`, filter, reconstruct for the 4 views (§3.3).
   - `i_apply_projection` — Dirac-dSPM branch returns `c` (per-hemi) instead of re-projecting.
   - `i_dirac_leadfield` — build `L_eig` to the inverse basis (Tau/nModes from `ax`), assert vs `Eigenvalues`.
+  - `i_dspm_scale(st, D)` — recover the per-vertex dSPM scale `SIR(v) = ‖ImagingKernel_v‖/‖reconstruct(Imaging
+    KernelMode)_v‖` once (data-independent), cached; `[]` for an amplitude-measure source (no renorm needed).
+  - cortex-magnitude **measure toggle** control in the Atom/Preview section (amplitude default | dSPM);
+    applies `SIR(v)` to the magnitude only, re-previews.
 - **Reuse:** `in_bst_eigen`/`in_bst_operator` (basis), the `view_eigen_timeseries` recordings loader,
   `ImagingKernelMode`/`Eigenvalues`/`ModeHemisphere`/`GoodChannel`/`DiracEigenFile` on the result,
   `bst_eigenwavelet('Scalogram'/'JTVAtoms')`, `bst_dirac` (L_eig), the dimensional-atoms decode + quiver
@@ -134,8 +156,13 @@ and the mode kernel are mutually aligned. A truncated basis would differ by exac
 ## 7. Testing
 
 - **Headless (matlab -batch):**
-  - **Lossless projection (anchor):** `reconstruct(Φ, ImagingKernelMode·d)` imag 3-vector == `GetResults
-    Values` field over a window, to `~1e-8` relative (full mode set).
+  - **Lossless projection (anchor, per §4):** `reconstruct(Φ, ImagingKernelMode)` imag 3-vector equals the
+    dSPM vertex kernel in **direction** at every vertex (per-vertex cos ≥ 1−1e-6) and equals it up to a
+    per-vertex scale; equivalently `SIR(v)·reconstruct == ImagingKernel` to `~1e-6` relative (full mode
+    set). (Kernel-identity form — no recordings load needed; recordings for raw files are not a plain
+    `in_bst_data.F` matrix.)
+  - **dSPM-scale recovery:** `i_dspm_scale` reproduces `‖ImagingKernel_v‖/‖reconstruct_v‖` and, applied to
+    the amplitude magnitude, matches `|GetResultsValues|` per vertex.
   - `i_mode_coeffs` shape `[K_h×nWin]`, split matches `ModeHemisphere` counts; cache hit returns identical.
   - Filter equivalence: `c_filt = g(λ)·c` then reconstruct == field filtered by the same `g` in the same
     basis (sanity vs a direct `manifold_ift(Φ, g·(Φ'Bψ))` on the reconstructed field), to tolerance.
