@@ -1183,6 +1183,8 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuOperator, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Laplace-Beltrami', 'Interactive', 1));
                     gui_component('MenuItem', jMenuOperator, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Connection Laplacian', 'Interactive', 1));
                     gui_component('MenuItem', jMenuOperator, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Dirac', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuOperator, [], 'LB-Connectome',       IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'LB-Connectome', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuOperator, [], 'Dirac-Connectome',    IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_operators, filenameRelative, 'Dirac-Connectome', 'Interactive', 1));
                 end
 
                 % === EIGEN (cortex only) ===
@@ -1191,6 +1193,8 @@ switch (lower(action))
                     gui_component('MenuItem', jMenuEigen, [], 'Laplace-Beltrami',     IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Laplace-Beltrami', 'Interactive', 1));
                     gui_component('MenuItem', jMenuEigen, [], 'Connection Laplacian', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Connection Laplacian', 'Interactive', 1));
                     gui_component('MenuItem', jMenuEigen, [], 'Dirac',                IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuEigen, [], 'LB-Connectome',       IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'LB-Connectome', 'Interactive', 1));
+                    gui_component('MenuItem', jMenuEigen, [], 'Dirac-Connectome',    IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@tess_eigen, filenameRelative, 'Dirac-Connectome', 'Interactive', 1));
                 end
 
                 % === ATOM DESIGNER (cortex only) ===
