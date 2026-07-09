@@ -91,7 +91,7 @@ disp([10 'DEMO> 2. Import and process PET volumes' 10]);
 PetFiles = {Pet1File, Pet2File};
 for iPet = 1 : length(PetFiles)
     % Import PET volume
-    impPetFile = import_mri(iSubject, PetFiles{iPet}, [], 0, 0, 'PET');
+    impPetFile = import_pet(iSubject, PetFiles{iPet}, [], 0, 0);
     % Update PET name
     [~, fbase, fExt] = bst_fileparts(PetFiles{iPet});
     if strcmpi(fExt, '.gz')

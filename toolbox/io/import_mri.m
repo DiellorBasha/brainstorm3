@@ -193,7 +193,7 @@ end
 % metadata a first-class, inspectable part of the PET volume that all downstream
 % PET steps (windowing, SUVR, surface projection) read from.
 if isPet && ~iscell(MriFile)
-    sMri.PET = pet_read_metadata(MriFile, sMri);
+    sMri.PET = import_pet('ReadMetadata', MriFile, sMri);
 end
 
 

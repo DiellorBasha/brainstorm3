@@ -193,12 +193,17 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
         [~, fBase] = bst_fileparts(MriFile);
         Comment = strrep(fBase, '.nii', '');
     end
-    % For CT and PET, pass VolType in Comment to import_mri()
-    if ismember(VolType, {'ct', 'pet'})
-        Comment = [upper(VolType), ' ', Comment];
+    % PET: dedicated importer (tags PET + captures tracer/timing/scanner metadata)
+    if strcmpi(VolType, 'pet')
+        DbMriFile = import_pet(iSubject, MriFile, FileFormat, 0, 0, Comment);
+    else
+        % For CT, pass VolType in Comment to import_mri()
+        if strcmpi(VolType, 'ct')
+            Comment = [upper(VolType), ' ', Comment];
+        end
+        % Import volume file
+        DbMriFile = import_mri(iSubject, MriFile, FileFormat, 0, 0, Comment);
     end
-    % Import volume file
-    DbMriFile = import_mri(iSubject, MriFile, FileFormat, 0, 0, Comment);
     if isempty(DbMriFile)
         bst_report('Error', sProcess, [], ['Cannot import file: "' MriFile '".']);
         return

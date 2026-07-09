@@ -576,7 +576,7 @@ switch (lower(action))
                     gui_component('MenuItem', jPopup, [], 'Import anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
                     gui_component('MenuItem', jPopup, [], 'Import MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
                     gui_component('MenuItem', jPopup, [], 'Import CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'CT Import'));
-                    gui_component('MenuItem', jPopup, [], 'Import PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'PET Import'));
+                    gui_component('MenuItem', jPopup, [], 'Import PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_pet, iSubject, [], [], 1, 1));
                     gui_component('MenuItem', jPopup, [], 'Import surfaces', IconLoader.ICON_SURFACE, [], @(h,ev)bst_call(@import_surfaces, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Import fibers', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@import_fibers, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Convert DWI to DTI', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@process_dwi2dti, 'ComputeInteractive', iSubject));
@@ -3418,7 +3418,7 @@ function PetPvc_Callback(PetFile, sSubject)
         if isfield(w, 'PET'), PET = w.PET; end
     catch
     end
-    [defFwhm, fwhmSrc] = pet_scanner_fwhm(PET);
+    [defFwhm, fwhmSrc] = import_pet('ScannerFwhm', PET);
     % Ask for FWHM (pre-filled from metadata)
     res = java_dialog('input', ...
         ['<HTML>PSF FWHM in mm for partial volume correction.<BR>' ...

@@ -20,7 +20,7 @@ function [MriFileGtm, errMsg, regTable] = pet_gtm(PetFile, fwhm, gtmOpts)
 %
 % INPUTS:
 %   PetFile : static (3D) PET volume in the Brainstorm DB.
-%   fwhm    : PSF FWHM in mm (scalar). [] -> derived from PET metadata (pet_scanner_fwhm).
+%   fwhm    : PSF FWHM in mm (scalar). [] -> derived from PET metadata (import_pet('ScannerFwhm',...)).
 %   gtmOpts : (optional) .AtlasComment (default 'Desikan-Killiany'), .minVox (default 50).
 %
 % OUTPUTS:
@@ -28,7 +28,7 @@ function [MriFileGtm, errMsg, regTable] = pet_gtm(PetFile, fwhm, gtmOpts)
 %   errMsg     : error message, if any.
 %   regTable   : struct with .id .nvox .observed .corrected (per region).
 %
-% SEE ALSO: pet_pvc, pet_scanner_fwhm
+% SEE ALSO: pet_pvc, import_pet
 %
 % Reference: Rousset OG, Ma Y, Evans AC. Correction for partial volume effects in PET:
 %            principle and validation. J Nucl Med 1998;39:904-911.
@@ -60,7 +60,7 @@ function [MriFileGtm, errMsg, regTable] = pet_gtm(PetFile, fwhm, gtmOpts)
         % ----- PSF -----
         if isempty(fwhm)
             PET = []; try w = load(file_fullpath(PetFile),'PET'); if isfield(w,'PET'), PET = w.PET; end; catch; end
-            [fwhm, fwhmSrc] = pet_scanner_fwhm(PET);
+            [fwhm, fwhmSrc] = import_pet('ScannerFwhm', PET);
             fprintf('BST> PET GTM: PSF FWHM = %.1f mm [%s]\n', fwhm, fwhmSrc);
         end
         if isscalar(fwhm), fwhm = [fwhm fwhm fwhm]; end

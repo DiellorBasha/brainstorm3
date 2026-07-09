@@ -70,7 +70,7 @@ if nargin < 3 || isempty(fwhm)
         if isfield(w, 'PET'), PET = w.PET; end
     catch
     end
-    [fwhm, fwhmSrc] = pet_scanner_fwhm(PET);
+    [fwhm, fwhmSrc] = import_pet('ScannerFwhm', PET);
     fprintf('BST> PET PVC: PSF FWHM = %.1f mm [%s]\n', fwhm, fwhmSrc);
 end
 % Expand scalar FWHM to 3D vector
