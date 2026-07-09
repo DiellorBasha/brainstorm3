@@ -576,7 +576,7 @@ switch (lower(action))
                     gui_component('MenuItem', jPopup, [], 'Import anatomy folder (auto)', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_anatomy, iSubject, 1));
                     gui_component('MenuItem', jPopup, [], 'Import MRI', IconLoader.ICON_ANATOMY, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1));
                     gui_component('MenuItem', jPopup, [], 'Import CT', IconLoader.ICON_VOLCT, [], @(h,ev)bst_call(@import_mri, iSubject, [], [], 1, 1, 'CT Import'));
-                    gui_component('MenuItem', jPopup, [], 'Import PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@import_pet, iSubject, [], [], 1, 1));
+                    gui_component('MenuItem', jPopup, [], 'Import PET', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@process_import_pet, 'ComputeInteractive', iSubject));
                     gui_component('MenuItem', jPopup, [], 'Import surfaces', IconLoader.ICON_SURFACE, [], @(h,ev)bst_call(@import_surfaces, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Import fibers', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@import_fibers, iSubject));
                     gui_component('MenuItem', jPopup, [], 'Convert DWI to DTI', IconLoader.ICON_FIBERS, [], @(h,ev)bst_call(@process_dwi2dti, 'ComputeInteractive', iSubject));
@@ -3290,32 +3290,11 @@ function fcnPetProcessing(jPopup, sSubject, iAnatomy)
         PetFile = sSubject.Anatomy(iAnatomy).FileName;
         % === PET METADATA ===
         gui_component('MenuItem', jMenu, [], 'PET information', IconLoader.ICON_VOLPET, [], @(h,ev)PetInfo_Callback(PetFile));
-        AddSeparator(jMenu);
-        % === PET IMPORT ===
-        gui_component('MenuItem', jMenu, [], 'Realign frames', IconLoader.ICON_VOLPET, [], @(h,ev)PetImportProcess_Callback(PetFile));
         % === PET PROCESSING ===
         AddSeparator(jMenu);
         gui_component('MenuItem', jMenu, [], 'Compute SUVR', IconLoader.ICON_VOLPET, [], @(h,ev)bst_call(@gui_show_dialog, 'PET processing options', @panel_process_pet, 1, [], PetFile));
         gui_component('MenuItem', jMenu, [], 'Partial volume correction', IconLoader.ICON_VOLPET, [], @(h,ev)PetPvc_Callback(PetFile, sSubject));
         gui_component('MenuItem', jMenu, [], 'Project volume to surface', IconLoader.ICON_SURFACE_CORTEX, [], @(h,ev)bst_call(@mri_interp_vol2tess, PetFile, [], 'PET'));
-    end
-end
-
-
-%% ===== PET IMPORT PROCESSING =====
-function PetImportProcess_Callback(PetFile)
-    % Get number of frames (4D)
-    CubeInfo = whos('-file', file_fullpath(PetFile), 'Cube');
-    if numel(CubeInfo.size) < 4
-        disp('BST> PET volume is static (3D), skipping realignment across frames');
-        return
-    end
-    nFrames = CubeInfo.size(4);
-    % Collect user inputs
-    petopts = gui_show_dialog('PET Pre-processing options', @panel_import_pet, 1, [], nFrames, 0);
-    if ~isempty(petopts)
-        % Realign, smooth and aggregate
-        mri_realign(PetFile, petopts.align, petopts.fwhm, petopts.aggregate);
     end
 end
 

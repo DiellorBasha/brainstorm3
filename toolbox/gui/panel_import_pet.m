@@ -1,30 +1,29 @@
 function varargout = panel_import_pet(varargin)
-% PANEL_IMPORT_PET: User options for pre-processing dynamic PET volumes.
+% PANEL_IMPORT_PET: Options for importing and processing a PET volume.
 %
-% USAGE: [bstPanelNew, panelName] = panel_import_pet('CreatePanel', nFrames, dispRegistration)
+% USAGE: [bstPanelNew, panelName] = panel_import_pet('CreatePanel')
+%        Options = gui_show_dialog('Import & process PET', @panel_import_pet, 1, [])
 %
-% petopts = gui_show_dialog('PET Pre-processing options', @panel_import_pet, 1, [], nFrames, dispRegistration)
+% Interactive front-end for process_import_pet(). A processing-mode selector:
+%   - Recommended : import + full validated pipeline with default settings (no
+%                   options to choose).
+%   - Advanced    : reveals the pipeline knobs for customization.
+%   - Import only : raw volume, no processing.
+% The Advanced knobs are shown ONLY in Advanced mode; their initial values are
+% the recommended defaults, so Recommended just reads those defaults.
 %
-% This panel is typically displayed using gui_show_dialog() to collect user inputs:
-%   - Align PET frames (realignment)
-%   - Smooth the volume using a specified FWHM kernel
-%   - Aggregate aligned frames into a static volume
-%   If dispRegistration == 1, the options below are also shown:
-%   - Register the PET volume to the default MRI
-%   - Choose whether to reslice the volume on import
-%
-% The panel contents are returned as a structure using GetPanelContents
-%
+% Returns an Options struct consumed by process_import_pet (fields: RunPipeline,
+% Aggregate, Register, Reslice, PvcMethod, PvcFwhm, SuvrRef, DoProject).
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
 % https://neuroimage.usc.edu/brainstorm
-% 
+%
 % Copyright (c) University of Southern California & McGill University
 % This software is distributed under the terms of the GNU General Public License
 % as published by the Free Software Foundation. Further details on the GPLv3
 % license can be found at http://www.gnu.org/copyleft/gpl.html.
-% 
+%
 % FOR RESEARCH PURPOSES ONLY. THE SOFTWARE IS PROVIDED "AS IS," AND THE
 % UNIVERSITY OF SOUTHERN CALIFORNIA AND ITS COLLABORATORS DO NOT MAKE ANY
 % WARRANTY, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
@@ -34,113 +33,104 @@ function varargout = panel_import_pet(varargin)
 % For more information type "brainstorm license" at command prompt.
 % =============================================================================@
 %
-% Authors: Diellor Basha, 2025
+% Authors: Diellor Basha, 2025-2026
 %          Raymundo Cassani, 2025
 
 eval(macro_method);
 end
 
 %% ===== CREATE PANEL =====
-function [bstPanelNew, panelName] = CreatePanel(nFrames, dispRegistration)
+function [bstPanelNew, panelName] = CreatePanel()
     panelName = 'panel_import_pet';
     import java.awt.*
     import javax.swing.*
-    % Handle number of frames
-    isMultiFrame = nFrames > 1;
-    strFrames = sprintf('%d frame', nFrames);
-    if isMultiFrame
-        strFrames = [strFrames 's'];
-    end
 
-    % === MAIN LAYOUT (2 PANELS) ===
+    % === MAIN LAYOUT ===
     jPanelMain = gui_river([5, 5], [0, 10, 10, 10]);
-    % === FRAME ALIGNMENT PANEL (1/2) ===
-    jPanelAlign = gui_river([2, 2], [0, 10, 10, 10], 'Frame alignment');
-    % Alignment
-    gui_component('label', jPanelAlign, 'br', ...
-        sprintf('<HTML><EM>Imported volume contains %s.</EM><BR></HTML>', strFrames));
-    jCheckAlign = gui_component('checkbox', jPanelAlign, 'br', 'Align frames');
-    jCheckAlign.setSelected(isMultiFrame);
-    % Smooth
-    jPanelSmooth = gui_river([0, 0], [2, 0, 0, 0]);
-    jCheckSmooth = gui_component('checkbox', jPanelSmooth, 'br', 'Apply smoothing');
-    jCheckSmooth.setSelected(false);   % Default OFF: import-time smoothing blurs the volume before PVC
-    jCheckSmooth.setEnabled(isMultiFrame);
-    jPanelFwhm = gui_river([0, 0], [0, 15, 0, 0]);
-    jLabelFwhm = gui_component('label', jPanelFwhm, 'br', 'FWHM (mm): ');
-    jTextFwhm = gui_component('text', jPanelFwhm, 'tab', '8');
-    jTextFwhm.setMaximumSize(java.awt.Dimension(50, 20));
-    SetEnabled([jTextFwhm, jLabelFwhm], jCheckSmooth.isSelected());
-    java_setcb(jCheckSmooth, 'ActionPerformedCallback', @(h, ev)SetEnabled([jTextFwhm, jLabelFwhm], jCheckSmooth.isSelected()));
-    java_setcb(jCheckAlign, 'ActionPerformedCallback', @(h, ev)SetSelectedAndEnabled(jCheckSmooth, jCheckSmooth.isSelected() && jCheckAlign.isSelected(), jCheckAlign.isSelected));
-    jPanelSmooth.add('br', jPanelFwhm);
-    jPanelAlign.add('br', jPanelSmooth);
-    % Aggregate
-    jPanelAggregate = gui_river([0, 0], [2, 0, 0, 0]);
-    jCheckAggregate = gui_component('checkbox', jPanelAggregate, 'br', 'Aggregate frames: ');
-    jCheckAggregate.setSelected(isMultiFrame);
-    jComboboxAggregate = gui_component('combobox', jPanelAggregate, 'tab', [], {{'Mean', 'Sum', 'Median', 'Max', 'Min', 'First', 'Last', 'Z-score'}});
-    jComboboxAggregate.setEnabled(isMultiFrame);
-    java_setcb(jCheckAggregate, 'ActionPerformedCallback', @(h, ev)jComboboxAggregate.setEnabled(jCheckAggregate.isSelected()));
-    jPanelAlign.add('br', jPanelAggregate);
-    % Disable entries if single frame
-    if ~isMultiFrame
-        SetEnabled([jPanelAlign, jCheckAlign, jPanelSmooth, jCheckSmooth, jPanelAggregate, jCheckAggregate], 0);
-    end
-    % === REGISTRATION PANEL (2/2) ===
-    jPanelReg = gui_river('Registration');
-    jCheckRegister = gui_component('checkbox', jPanelReg, 'br', 'Register to MRI using:');
-    jCheckRegister.setSelected(true);
-    jComboboxRegister = gui_component('combobox', jPanelReg, 'tab', [], {{'SPM', 'MNI'}});
-    java_setcb(jCheckRegister, 'ActionPerformedCallback', @(h, ev)jComboboxRegister.setEnabled(jCheckRegister.isSelected()));
-    jCheckReslice = gui_component('checkbox', jPanelReg, 'br', 'Reslice volume on import');
+
+    % === PROCESSING MODE ===
+    jPanelMode = gui_river([2, 2], [0, 10, 10, 10], 'Processing');
+    jGroupMode = ButtonGroup();
+    jRadioRec = gui_component('radio', jPanelMode, 'br', 'Recommended  (import + full pipeline)');
+    jRadioAdv = gui_component('radio', jPanelMode, 'br', 'Advanced  (customize each step)');
+    jRadioRaw = gui_component('radio', jPanelMode, 'br', 'Import only  (raw volume)');
+    jGroupMode.add(jRadioRec);
+    jGroupMode.add(jRadioAdv);
+    jGroupMode.add(jRadioRaw);
+    jRadioRec.setSelected(true);
+    jPanelMain.add('br hfill', jPanelMode);
+
+    % === ADVANCED OPTIONS (initial values = recommended defaults) ===
+    jPanelAdv = gui_river([2, 2], [0, 10, 10, 10], 'Advanced options');
+    % Aggregate frames
+    gui_component('label', jPanelAdv, 'br', 'Aggregate frames: ');
+    jComboAggregate = gui_component('combobox', jPanelAdv, 'tab', [], {{'Mean', 'Sum', 'Median', 'Max', 'Min', 'First', 'Last'}});
+    % Register to MRI
+    gui_component('label', jPanelAdv, 'br', 'Register to MRI: ');
+    jComboRegister = gui_component('combobox', jPanelAdv, 'tab', [], {{'SPM', 'MNI', 'Ignore'}});
+    % Reslice
+    jCheckReslice = gui_component('checkbox', jPanelAdv, 'br', 'Reslice on the MRI grid');
     jCheckReslice.setSelected(true);
-    if ~dispRegistration
-        jPanelReg.setVisible(0);
-        jCheckRegister.setSelected(0);
-        jCheckReslice.setSelected(0);
-    end
-    % Add panels to main layout
-    jPanelMain.add('br', jPanelAlign);
-    jPanelMain.add('br', jPanelReg);
+    % PVC method
+    gui_component('label', jPanelAdv, 'br', 'Partial volume correction: ');
+    jComboPvc = gui_component('combobox', jPanelAdv, 'tab', [], {{'Muller-Gartner', 'GTM (Rousset)', 'None'}});
+    % PVC FWHM (0 = auto from scanner metadata)
+    gui_component('label', jPanelAdv, 'br', 'PVC PSF FWHM (0 = auto): ');
+    jTextFwhm = gui_component('text', jPanelAdv, 'tab', '0');
+    jTextFwhm.setMaximumSize(java.awt.Dimension(50, 20));
+    % SUVR reference (empty = tracer-aware default)
+    gui_component('label', jPanelAdv, 'br', 'SUVR reference (empty = tracer): ');
+    jTextRef = gui_component('text', jPanelAdv, 'tab', '');
+    jTextRef.setMaximumSize(java.awt.Dimension(120, 20));
+    % Project to surface
+    jCheckProject = gui_component('checkbox', jPanelAdv, 'br', 'Project SUVR to cortical surface');
+    jCheckProject.setSelected(true);
+    jPanelMain.add('br hfill', jPanelAdv);
+    % Advanced options are shown ONLY in Advanced mode
+    jPanelAdv.setVisible(false);
+
+    % Mode selection reveals/hides the Advanced options and resizes the dialog
+    java_setcb(jRadioRec, 'ActionPerformedCallback', @(h, ev)UpdateMode());
+    java_setcb(jRadioAdv, 'ActionPerformedCallback', @(h, ev)UpdateMode());
+    java_setcb(jRadioRaw, 'ActionPerformedCallback', @(h, ev)UpdateMode());
 
     % === BUTTONS ===
     jPanelButtons = gui_river([2 0], [0 5 0 5]);
     gui_component('button', jPanelButtons, 'br right', 'Cancel', [], [], @ButtonCancel_Callback);
-    gui_component('button', jPanelButtons, '', 'Import', [], [], @ButtonImport_Callback);
+    gui_component('button', jPanelButtons, '', 'OK', [], [], @ButtonOk_Callback);
     jPanelMain.add('br right', jPanelButtons);
-    % === Panel Layout  ===
-    if ~isempty(jCheckAlign)
-        jPanelAlign.doLayout();
-        jPanelReg.doLayout();
-        maxWidth = max([jPanelAlign.getPreferredSize().width, jPanelReg.getPreferredSize().width]);
-        jPanelAlign.setPreferredSize(java.awt.Dimension(maxWidth, jPanelAlign.getPreferredSize().height));
-        jPanelReg.setPreferredSize(java.awt.Dimension(maxWidth, jPanelReg.getPreferredSize().height));
-    end
     % === Create mutex ===
     bst_mutex('create', panelName);
     % === Return panel object ===
     bstPanelNew = BstPanel(panelName, ...
         jPanelMain, ...
-        struct('jCheckAlign',        jCheckAlign, ...
-               'jCheckAggregate',    jCheckAggregate, ...
-               'jComboBoxAggregate', jComboboxAggregate, ...
-               'jCheckSmooth',       jCheckSmooth, ...
-               'jTextFwhm',          jTextFwhm, ...
-               'jCheckRegister',     jCheckRegister, ...
-               'jComboboxRegister',  jComboboxRegister, ...
-               'jCheckReslice',      jCheckReslice));
+        struct('jRadioRec',       jRadioRec, ...
+               'jRadioAdv',       jRadioAdv, ...
+               'jRadioRaw',       jRadioRaw, ...
+               'jComboAggregate', jComboAggregate, ...
+               'jComboRegister',  jComboRegister, ...
+               'jCheckReslice',   jCheckReslice, ...
+               'jComboPvc',       jComboPvc, ...
+               'jTextFwhm',       jTextFwhm, ...
+               'jTextRef',        jTextRef, ...
+               'jCheckProject',   jCheckProject));
 
 %% =================================================================================
 %  === INTERNAL CALLBACKS ==========================================================
 %  =================================================================================
-%% ===== CANCEL BUTTON =====
+    function UpdateMode()
+        jPanelAdv.setVisible(jRadioAdv.isSelected());
+        % Resize the dialog to fit the new content
+        jTop = jPanelMain.getTopLevelAncestor();
+        if ~isempty(jTop)
+            jPanelMain.revalidate();
+            jTop.pack();
+        end
+    end
     function ButtonCancel_Callback(~, ~)
         gui_hide(panelName);
     end
-
-%% ===== IMPORT BUTTON =====
-    function ButtonImport_Callback(~, ~)
+    function ButtonOk_Callback(~, ~)
         bst_mutex('release', panelName);  % Triggers gui_show_dialog to call GetPanelContents
     end
 end
@@ -150,40 +140,28 @@ end
 %  =================================================================================
 %% ===== GET PANEL CONTENTS =====
 function s = GetPanelContents()
-    % Get panel controls
     ctrl = bst_get('PanelControls', 'panel_import_pet');
-    % Get import PET options
-    if ctrl.jCheckAlign.isSelected()
-        s.align = 'spm_realign';
+    % Pipeline runs unless "Import only" is selected. In Recommended mode the
+    % Advanced widgets are untouched, so they still hold the recommended defaults.
+    s.RunPipeline = ~ctrl.jRadioRaw.isSelected();
+    s.Aggregate   = lower(char(ctrl.jComboAggregate.getSelectedItem()));
+    s.Register    = lower(char(ctrl.jComboRegister.getSelectedItem()));
+    s.Reslice     = ctrl.jCheckReslice.isSelected();
+    % PVC method: map display label -> internal value
+    pvcDisp = lower(char(ctrl.jComboPvc.getSelectedItem()));
+    if ~isempty(strfind(pvcDisp, 'gtm')) %#ok<STREMP>
+        s.PvcMethod = 'gtm';
+    elseif ~isempty(strfind(pvcDisp, 'none')) %#ok<STREMP>
+        s.PvcMethod = 'none';
     else
-        s.align = '';
+        s.PvcMethod = 'mg';
     end
-    s.fwhm     = ctrl.jCheckSmooth.isSelected() * str2double(char(ctrl.jTextFwhm.getText()));
-    if ctrl.jCheckAggregate.isSelected()
-        s.aggregate = lower(char(ctrl.jComboBoxAggregate.getSelectedItem()));
-    else
-        s.aggregate = 'ignore';
+    % PVC FWHM: 0 (or blank) -> auto
+    fwhm = str2double(char(ctrl.jTextFwhm.getText()));
+    if isnan(fwhm)
+        fwhm = 0;
     end
-    if ctrl.jCheckRegister.isSelected()
-        s.register = lower(char(ctrl.jComboboxRegister.getSelectedItem()));
-    else
-        s.register = 'ignore';
-    end
-    s.reslice  = ctrl.jCheckReslice.isSelected();
-end
-
-%% ===== SET ENABLED FOR COMPONENTS =====
-function SetEnabled(components, status)
-    for iComponent = 1 : length(components)
-        components(iComponent).setEnabled(status);
-    end
-end
-
-%% ===== SET SELECTED AND ENABLED FOR CHECK COMPONENTS =====
-function SetSelectedAndEnabled(component, isSelected, isEnabled)
-    % If value changed, doClick, it triggers ActionPerformedCallback
-    if component.isSelected ~= isSelected
-        component.doClick;
-    end
-    component.setEnabled(isEnabled);
+    s.PvcFwhm   = fwhm;
+    s.SuvrRef   = strtrim(char(ctrl.jTextRef.getText()));
+    s.DoProject = ctrl.jCheckProject.isSelected();
 end

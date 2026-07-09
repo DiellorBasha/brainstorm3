@@ -285,7 +285,6 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
         refSize = size(sMriRef.Cube(:,:,:,1));
         newSize = size(sMri.Cube(:,:,:,1));
         isSameSize = all(refSize == newSize) && all(round(sMriRef.Voxsize(1:3) .* 1000) == round(sMri.Voxsize(1:3) .* 1000));
-        nFrames = size(sMri.Cube, 4);
 
         % ==== ASK OPERATIONS FOR VOLUME ====
         % Ask what operation to perform with this MRI
@@ -342,22 +341,11 @@ if (iAnatomy > 1) && (isInteractive || isAutoAdjust)
                     isReslice = 0;
                 end
 
-            % Ask for PET processing
+            % PET: imported raw; realign/coregister/PVC/SUVR handled by process_import_pet
             else
-                % Collect user inputs
-                petopts = gui_show_dialog('PET Pre-processing options', @panel_import_pet, 1, [], nFrames, 1);
-                if isempty(petopts)  % User aborted the import
-                    sMri = [];
-                    bst_progress('stop');
-                    return;
-                end
-                % Realign, smooth and aggregate
-                [sMri, petImportFileTag] = mri_realign(sMri, petopts.align, petopts.fwhm, petopts.aggregate); % FWHM == 0 => no smoothing
-                tmpHistory.History = sMri.History;
-                % Registration method
-                RegMethod = petopts.register;
-                % Reslice
-                isReslice = petopts.reslice;
+                RegMethod = 'Ignore';
+                isReslice = 0;
+                petImportFileTag = '';
             end
         % In non-interactive mode
         else
