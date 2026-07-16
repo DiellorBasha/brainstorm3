@@ -1,9 +1,11 @@
 function varargout = process_import_pet( varargin )
 % PROCESS_IMPORT_PET: Import a PET volume and run the recommended PET pipeline.
 %
-% The recommended pipeline (all in volume space, benchmarked r=0.99 vs VLPP):
-%   raw import -> realign+aggregate -> coregister+reslice to T1 -> PVC ->
-%   SUVR (tracer-aware reference) -> project to cortical surface.
+% The recommended pipeline (all in volume space) mirrors the validated flow and
+% produces two anatomy nodes:
+%   1. Imported PET   : realign -> mean-aggregate -> coregister + reslice to the MRI.
+%   2. Fully processed: PVC -> SUVR (tracer-aware reference) from node 1.
+% Surface projection is a separate step, not part of the recommended import.
 %
 % Interactive entry:  process_import_pet('ComputeInteractive', iSubject)
 % Batch entry:        run from the Process tab (GetDescription options).
@@ -96,7 +98,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     % PVC method
     sProcess.options.pvcmethod.Comment = 'Partial volume correction: ';
     sProcess.options.pvcmethod.Type    = 'combobox_label';
-    sProcess.options.pvcmethod.Value   = {'mg', {'Muller-Gartner','GTM (Rousset)','None'; 'mg','gtm','none'}};
+    sProcess.options.pvcmethod.Value   = {'gtm', {'GTM (Rousset)','Muller-Gartner','None'; 'gtm','mg','none'}};
     sProcess.options.pvcmethod.Class   = 'advanced';
     % PVC FWHM (0 = auto from scanner metadata)
     sProcess.options.pvcfwhm.Comment = 'PVC PSF FWHM (0 = auto from scanner): ';
@@ -111,7 +113,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     % Project to surface
     sProcess.options.doproject.Comment = 'Project SUVR to cortical surface';
     sProcess.options.doproject.Type    = 'checkbox';
-    sProcess.options.doproject.Value   = 1;
+    sProcess.options.doproject.Value   = 0;
     sProcess.options.doproject.Class   = 'advanced';
 end
 
@@ -194,87 +196,169 @@ function ComputeInteractive(iSubject) %#ok<DEFNU>
 end
 
 
-%% ===== ENGINE: import + pipeline =====
+%% ===== ENGINE: import + two-node pipeline (matches the validated pipeline) =====
+% Produces exactly two anatomy nodes:
+%   1. Imported PET   - realigned + mean-aggregated + coregistered to the subject MRI
+%                       (== the validated PetAggCoreg volume), done in-memory.
+%   2. Fully processed - PVC -> SUVR from node 1. The transient PVC volume that
+%                       pet_process creates is removed so only these two nodes remain.
+% Import-only mode (RunPipeline=false) saves just the raw volume.
 function [OutputFiles, errMsg] = Compute(iSubject, PetFile, FileFormat, Comment, Options)
     OutputFiles = {};
     errMsg = '';
-    % ----- 1. Raw import (import_pet owns load + metadata) -----
-    bst_progress('start', 'Import & process PET', 'Importing PET volume...');
-    [DbPetFile, sMri] = import_pet(iSubject, PetFile, FileFormat, 0, 0, Comment);
-    if isempty(DbPetFile) || iscell(DbPetFile)
-        errMsg = ['Cannot import PET file: "' PetFile '".'];
+    if isempty(FileFormat)
+        FileFormat = 'ALL';
+    end
+    bst_progress('start', 'Import & process PET', 'Loading PET volume...');
+
+    % ----- Load raw PET into memory (no DB node yet) + capture metadata -----
+    sMri = in_mri(PetFile, FileFormat, 0, 0, 1);   % isPet = 1
+    if isempty(sMri)
+        errMsg = ['Cannot read PET file: "' PetFile '".'];
         bst_progress('stop');
         return;
     end
-    OutputFiles{end+1} = DbPetFile;
-    % Raw import only?
+    petMeta = import_pet('ReadMetadata', PetFile, sMri);   % kept aside: realign/coregister drop sMri.PET
+    % Base comment (strip .nii / .gz)
+    if isempty(Comment)
+        [~, fBase, fExt] = bst_fileparts(PetFile);
+        if strcmpi(fExt, '.gz')
+            [~, fBase] = bst_fileparts(fBase);
+        end
+        Comment = fBase;
+    end
+
+    % ----- Import-only: save the raw volume as a single node -----
     if ~Options.RunPipeline
+        bst_progress('text', 'Saving PET volume...');
+        sMri.PET = petMeta;
+        OutputFiles{end+1} = SaveVolume(iSubject, sMri, ['PET ' Comment]);
         bst_progress('stop');
         return;
     end
-    % ----- Prerequisite: reference MRI (T1) -----
+
+    % ----- Prerequisite: reference MRI -----
     sSubject = bst_get('Subject', iSubject);
     if isempty(sSubject.Anatomy) || isempty(sSubject.iAnatomy)
-        errMsg = 'No reference MRI in this subject: cannot run the PET pipeline. Raw volume imported.';
+        errMsg = 'No reference MRI in this subject: cannot process the PET volume.';
         bst_progress('stop');
         return;
     end
-    MriFile = sSubject.Anatomy(sSubject.iAnatomy).FileName;
-    % ----- 2. Realign + aggregate (skip if already static 3D) -----
-    if isfield(sMri, 'Cube') && (size(sMri.Cube, 4) > 1)
+    sMriRef = in_mri_bst(sSubject.Anatomy(sSubject.iAnatomy).FileName);
+
+    % ===== NODE 1: realign + mean-aggregate + coregister (validated, in-memory) =====
+    if (size(sMri.Cube, 4) > 1)
         bst_progress('text', 'Realigning and aggregating frames...');
-        PetAggFile = mri_realign(DbPetFile, 'spm_realign', 0, Options.Aggregate);
-    else
-        PetAggFile = DbPetFile;   % single-volume PET: nothing to realign/aggregate
+        sMri = mri_realign(sMri, 'spm_realign', 0, Options.Aggregate);   % realign + aggregate to 3D
     end
-    % ----- 3. Coregister + reslice to the T1 -----
     if ~strcmpi(Options.Register, 'ignore')
         bst_progress('text', 'Coregistering PET to MRI...');
-        PetCoregFile = mri_coregister(PetAggFile, MriFile, Options.Register, Options.Reslice);
-    else
-        PetCoregFile = PetAggFile;
-    end
-    OutputFiles{end+1} = PetCoregFile;
-    % ----- 4. Partial volume correction -----
-    PetPvcFile = PetCoregFile;
-    if ~strcmpi(Options.PvcMethod, 'none')
-        bst_progress('text', 'Partial volume correction...');
-        pvcFwhm = Options.PvcFwhm;
-        if isempty(pvcFwhm) || (pvcFwhm <= 0)
-            pvcFwhm = [];   % auto: derive from scanner metadata inside pet_pvc
-        end
-        [PetPvcFile, errPvc] = pet_pvc(PetCoregFile, MriFile, pvcFwhm, struct('method', Options.PvcMethod));
-        if ~isempty(errPvc) || isempty(PetPvcFile)
-            % Non-fatal: continue SUVR on the uncorrected (coregistered) volume
-            disp(['BST> PET PVC failed: ' errPvc '. Continuing without PVC.']);
-            PetPvcFile = PetCoregFile;
-        else
-            OutputFiles{end+1} = PetPvcFile;
+        [sMri, errCoreg] = mri_coregister(sMri, sMriRef, Options.Register, Options.Reslice, 0);
+        if ~isempty(errCoreg)
+            errMsg = ['Coregistration failed: ' errCoreg];
+            bst_progress('stop');
+            return;
         end
     end
-    % ----- 5. SUVR (tracer-aware reference) + optional surface projection -----
+    sMri.PET = petMeta;
+    importedFile = SaveVolume(iSubject, sMri, ['PET ' Comment]);
+    OutputFiles{end+1} = importedFile;
+
+    % ===== NODE 2: fully processed = PVC -> SUVR from node 1 =====
+    % PVC PSF FWHM from the scanner metadata (derived volumes drop sMri.PET)
+    pvcFwhm = Options.PvcFwhm;
+    if isempty(pvcFwhm) || (pvcFwhm <= 0)
+        pvcFwhm = import_pet('ScannerFwhm', petMeta);
+    end
+    % Tracer-aware SUVR reference (unless overridden)
     SuvrRef = Options.SuvrRef;
     if isempty(SuvrRef)
         tracerName = '';
-        if isfield(sMri, 'PET') && isstruct(sMri.PET) && isfield(sMri.PET, 'Tracer')
-            tracerName = sMri.PET.Tracer.Name;
+        if isstruct(petMeta) && isfield(petMeta, 'Tracer')
+            tracerName = petMeta.Tracer.Name;
         end
         SuvrRef = GetTracerReference(tracerName);
     end
-    bst_progress('text', 'Computing SUVR...');
-    [PetSuvrFile, errSuvr, SurfFile] = pet_process(PetPvcFile, 'ASEG', SuvrRef, 'Brainmask', 1, Options.DoProject);
-    if ~isempty(errSuvr)
+    pvcOpts = [];
+    if ~strcmpi(Options.PvcMethod, 'none')
+        pvcOpts = struct('method', Options.PvcMethod, 'fwhm', pvcFwhm);
+    end
+    % Snapshot so the transient PVC volume can be removed afterwards
+    sSubject = bst_get('Subject', iSubject);
+    anatBefore = {sSubject.Anatomy.FileName};
+    bst_progress('text', 'Partial volume correction + SUVR...');
+    [suvrFile, errSuvr, surfFile] = pet_process(importedFile, 'ASEG', SuvrRef, 'Brainmask', 1, Options.DoProject, pvcOpts);
+
+    % ----- Keep only node 1 (imported) + SUVR; drop the transient PVC volume -----
+    sSubject = bst_get('Subject', iSubject);
+    newFiles = setdiff({sSubject.Anatomy.FileName}, anatBefore);
+    for iNew = 1:numel(newFiles)
+        if isempty(suvrFile) || ~strcmp(newFiles{iNew}, file_short(suvrFile))
+            DeleteAnatomy(iSubject, newFiles{iNew});   % transient PVC volume
+        end
+    end
+    panel_protocols('UpdateNode', 'Subject', iSubject);
+
+    if isempty(suvrFile)
         errMsg = ['SUVR step failed: ' errSuvr];
         bst_progress('stop');
         return;
     end
-    if ~isempty(PetSuvrFile)
-        OutputFiles{end+1} = PetSuvrFile;
+    OutputFiles{end+1} = suvrFile;
+    if ~isempty(surfFile)
+        OutputFiles{end+1} = surfFile;   % optional (Advanced): SUVR projected on the cortex
     end
-    if ~isempty(SurfFile)
-        OutputFiles{end+1} = SurfFile;
+    if ~isempty(errSuvr)
+        disp(['BST> ' errSuvr]);   % non-fatal
     end
     bst_progress('stop');
+end
+
+
+%% ===== save an in-memory volume struct as a new anatomy node =====
+function BstFile = SaveVolume(iSubject, sMri, Comment)
+    sSubject = bst_get('Subject', iSubject);
+    sMri.Comment = Comment;
+    % Anatomy folder for this subject
+    if ~isempty(sSubject.Anatomy)
+        anatDir = bst_fileparts(file_fullpath(sSubject.Anatomy(1).FileName));
+    else
+        ProtocolInfo = bst_get('ProtocolInfo');
+        anatDir = bst_fullfile(ProtocolInfo.SUBJECTS, bst_fileparts(sSubject.FileName));
+    end
+    MriFileFull = file_unique(bst_fullfile(anatDir, ['subjectimage_' file_standardize(Comment) '.mat']));
+    out_mri_bst(sMri, MriFileFull);
+    % Register the new volume with the subject
+    iAnatomy = length(sSubject.Anatomy) + 1;
+    sSubject.Anatomy(iAnatomy) = db_template('Anatomy');
+    sSubject.Anatomy(iAnatomy).FileName = file_short(MriFileFull);
+    sSubject.Anatomy(iAnatomy).Comment  = Comment;
+    bst_set('Subject', iSubject, sSubject);
+    db_save();
+    BstFile = file_short(MriFileFull);
+end
+
+
+%% ===== delete an anatomy volume node (file + DB entry) =====
+function DeleteAnatomy(iSubject, BstFile)
+    sSubject = bst_get('Subject', iSubject);
+    if isempty(sSubject.Anatomy)
+        return;
+    end
+    iAnat = find(strcmp({sSubject.Anatomy.FileName}, file_short(BstFile)), 1);
+    if isempty(iAnat)
+        return;
+    end
+    file_delete(file_fullpath(BstFile), 1);
+    sSubject.Anatomy(iAnat) = [];
+    % Keep iAnatomy valid after the removal
+    if isequal(sSubject.iAnatomy, iAnat)
+        sSubject.iAnatomy = [];
+    elseif ~isempty(sSubject.iAnatomy) && (sSubject.iAnatomy > iAnat)
+        sSubject.iAnatomy = sSubject.iAnatomy - 1;
+    end
+    bst_set('Subject', iSubject, sSubject);
+    db_save();
 end
 
 
@@ -302,10 +386,10 @@ function Options = DefaultOptions()
     Options.Aggregate   = 'mean';
     Options.Register    = 'spm';
     Options.Reslice     = 1;
-    Options.PvcMethod   = 'mg';
+    Options.PvcMethod   = 'gtm';   % native (no PETPVE12); MG available in Advanced
     Options.PvcFwhm     = [];      % auto from scanner metadata
     Options.SuvrRef     = '';      % tracer-aware default
-    Options.DoProject   = 1;
+    Options.DoProject   = 0;       % projection is a separate step (Advanced opt-in)
 end
 
 

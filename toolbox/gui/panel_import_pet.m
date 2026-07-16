@@ -73,7 +73,7 @@ function [bstPanelNew, panelName] = CreatePanel()
     jCheckReslice.setSelected(true);
     % PVC method
     gui_component('label', jPanelAdv, 'br', 'Partial volume correction: ');
-    jComboPvc = gui_component('combobox', jPanelAdv, 'tab', [], {{'Muller-Gartner', 'GTM (Rousset)', 'None'}});
+    jComboPvc = gui_component('combobox', jPanelAdv, 'tab', [], {{'GTM (Rousset)', 'Muller-Gartner', 'None'}});
     % PVC FWHM (0 = auto from scanner metadata)
     gui_component('label', jPanelAdv, 'br', 'PVC PSF FWHM (0 = auto): ');
     jTextFwhm = gui_component('text', jPanelAdv, 'tab', '0');
@@ -84,7 +84,7 @@ function [bstPanelNew, panelName] = CreatePanel()
     jTextRef.setMaximumSize(java.awt.Dimension(120, 20));
     % Project to surface
     jCheckProject = gui_component('checkbox', jPanelAdv, 'br', 'Project SUVR to cortical surface');
-    jCheckProject.setSelected(true);
+    jCheckProject.setSelected(false);
     jPanelMain.add('br hfill', jPanelAdv);
     % Advanced options are shown ONLY in Advanced mode
     jPanelAdv.setVisible(false);
