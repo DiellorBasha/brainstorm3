@@ -4,10 +4,17 @@ function varargout = process_source_flow_functional( varargin )
 %
 % USAGE:  OutputFiles = process_source_flow_functional('Run', sProcess, sInputs)
 %
-% The functionals are QUADRATIC in the source, so unlike the flow MAPS (process_source_flow)
-% they cannot be kernels: the source is materialized and the functional integrated over the
-% cortex (or per scout), giving a scalar / per-scout time series (a matrix file) that PSD /
-% Welch analyze. Geometry (areas, curl) comes from the Covariant operator node.
+% The functionals are BILINEAR in the source J. They are NOT linear maps (so, unlike the flow
+% MAPS, they are not a single imaging kernel), but because J = K*b is linear in the sensors they
+% ARE a fixed SENSOR-SPACE GRAM form: for a differential operator D and area weights W,
+%     f(t) = (D J)^T W (D J) = b(t)^T [ (D K)^T W (D K) ] b(t) = b(t)^T Q b(t),
+% with Q an [nChan x nChan] matrix computed ONCE (D K is the fused flow kernel; curl is linear so
+% curl(K b) = (curl K) b). The whole-recording series is then b^T Q b per frame -- a tiny 270x270
+% quadratic form -- WITHOUT ever reconstructing the 3*nVertices source. This is ~2 orders of
+% magnitude cheaper than materializing J every frame and cannot run out of memory (Q is nChan^2).
+% Matches the Gram form of the standalone +flow package. A full (ImageGridAmp, no-kernel) source
+% has no sensor representation, so it falls back to materialize-and-integrate. Geometry (areas,
+% curl) comes from the Covariant operator node.
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -70,20 +77,13 @@ function OutputFiles = Run(sProcess, sInputs)
     Func = sProcess.options.func.Value;
     AtlasList = sProcess.options.scouts.Value;
     for iInput = 1:numel(sInputs)
-        % Resolve the source WITHOUT materializing: a kernel over a continuous (raw) file is
-        % streamed block-by-block; anything else (short imported source) is materialized.
         Rk = in_bst_results(sInputs(iInput).FileName, 0, ...
             'ImagingKernel','GoodChannel','DataFile','nComponents','SurfaceFile','Comment','Time');
-        isRawKernel = ~isempty(Rk.ImagingKernel) && ~isempty(Rk.DataFile);
-        if isRawKernel
-            sRawData = in_bst_data(Rk.DataFile, 'F');
-            isRawKernel = isstruct(sRawData.F);                 % a continuous-file descriptor => raw link
-        end
-
-        if isRawKernel
+        hasKernel = ~isempty(Rk.ImagingKernel);
+        if hasKernel
             SurfaceFile = Rk.SurfaceFile;  Comment = Rk.Comment;  nComp = Rk.nComponents;
         else
-            R = in_bst_results(sInputs(iInput).FileName, 1);    % materialize (functional is quadratic)
+            R = in_bst_results(sInputs(iInput).FileName, 1);       % full field: materialize (fallback)
             SurfaceFile = R.SurfaceFile;  Comment = R.Comment;  nComp = R.nComponents;
         end
         if nComp ~= 3
@@ -92,19 +92,27 @@ function OutputFiles = Run(sProcess, sInputs)
         end
 
         Cov = tess_operators(SurfaceFile, 'Covariant');
-        w   = VertexAreas(Cov);                                 % [nVtot x 1] lumped vertex areas
+        w   = VertexAreas(Cov);                                   % [nVtot x 1] lumped vertex areas
         if isempty(AtlasList)
             scoutVerts = {};  Desc = {'whole-brain'};
         else
             [scoutVerts, scoutNames] = GetScoutVertices(AtlasList, SurfaceFile);  Desc = scoutNames(:);
         end
 
-        if isRawKernel
-            [Value, Time] = StreamFunctional(Func, Rk, sRawData.F, Cov, w, scoutVerts, sProcess);
+        if hasKernel
+            % ---- GRAM FORM: f(t) = b' Q b, no source reconstruction ----
+            Qs = BuildGrams(Func, Rk.ImagingKernel, Cov, w, scoutVerts);   % [nCh x nCh] per output row
+            sData = in_bst_data(Rk.DataFile, 'F');
+            if isstruct(sData.F)                                   % raw continuous -> stream sensors
+                ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', Rk.DataFile));
+                [Value, Time] = StreamGram(Qs, sData.F, ChannelMat, Rk.GoodChannel, sProcess);
+            else                                                   % imported sensors in memory
+                Value = ApplyGrams(Qs, sData.F(Rk.GoodChannel, :));  Time = Rk.Time;
+            end
         else
-            dens  = Density(Func, R.ImageGridAmp, Cov);         % [nVtot x nT] per-vertex density
-            Value = ReduceDensity(dens, w, scoutVerts);
-            Time  = R.Time;
+            % ---- fallback: full source, no kernel -> materialize + integrate ----
+            dens  = Density(Func, R.ImageGridAmp, Cov);
+            Value = ReduceDensity(dens, w, scoutVerts);            Time = R.Time;
         end
 
         % Save as a matrix time series
@@ -114,7 +122,7 @@ function OutputFiles = Run(sProcess, sInputs)
         FileMat.Description   = Desc;
         FileMat.Comment      = [Comment ' | flow:' Func];
         FileMat.DisplayUnits  = 'flow';
-        FileMat = bst_history('add', FileMat, 'flow', ['Flow functional: ' Func]);
+        FileMat = bst_history('add', FileMat, 'flow', ['Flow functional (Gram): ' Func]);
         sStudy = bst_get('Study', sInputs(iInput).iStudy);
         OutputFiles{iInput} = bst_process('GetNewFilename', bst_fileparts(sStudy.FileName), ['matrix_flow_' Func]);
         bst_save(OutputFiles{iInput}, FileMat, 'v6');
@@ -123,52 +131,67 @@ function OutputFiles = Run(sProcess, sInputs)
 end
 
 
-%% ===== STREAM A FUNCTIONAL OVER A RAW KERNEL-LINK (no full-source materialization) =====
-% Reads the raw in memory-bounded time blocks via the canonical reader
-% (panel_record('ReadRawBlock', ..., RemoveBaseline='all', UseSsp=1) -- VERIFIED bit-exact against
-% bst_process('LoadInputFile')), applies the kernel per block, integrates the functional over the
-% cortex (or per scout), and concatenates the scalar/per-scout time series.
-function [Value, Time] = StreamFunctional(Func, Rk, sFile, Cov, w, scoutVerts, sProcess)
-    K  = Rk.ImagingKernel;  GoodChannel = Rk.GoodChannel;
-    ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', Rk.DataFile));
+%% ===== BUILD SENSOR-SPACE GRAM(S)  Q = sym( (D K)' * (W .* (E K)) )  [nCh x nCh] =====
+% The functional f = (D J)' W (E J) with J = K b becomes f = b' Q b, Q = sym( AK' (W .* BK) ).
+% AK/BK are the operator-applied kernels (computed ONCE); per-scout Grams reuse them with a masked
+% weight, so curl(K) is never recomputed. energy: A=B=K; enstrophy: A=B=curl K; helicity: A=K, B=curlVec K.
+function Qs = BuildGrams(Func, K, Cov, w, scoutVerts)
+    switch Func
+        case 'energy'
+            AK = K;                                   BK = K;                    scalarWeight = false;
+        case 'enstrophy'
+            AK = bst_curl(K, [], 'Ambient', [], Cov); BK = AK;                   scalarWeight = true;   % [nV x nCh]
+        case 'helicity'
+            AK = K;                                   BK = CurlVector(K, Cov);   scalarWeight = false;  % [3nV x nCh]
+        otherwise
+            error('Unknown functional "%s".', Func);
+    end
+    if isempty(scoutVerts), weightSets = {w};
+    else
+        weightSets = cell(numel(scoutVerts), 1);
+        for k = 1:numel(scoutVerts)
+            ws = zeros(numel(w), 1);  ws(scoutVerts{k}) = w(scoutVerts{k});  weightSets{k} = ws;
+        end
+    end
+    Qs = cell(numel(weightSets), 1);
+    for k = 1:numel(weightSets)
+        if scalarWeight, Wt = weightSets{k};                            % weight on per-vertex scalar (nV)
+        else,            Wt = reshape(repmat(weightSets{k}(:)', 3, 1), [], 1);  end  % on 3-vector rows (3nV)
+        Qraw = AK' * (Wt .* BK);
+        Qs{k} = 0.5 * (Qraw + Qraw');                                   % symmetric quadratic form
+    end
+end
+
+
+%% ===== STREAM SENSORS AND APPLY THE GRAM(S)  f(t) = b(t)' Q b(t) =====
+% Reads the raw sensors (nChan rows only -- tiny) via the canonical reader
+% panel_record('ReadRawBlock', ..., 'all', 1), so blocks can be large; no source is materialized.
+function [Value, Time] = StreamGram(Qs, sFile, ChannelMat, GoodChannel, sProcess)
     sfreq = sFile.prop.sfreq;  tStart = sFile.prop.times(1);  tStop = sFile.prop.times(2);
-    % memory-bounded block length: cap the per-block source array (~1 GB) since it is 3*nV x nT
-    nSources   = size(K, 1);
-    maxSamples = max(round(2*sfreq), floor(1e9 / (nSources * 8)));   % >=2 s worth of columns budget
-    blockSec   = max(1, maxSamples / sfreq);
-    nRows = max(1, numel(scoutVerts));
-    Value = zeros(nRows, 0);  Time = zeros(1, 0);
+    blockSec = 30;                                          % b is nChan rows -> big blocks are cheap
+    Value = zeros(numel(Qs), 0);  Time = zeros(1, 0);
     tBlock = tStart;  iBlock = 0;  nBlocks = ceil((tStop - tStart) / blockSec);
     while tBlock < tStop - 0.5/sfreq
         tBlockEnd = min(tBlock + blockSec, tStop);
-        [F, T] = panel_record('ReadRawBlock', sFile, ChannelMat, 1, [tBlock tBlockEnd], 0, 1, 'all', 1);
-        Jblock = K * F(GoodChannel, :);                          % [3nV x nT_block]
-        dens   = Density(Func, Jblock, Cov);                     % [nV x nT_block]
-        Value  = [Value, ReduceDensity(dens, w, scoutVerts)];    %#ok<AGROW>
-        Time   = [Time,  T];                                     %#ok<AGROW>
-        tBlock = tBlockEnd + 1/sfreq;
-        iBlock = iBlock + 1;
-        if nargin >= 7 && ~isempty(sProcess)
-            bst_progress('text', sprintf('Flow functional: block %d/%d', iBlock, nBlocks));
+        [b, T] = panel_record('ReadRawBlock', sFile, ChannelMat, 1, [tBlock tBlockEnd], 0, 1, 'all', 1);
+        Value = [Value, ApplyGrams(Qs, b(GoodChannel, :))];  %#ok<AGROW>
+        Time  = [Time,  T];                                  %#ok<AGROW>
+        tBlock = tBlockEnd + 1/sfreq;  iBlock = iBlock + 1;
+        if nargin >= 5 && ~isempty(sProcess)
+            bst_progress('text', sprintf('Flow functional (Gram): block %d/%d', iBlock, nBlocks));
         end
     end
 end
 
-
-%% ===== INTEGRATE A PER-VERTEX DENSITY OVER CORTEX OR PER SCOUT =====
-function Value = ReduceDensity(dens, w, scoutVerts)
-    if isempty(scoutVerts)
-        Value = sum(w .* dens, 1);                               % [1 x nT] whole-brain
-    else
-        Value = zeros(numel(scoutVerts), size(dens, 2));
-        for k = 1:numel(scoutVerts)
-            v = scoutVerts{k};  Value(k,:) = sum(w(v) .* dens(v,:), 1);
-        end
+function Value = ApplyGrams(Qs, b)
+    Value = zeros(numel(Qs), size(b, 2));
+    for r = 1:numel(Qs)
+        Value(r,:) = sum(b .* (Qs{r} * b), 1);               % b' Q b per frame
     end
 end
 
 
-%% ===== FUNCTIONAL DENSITY (per-vertex; caller applies area weight) =====
+%% ===== FUNCTIONAL DENSITY (per-vertex; fallback path for full sources) =====
 function d = Density(Func, J, Cov)
     Jx = J(1:3:end,:);  Jy = J(2:3:end,:);  Jz = J(3:3:end,:);
     switch Func
@@ -182,6 +205,19 @@ function d = Density(Func, J, Cov)
             d = Jx.*cv(1:3:end,:) + Jy.*cv(2:3:end,:) + Jz.*cv(3:3:end,:);
         otherwise
             error('Unknown functional "%s".', Func);
+    end
+end
+
+
+%% ===== INTEGRATE A PER-VERTEX DENSITY OVER CORTEX OR PER SCOUT (fallback) =====
+function Value = ReduceDensity(dens, w, scoutVerts)
+    if isempty(scoutVerts)
+        Value = sum(w .* dens, 1);
+    else
+        Value = zeros(numel(scoutVerts), size(dens, 2));
+        for k = 1:numel(scoutVerts)
+            v = scoutVerts{k};  Value(k,:) = sum(w(v) .* dens(v,:), 1);
+        end
     end
 end
 
@@ -210,13 +246,6 @@ function w = VertexAreas(Cov)
         a = accumarray(C.Faces(:), repmat(C.FaceArea,3,1), [numel(vH) 1]) / 3;
         w(vH) = a;
     end
-end
-
-
-%% ===== DIRECT ENERGY SERIES (for validation) =====
-function E = EnergySeries(J, w)
-    Jx = J(1:3:end,:);  Jy = J(2:3:end,:);  Jz = J(3:3:end,:);
-    E = sum(w .* (Jx.^2 + Jy.^2 + Jz.^2), 1);
 end
 
 
