@@ -1,33 +1,37 @@
 function import_fibers_subject(BidsDir, OutputDir, SubjectLabel, Module, varargin)
 % IMPORT_FIBERS_SUBJECT  Import DWI tractography (.trk) into an existing per-subject
-%                        Brainstorm protocol using Brainstorm's own import_fibers.
+%                        Brainstorm protocol and build structural connectomes,
+%                        using established Brainstorm functions.
 %
-% Container worker for the nsp `brainstorm-fibers` pathway, selected by the
-% brainstorm-pipeline entrypoint via BST_PIPELINE=import_fibers_subject and called
-% with the standard positional contract:
-%
+% Container worker for the nsp `brainstorm-fibers` pathway (BST_PIPELINE selects
+% it). Standard positional contract:
 %   import_fibers_subject(BidsDir, OutputDir, SubjectLabel, Module, ...
 %                         'BstDir', D, 'BstDbDir', DB, 'NVertices', N)
+% BidsDir / Module are accepted for parity but unused.
 %
-% BidsDir / Module are accepted for contract parity but unused: this worker
-% augments an already-computed protocol rather than importing BIDS.
+% Brainstorm functions used (no reimplemented neuroimaging methods):
+%   import_protocol                    load the exported per-subject protocol
+%   bst_get('Subject')                 resolve the subject index
+%   import_fibers                      trk_read/trk_interp/cs_convert/ComputeColor/save
+%   in_tess_bst                        load cortex surface + atlases
+%   fibers_helper('AssignToScouts')    assign streamline endpoints to scouts
+%   export_protocol                    write the augmented protocol back out
+% Region node positions use Brainstorm's own scout-seed convention
+% (figure_connect: RowLocs = Vertices([Atlas.Scouts.Seed],:)). The only glue is
+% tallying Brainstorm's per-fiber Assignment into an NxN streamline-count matrix
+% (Brainstorm has no headless connectome writer).
 %
-% All neuroimaging operations use established Brainstorm functions:
-%   import_protocol   - load the exported per-subject protocol into the DB
-%   bst_get('Subject')- resolve the subject index
-%   import_fibers     - read/interpolate/transform the .trk into the subject
-%                       (trk_read -> trk_interp -> cs_convert -> ComputeColor -> save)
-%   export_protocol   - write the augmented protocol back out
+% Env inputs (set by the nsp template's apptainer --env):
+%   NSP_PROTOCOL_ZIP  exported protocol .zip to augment          (required)
+%   NSP_TRK           TrackVis .trk streamlines                  (required)
+%   NSP_CS            .trk coordinate system {scs|mni|world|mri} (default 'world')
+%   NSP_NPOINTS       points per streamline after resampling     (default 100)
+%   NSP_ATLASES       comma-list of cortical atlases for connectomes
+%                     (default 'Desikan-Killiany,Destrieux')
 %
-% Fiber-import parameters come from environment variables (set by the nsp
-% template's apptainer --env), keeping the entrypoint contract intact:
-%   NSP_PROTOCOL_ZIP : exported per-subject protocol .zip to augment   (required)
-%   NSP_TRK          : TrackVis .trk streamlines to import             (required)
-%   NSP_CS           : coordinate system of the .trk {scs|mni|world|mri} (default 'world')
-%   NSP_NPOINTS      : points per streamline after resampling          (default 100)
-%
-% OUTPUT written to OutputDir:
-%   <Subject>_brainstorm.zip   augmented protocol (existing anatomy + imported fibers)
+% OUTPUT (to OutputDir):
+%   <Subject>_brainstorm.zip            augmented protocol (anatomy + fibers)
+%   <Subject>_connectome_<atlas>.mat    NxN streamline-count matrix + labels
 %
 % Authors: Diellor Basha, 2026 (nsp brainstorm-fibers pathway)
 
@@ -51,8 +55,12 @@ protocolZip = getenv('NSP_PROTOCOL_ZIP');
 trkFile     = getenv('NSP_TRK');
 csEnv       = lower(getenv('NSP_CS'));
 nPointsEnv  = getenv('NSP_NPOINTS');
+atlasEnv    = getenv('NSP_ATLASES');
 if isempty(csEnv);      csEnv = 'world'; end
 if isempty(nPointsEnv); nPoints = 100; else; nPoints = str2double(nPointsEnv); end
+if isempty(atlasEnv);   atlasEnv = 'Desikan-Killiany,Destrieux'; end
+atlasList = strtrim(strsplit(atlasEnv, ','));
+atlasList = atlasList(~cellfun(@isempty, atlasList));
 
 assert(~isempty(protocolZip) && exist(protocolZip, 'file') == 2, ...
     'NSP_PROTOCOL_ZIP not found: %s', protocolZip);
@@ -83,7 +91,7 @@ diary(reportFile); diary on;
 fprintf('=== import_fibers_subject: %s ===\n', SubjectName);
 fprintf('protocol : %s\n', protocolZip);
 fprintf('trk      : %s\n', trkFile);
-fprintf('CS       : %s | nPoints: %d\n', csEnv, nPoints);
+fprintf('CS       : %s | nPoints: %d | atlases: %s\n', csEnv, nPoints, strjoin(atlasList, ', '));
 
 % ===== Init Brainstorm (headless server) =====
 % Pre-seed ~/.brainstorm/brainstorm.mat so `brainstorm server` starts without the
@@ -104,12 +112,11 @@ if ~brainstorm('status'); brainstorm server; end
 fprintf('Brainstorm server started. DB = %s\n', opts.BstDbDir);
 
 try
-    % ===== Load the existing exported protocol (Brainstorm) =====
+    % ===== Load existing protocol + resolve subject (Brainstorm) =====
     import_protocol(protocolZip);
     iProtocol = bst_get('iProtocol');
     fprintf('Loaded protocol #%d from %s\n', iProtocol, protocolZip);
 
-    % Resolve subject index (Brainstorm).
     [sSubject, iSubject] = bst_get('Subject', SubjectName);
     if isempty(sSubject)
         sProt = bst_get('ProtocolSubjects');
@@ -121,15 +128,58 @@ try
         end
         sSubject = bst_get('Subject', iSubject);
     end
-    assert(~isempty(sSubject), 'Subject %s not found in protocol', SubjectName);
+    assert(~isempty(sSubject) && ~isempty(sSubject.iCortex), ...
+        'Subject %s has no cortex in protocol', SubjectName);
     fprintf('Subject #%d: %s (%d surfaces)\n', iSubject, sSubject.Name, numel(sSubject.Surface));
 
     % ===== Import fibers (Brainstorm import_fibers) =====
-    % import_fibers handles trk_read, trk_interp to nPoints, mm->m, cs_convert to
-    % SCS using the subject MRI, ComputeColor, save, and db_add_surface.
     fprintf('Importing fibers via import_fibers (CS=%s, nPoints=%d)...\n', csEnv, nPoints);
     [iNewFibers, OutputFiles, nFibers] = import_fibers(iSubject, {trkFile}, 'TRK', nPoints, csEnv); %#ok<ASGLU>
-    fprintf('Imported %d fibers.\n', nFibers);
+    if iscell(OutputFiles); fibersFile = OutputFiles{1}; else; fibersFile = OutputFiles; end
+    fprintf('Imported %d fibers -> %s\n', nFibers, fibersFile);
+
+    % ===== Structural connectomes (Brainstorm AssignToScouts) =====
+    % Region nodes = scout seed vertices (Brainstorm's own connectivity node
+    % positions). AssignToScouts does the endpoint->region assignment. The NxN
+    % streamline count is a tally of Brainstorm's Assignment output.
+    FibMat = load(file_fullpath(fibersFile));
+    sCortex = in_tess_bst(sSubject.Surface(sSubject.iCortex).FileName);
+    for ia = 1:numel(atlasList)
+        atlasName = atlasList{ia};
+        iAtlas = find(strcmpi({sCortex.Atlas.Name}, atlasName), 1);
+        if isempty(iAtlas)
+            warning('Atlas "%s" not on cortex (available: %s)', atlasName, strjoin({sCortex.Atlas.Name}, ', '));
+            continue;
+        end
+        scouts  = sCortex.Atlas(iAtlas).Scouts;
+        nScouts = numel(scouts);
+        if nScouts < 2; continue; end
+        % Brainstorm scout seeds (ensure populated, as Brainstorm does: Seed=Vertices(1))
+        seeds = zeros(nScouts, 1);
+        for is = 1:nScouts
+            if isempty(scouts(is).Seed); seeds(is) = scouts(is).Vertices(1);
+            else;                        seeds(is) = scouts(is).Seed; end
+        end
+        centroids = sCortex.Vertices(seeds, :);      % == figure_connect RowLocs
+        labels    = {scouts.Label};
+        FibMat = fibers_helper('AssignToScouts', FibMat, sprintf('%s_%s', SubjectName, atlasName), centroids);
+        asg = FibMat.Scouts(end).Assignment;         % nFibers x 2 scout indices
+        C = zeros(nScouts, nScouts);
+        valid = all(asg > 0, 2);
+        for f = find(valid)'
+            a = asg(f,1); b = asg(f,2);
+            C(a,b) = C(a,b) + 1;
+            if a ~= b; C(b,a) = C(b,a) + 1; end
+        end
+        outMat = fullfile(opts.OutputDir, sprintf('%s_connectome_%s.mat', SubjectName, atlasName));
+        connectome = struct('Matrix', C, 'Labels', {labels}, 'Atlas', atlasName, ...
+                            'Subject', SubjectName, 'nFibers', nFibers, ...
+                            'Measure', 'streamline_count', 'CS', csEnv); %#ok<NASGU>
+        save(outMat, '-struct', 'connectome');
+        fprintf('Connectome[%s]: %dx%d, %d assigned streamlines -> %s\n', ...
+            atlasName, nScouts, nScouts, sum(valid), outMat);
+    end
+    bst_save(file_fullpath(fibersFile), FibMat, 'v7');
     db_save();
 
     % ===== Re-export the augmented protocol (Brainstorm) =====
