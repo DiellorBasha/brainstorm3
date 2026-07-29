@@ -21,12 +21,17 @@ function OutputFiles = tutorial_flow_omega()
     %         only resolvable this way -- a bare filename / GetInputStruct does NOT find it) ----
     sSrc = bst_process('CallProcess', 'process_select_files_results', [], [], ...
         'subjectname', 'All', 'tag', 'MN');
+    % keep ONLY the inverse KERNELs -- the 'MN' comment tag also matches derived flow maps
+    % (process_source_flow appends '| flow:div' to the 'MN...' comment), so filter by filename.
+    if ~isempty(sSrc)
+        sSrc = sSrc(contains({sSrc.FileName}, 'KERNEL'));
+    end
     if numel(sSrc) < 2
         error(['Need the two unconstrained MN kernels (run Task 0 first). ' ...
                'If they exist on disk but are not found, db_reload_studies the raw studies.']);
     end
     subjOf = {sSrc.SubjectName};
-    fprintf('tutorial_flow_omega: %d MN source links (%s)\n', numel(sSrc), strjoin(subjOf,', '));
+    fprintf('tutorial_flow_omega: %d MN kernels (%s)\n', numel(sSrc), strjoin(subjOf,', '));
 
     bands = {'delta','2, 4','mean'; 'theta','4, 8','mean'; 'alpha','8, 13','mean'; ...
              'beta','13, 30','mean'; 'gamma','30, 45','mean'};
@@ -45,6 +50,10 @@ function OutputFiles = tutorial_flow_omega()
             sPsdN = bst_process('CallProcess', 'process_tf_norm', sPsd, [], 'normalize', 'relative', 'overwrite', 0);
             sProj = bst_process('CallProcess', 'process_project_sources', sPsdN, [], 'headmodeltype', 'surface');
             sProj = bst_process('CallProcess', 'process_ssmooth_surfstat', sProj, [], 'fwhm', 3, 'overwrite', 1);
+            if isempty(sMap) || isempty(sPsd) || isempty(sProj)
+                fprintf('  [%s] %s -> SKIPPED (a step returned empty)\n', Q, subjOf{i});
+                continue;
+            end
             projFiles{end+1} = sProj.FileName; %#ok<AGROW>
             fprintf('  [%s] %s -> band PSD -> projected\n', Q, subjOf{i});
         end
