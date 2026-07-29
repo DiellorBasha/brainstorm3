@@ -70,36 +70,100 @@ function OutputFiles = Run(sProcess, sInputs)
     Func = sProcess.options.func.Value;
     AtlasList = sProcess.options.scouts.Value;
     for iInput = 1:numel(sInputs)
-        R = in_bst_results(sInputs(iInput).FileName, 1);       % materialize (functional is quadratic)
-        if R.nComponents ~= 3
-            bst_report('Error', sProcess, sInputs(iInput), 'Input is not an unconstrained (3-component) source model.');
-            OutputFiles = {};  return;
+        % Resolve the source WITHOUT materializing: a kernel over a continuous (raw) file is
+        % streamed block-by-block; anything else (short imported source) is materialized.
+        Rk = in_bst_results(sInputs(iInput).FileName, 0, ...
+            'ImagingKernel','GoodChannel','DataFile','nComponents','SurfaceFile','Comment','Time');
+        isRawKernel = ~isempty(Rk.ImagingKernel) && ~isempty(Rk.DataFile);
+        if isRawKernel
+            sRawData = in_bst_data(Rk.DataFile, 'F');
+            isRawKernel = isstruct(sRawData.F);                 % a continuous-file descriptor => raw link
         end
-        Cov  = tess_operators(R.SurfaceFile, 'Covariant');
-        w    = VertexAreas(Cov);                                % [nVtot x 1] lumped vertex areas
-        dens = Density(Func, R.ImageGridAmp, Cov);              % [nVtot x nT] per-vertex density
-        % Whole-brain sum, or per-scout sums
-        if isempty(AtlasList)
-            Value = sum(w .* dens, 1);  Desc = {'whole-brain'};
+
+        if isRawKernel
+            SurfaceFile = Rk.SurfaceFile;  Comment = Rk.Comment;  nComp = Rk.nComponents;
         else
-            [scoutVerts, scoutNames] = GetScoutVertices(AtlasList, R.SurfaceFile);
-            Value = zeros(numel(scoutVerts), size(dens,2));  Desc = scoutNames(:);
-            for k = 1:numel(scoutVerts)
-                v = scoutVerts{k};  Value(k,:) = sum(w(v) .* dens(v,:), 1);
-            end
+            R = in_bst_results(sInputs(iInput).FileName, 1);    % materialize (functional is quadratic)
+            SurfaceFile = R.SurfaceFile;  Comment = R.Comment;  nComp = R.nComponents;
         end
+        if nComp ~= 3
+            bst_report('Error', sProcess, sInputs(iInput), 'Input is not an unconstrained (3-component) source model.');
+            continue;
+        end
+
+        Cov = tess_operators(SurfaceFile, 'Covariant');
+        w   = VertexAreas(Cov);                                 % [nVtot x 1] lumped vertex areas
+        if isempty(AtlasList)
+            scoutVerts = {};  Desc = {'whole-brain'};
+        else
+            [scoutVerts, scoutNames] = GetScoutVertices(AtlasList, SurfaceFile);  Desc = scoutNames(:);
+        end
+
+        if isRawKernel
+            [Value, Time] = StreamFunctional(Func, Rk, sRawData.F, Cov, w, scoutVerts, sProcess);
+        else
+            dens  = Density(Func, R.ImageGridAmp, Cov);         % [nVtot x nT] per-vertex density
+            Value = ReduceDensity(dens, w, scoutVerts);
+            Time  = R.Time;
+        end
+
         % Save as a matrix time series
         FileMat = db_template('matrixmat');
         FileMat.Value        = Value;
-        FileMat.Time         = R.Time;
+        FileMat.Time         = Time;
         FileMat.Description   = Desc;
-        FileMat.Comment      = [R.Comment ' | flow:' Func];
+        FileMat.Comment      = [Comment ' | flow:' Func];
         FileMat.DisplayUnits  = 'flow';
         FileMat = bst_history('add', FileMat, 'flow', ['Flow functional: ' Func]);
         sStudy = bst_get('Study', sInputs(iInput).iStudy);
         OutputFiles{iInput} = bst_process('GetNewFilename', bst_fileparts(sStudy.FileName), ['matrix_flow_' Func]);
         bst_save(OutputFiles{iInput}, FileMat, 'v6');
         db_add_data(sInputs(iInput).iStudy, OutputFiles{iInput}, FileMat);
+    end
+end
+
+
+%% ===== STREAM A FUNCTIONAL OVER A RAW KERNEL-LINK (no full-source materialization) =====
+% Reads the raw in memory-bounded time blocks via the canonical reader
+% (panel_record('ReadRawBlock', ..., RemoveBaseline='all', UseSsp=1) -- VERIFIED bit-exact against
+% bst_process('LoadInputFile')), applies the kernel per block, integrates the functional over the
+% cortex (or per scout), and concatenates the scalar/per-scout time series.
+function [Value, Time] = StreamFunctional(Func, Rk, sFile, Cov, w, scoutVerts, sProcess)
+    K  = Rk.ImagingKernel;  GoodChannel = Rk.GoodChannel;
+    ChannelMat = in_bst_channel(bst_get('ChannelFileForStudy', Rk.DataFile));
+    sfreq = sFile.prop.sfreq;  tStart = sFile.prop.times(1);  tStop = sFile.prop.times(2);
+    % memory-bounded block length: cap the per-block source array (~1 GB) since it is 3*nV x nT
+    nSources   = size(K, 1);
+    maxSamples = max(round(2*sfreq), floor(1e9 / (nSources * 8)));   % >=2 s worth of columns budget
+    blockSec   = max(1, maxSamples / sfreq);
+    nRows = max(1, numel(scoutVerts));
+    Value = zeros(nRows, 0);  Time = zeros(1, 0);
+    tBlock = tStart;  iBlock = 0;  nBlocks = ceil((tStop - tStart) / blockSec);
+    while tBlock < tStop - 0.5/sfreq
+        tBlockEnd = min(tBlock + blockSec, tStop);
+        [F, T] = panel_record('ReadRawBlock', sFile, ChannelMat, 1, [tBlock tBlockEnd], 0, 1, 'all', 1);
+        Jblock = K * F(GoodChannel, :);                          % [3nV x nT_block]
+        dens   = Density(Func, Jblock, Cov);                     % [nV x nT_block]
+        Value  = [Value, ReduceDensity(dens, w, scoutVerts)];    %#ok<AGROW>
+        Time   = [Time,  T];                                     %#ok<AGROW>
+        tBlock = tBlockEnd + 1/sfreq;
+        iBlock = iBlock + 1;
+        if nargin >= 7 && ~isempty(sProcess)
+            bst_progress('text', sprintf('Flow functional: block %d/%d', iBlock, nBlocks));
+        end
+    end
+end
+
+
+%% ===== INTEGRATE A PER-VERTEX DENSITY OVER CORTEX OR PER SCOUT =====
+function Value = ReduceDensity(dens, w, scoutVerts)
+    if isempty(scoutVerts)
+        Value = sum(w .* dens, 1);                               % [1 x nT] whole-brain
+    else
+        Value = zeros(numel(scoutVerts), size(dens, 2));
+        for k = 1:numel(scoutVerts)
+            v = scoutVerts{k};  Value(k,:) = sum(w(v) .* dens(v,:), 1);
+        end
     end
 end
 
