@@ -1,0 +1,29 @@
+WARNING: package sun.awt.X11 not in java.desktop
+WARNING: package sun.awt.X11 not in java.desktop
+ 
+BST> Starting Brainstorm:
+BST> =================================
+BST> Version: 04-Aug-2026
+BST> Warning: Running on Apple silicon, some functions and plugins are not supported yet:
+              Use Matlab < 2023b or Matlab for Intel processor for full support
+BST> Deleting old process reports...
+BST> Loading configuration file...
+BST> Checking internet connectivity... ok
+BST> Reading process folder...
+BST> Database folder: /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db
+BST> Loading current protocol...
+BST> =================================
+ 
+WARNING: The temporary directory contains 3 file(s):
+BST> /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/tmp/
+BST>  |- importmri_260807_160005
+BST>  |- importmri_260807_160242
+BST>  |- importmri_260807_161304
+BST> If these files are not in use from another process, they will not be deleted automatically.
+BST> To delete all the temporary files, add the following command to your script: 
+BST> gui_brainstorm('EmptyTempFolder');
+
+hemi 1 stiffness parity rel err: 7.82091e-15
+hemi 2 stiffness parity rel err: 4.38253e-16
+test_tess_laplacian PASSED
+BST> Brainstorm stopped.
