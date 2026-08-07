@@ -140,8 +140,10 @@ Re-derive as clean commits from the `development` branch (already pure MATLAB):
 
 1. `tess_downsize` `'icosphere'` method — FreeSurfer/MNE-style per-hemisphere
    uniform resampling via the registration sphere.
-2. `tess_manifold` consolidated manifold check/repair — guarantees each
-   hemisphere is a closed 2-manifold (the property the operators depend on).
+2. `tess_repair` — the consolidated pure-MATLAB 2-manifold validation/repair
+   (successor of tess_check_manifold/tess_fix_manifold; guarantees each
+   hemisphere is a closed 2-manifold, the property the operators depend on).
+   The current `tess_manifold` (nxr manifold_-node builder) is NOT extracted.
 3. Import wiring — FreeSurfer import method option + BIDS import defaults.
 
 **Gate 0:** import an OMEGA/tutorial subject; confirm ico5 cortex and
