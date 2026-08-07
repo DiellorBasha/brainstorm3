@@ -1,0 +1,131 @@
+WARNING: package sun.awt.X11 not in java.desktop
+WARNING: package sun.awt.X11 not in java.desktop
+ 
+BST> Starting Brainstorm:
+BST> =================================
+BST> Version: 04-Aug-2026
+BST> Warning: Running on Apple silicon, some functions and plugins are not supported yet:
+              Use Matlab < 2023b or Matlab for Intel processor for full support
+BST> Deleting old process reports...
+BST> Loading configuration file...
+BST> Checking internet connectivity... ok
+BST> Reading process folder...
+BST> Database folder: /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db
+BST> Loading current protocol...
+BST> =================================
+ 
+WARNING: The temporary directory contains 2 file(s):
+BST> /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/tmp/
+BST>  |- importmri_260807_160005
+BST>  |- importmri_260807_160242
+BST> If these files are not in use from another process, they will not be deleted automatically.
+BST> To delete all the temporary files, add the following command to your script: 
+BST> gui_brainstorm('EmptyTempFolder');
+
+BST> Import anatomy: Anatomical fiducials were not defined, using standard MNI positions for NAS/LPA/RPA.
+
+BST> SPM12 template found: /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/defaults/spm/TPM.nii
+SPM> Iteration #1: Log-likelihood 0.791901
+SPM> Iteration #2: Log-likelihood 0.983198
+SPM> Iteration #3: Log-likelihood 1.066275
+SPM> Iteration #4: Log-likelihood 1.087900
+SPM> Iteration #5: Log-likelihood 1.089093
+SPM> Iteration #6: Log-likelihood 1.088788
+SPM> Iteration #7: Log-likelihood 1.089236
+SPM> Iteration #8: Log-likelihood 1.088982
+SPM> Iteration #9: Log-likelihood 1.089267
+SPM> Iteration #10: Log-likelihood 1.089121
+SPM> Iteration #11: Log-likelihood 1.089253
+SPM> Iteration #12: Log-likelihood 1.089246
+SPM> Iteration #13: Log-likelihood 1.089257
+SPM> Iteration #14: Log-likelihood 1.089262
+SPM> Iteration #1: Log-likelihood 1.098182
+SPM> Iteration #2: Log-likelihood 1.097960
+SPM> Iteration #3: Log-likelihood 1.097566
+SPM> Iteration #4: Log-likelihood 1.098826
+SPM> Iteration #5: Log-likelihood 1.098908
+SPM> Iteration #6: Log-likelihood 1.098909
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.pial is a triangle file (nvert = 153029 ntri = 306054)
+	created by jmoreau on Sun Apr 24 06:34:58 2016
+	Read a surface with 153029 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.pial
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Saving scouts in surface: FsSubj/tess_lh_pial.mat
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.sphere.reg is a triangle file (nvert = 153029 ntri = 306054)
+	created by jmoreau on Sun Apr 24 06:22:47 2016
+	Read a surface with 153029 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.sphere.reg
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.pial is a triangle file (nvert = 153616 ntri = 307228)
+	created by jmoreau on Sun Apr 24 08:34:46 2016
+	Read a surface with 153616 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.pial
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Saving scouts in surface: FsSubj/tess_rh_pial.mat
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.sphere.reg is a triangle file (nvert = 153616 ntri = 307228)
+	created by jmoreau on Sun Apr 24 08:22:41 2016
+	Read a surface with 153616 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.sphere.reg
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.white is a triangle file (nvert = 153029 ntri = 306054)
+	created by jmoreau on Sun Apr 24 05:13:04 2016
+	Read a surface with 153029 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.white
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Saving scouts in surface: FsSubj/tess_lh_white.mat
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.sphere.reg is a triangle file (nvert = 153029 ntri = 306054)
+	created by jmoreau on Sun Apr 24 06:22:47 2016
+	Read a surface with 153029 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/lh.sphere.reg
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.white is a triangle file (nvert = 153616 ntri = 307228)
+	created by jmoreau on Sun Apr 24 07:09:25 2016
+	Read a surface with 153616 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.white
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Saving scouts in surface: FsSubj/tess_rh_white.mat
+	/Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.sphere.reg is a triangle file (nvert = 153616 ntri = 307228)
+	created by jmoreau on Sun Apr 24 08:22:41 2016
+	Read a surface with 153616 vertices from /Volumes/SpikeData-2/workspace/library/datasets/omega-tutorial/derivatives/freesurfer/sub-0002/ses-mri/anat/surf/rh.sphere.reg
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Icosphere resampling: requested 10242, snapped to ico grid of 10242 vertices.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+BST> Warning: In server mode, it is not possible to use the patch() function to estimate the surface normals. Results are slightly different than in other graphical modes.
+test_import_fs_ico PASSED
+BST> Brainstorm stopped.
