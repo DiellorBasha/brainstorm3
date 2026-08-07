@@ -10,15 +10,15 @@ Harness: `dev/verify/phase1/` (oracle + 3 test `.m` files) +
 Phase 1 commits, oldest first:
 
 ```
-0acb987d Anatomy: Add tess_massmatrix, Galerkin mass matrix for triangular surfaces
-53bc911d Anatomy: Add tess_laplacian, cotangent stiffness matrix for triangular surfaces
-7d85f06f Anatomy: Add tess_operators, per-hemisphere Laplace-Beltrami operator pencil
+d190fbfa Anatomy: Add tess_massmatrix, Galerkin mass matrix for triangular surfaces
+6fed101c Anatomy: Add tess_laplacian, cotangent stiffness matrix for triangular surfaces
+b08b2a42 Anatomy: Add tess_operators, per-hemisphere Laplace-Beltrami operator pencil
 ```
 
 (Below them, 4 pre-existing commits from the icosphere/BIDS-import line:
 `bc480ca6`, `64f6d56d`, `acd1f5cd`, `523cc323`.)
 
-Worktree is at `7d85f06f`, `git status` clean (verified before this rerun).
+Worktree is at `b08b2a42`, `git status` clean (verified before this rerun).
 
 ## Parity surface (subject/protocol)
 
@@ -111,3 +111,16 @@ All four assertions passed silently inside the test (no separate log lines — t
 ## Harness commit
 
 Committed on the lab branch (main checkout, current branch — see report footer for SHA): `dev/verify/phase1/*` (oracle `.mat` included, 2.4 MB, well under the ~50 MB gitignore threshold) + the `dev/verify/phase0/run_matlab.sh` addpath edit. No other files staged.
+
+## Fix wave (post final review)
+
+The whole-phase review requested guard-rail hardening; history was rewritten in
+place (Phase 0 SHAs unchanged). Final commits: d190fbfa (tess_massmatrix),
+6fed101c (tess_laplacian), b08b2a42 (tess_operators). Added: NaN/Inf +
+degenerate-face input guards in both primitives, vH sorted by construction,
+recipe .Tau/.Name guards, canonical headers, help-text corrections. All 3
+parity tests re-passed on the final HEAD plus a new guard test
+(test_input_guards.m): invalidInput / degenerateFace / unexpectedParameter /
+unknownVariant all verified. Parked (ruling): unreachable isConnected guard
+kept as defense-in-depth; CheckManifold vertex-pinch gap deferred (cannot
+corrupt per-face assembly; icosphere/FS meshes unaffected).
