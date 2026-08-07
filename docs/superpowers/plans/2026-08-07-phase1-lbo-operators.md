@@ -30,9 +30,11 @@ that decision.
 - Oracle runs (nxr) execute in the MAIN checkout's MATLAB (dev code, real
   user config) — the user's Brainstorm GUI must be closed during those runs.
   Clean-branch runs stay fully isolated (phase0 runner).
-- The parity surface is the user's protocol cortex:
-  `/Volumes/SpikeData-2/workspace/library/datasets/brainstorm_db/omega-tutorial-cortical-flow/anat/sub-0002/tess_cortex_pial_low.mat`
-  — loaded DIRECTLY from file (never through the DB), read-only.
+- The parity surface is the Gate-0 imported cortex in the ISOLATED protocol:
+  `/Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db/omega-tutorial-cortical-flow/anat/sub-0002/tess_cortex_pial_low.mat`
+  — loaded DIRECTLY from file (never through the DB), read-only. (The
+  SpikeData-2 user-protocol copy is a separate deliverable, not the oracle
+  source.)
 - Numerical convention authority: the ORACLE. Task 1 documents nxr's exact
   sign/scale conventions; Tasks 2–3 match them exactly (units are meters —
   Brainstorm vertex coordinates — so mass entries are m²).
@@ -68,7 +70,7 @@ Create `dev/verify/phase1/make_oracle_lbo.m`:
 
 ```matlab
 % MAKE_ORACLE_LBO: nxr-built LBO pencil for the parity surface (dev side, run ONCE).
-SurfaceFile = '/Volumes/SpikeData-2/workspace/library/datasets/brainstorm_db/omega-tutorial-cortical-flow/anat/sub-0002/tess_cortex_pial_low.mat';
+SurfaceFile = '/Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db/omega-tutorial-cortical-flow/anat/sub-0002/tess_cortex_pial_low.mat';
 OutFile = fullfile(fileparts(mfilename('fullpath')), 'oracle_lbo_sub0002.mat');
 [isOk, errMsg] = bst_plugin('Install', 'nxr-compute');
 assert(isOk, 'nxr-compute unavailable: %s', errMsg);
@@ -383,7 +385,7 @@ Create `dev/verify/phase1/test_tess_operators.m`:
 ```matlab
 % TEST_TESS_OPERATORS: pencil assembly on the real cortex + guards.
 S = load(fullfile(fileparts(mfilename('fullpath')), 'oracle_lbo_sub0002.mat'));
-SurfaceFile = S.meta.SurfaceFile;
+SurfaceFile = '/Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db/omega-tutorial-cortical-flow/anat/sub-0002/tess_cortex_pial_low.mat';
 % --- happy path: parity of the assembled pencil, both hemispheres ---
 [Op, Ms, vH] = tess_operators(SurfaceFile, 'Laplace-Beltrami');
 for hh = 1:2
