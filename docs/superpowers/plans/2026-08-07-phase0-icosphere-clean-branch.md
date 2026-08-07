@@ -372,10 +372,13 @@ already targets `/Users/diellorbasha/workspace/library/datasets/omega-tutorial`
 sub-0002 with DEFAULT options and asserts an ico5 (20484) manifold cortex —
 keep those assertions verbatim; (c) if it calls dev-only helpers, inline the
 `bst_get('Subject')`/`iCortex` idiom from Task 4's test instead; (d) set
-`Def.ProtocolName = 'CorticalFlowPhase0'` and REMOVE the end-of-run
+`Def.ProtocolName = 'omega-tutorial-cortical-flow'` and REMOVE the end-of-run
 `DeleteProtocol` (keep the delete-if-exists at the START for idempotent
 reruns) — this protocol is deliberately KEPT for the user's Gate 0 GUI
-inspection.
+inspection. It lives ONLY in the isolated clean DB; a same-named protocol in
+the user's main database is never touched. Anatomy-only verification: no
+tutorial_omega preprocessing in Phase 0 (deferred to the phases that need
+recordings/kernels).
 
 - [ ] **Step 2: Run it — must FAIL**
 
@@ -464,7 +467,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 4: Present Gate 0 to the user**
 
-Show: the report, `git -C ~/workspace/research/code/brainstorm3-clean log --oneline master..` (expect 3 clean commits: tess_downsize icosphere, FS import wiring, BIDS import wiring), and how to inspect the kept `CorticalFlowPhase0` protocol in the GUI — launch Brainstorm from the worktree so it uses the isolated DB:
+Show: the report, `git -C ~/workspace/research/code/brainstorm3-clean log --oneline master..` (expect 3 clean commits: tess_downsize icosphere, FS import wiring, BIDS import wiring), and how to inspect the kept `omega-tutorial-cortical-flow` protocol in the GUI — launch Brainstorm from the worktree so it uses the isolated DB:
 
 ```bash
 /Applications/MATLAB_R2023b.app/bin/matlab -desktop -r "cd('$HOME/workspace/research/code/brainstorm3-clean'); brainstorm"
