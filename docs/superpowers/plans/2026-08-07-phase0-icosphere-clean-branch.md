@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create clean branch `feature/cortical-flow-core` off upstream master and re-derive the icosphere discretization prerequisite (tess_repair, tess_downsize 'icosphere', FreeSurfer/BIDS import wiring) as self-contained commits, verified by Gate 0.
+**Goal:** Create clean branch `feature/cortical-flow-core` off upstream master and re-derive the icosphere discretization prerequisite (tess_downsize 'icosphere', FreeSurfer/BIDS import wiring — 3 commits; tess_repair stays harness-side only) as self-contained commits, verified by Gate 0.
 
 **Architecture:** Extraction, not new development — apply the hunks of specific
 `development`-branch commits onto fresh upstream files in a dedicated git
@@ -82,9 +82,12 @@ WT="$HOME/workspace/research/code/brainstorm3-clean"
 SCRIPT="$1"
 DBDIR="${BST_DB_CLEAN:-$HOME/workspace/research/code/brainstorm3/dev/verify/phase0/bst_db_clean}"
 mkdir -p "$DBDIR"
+HARNESS="$HOME/workspace/research/code/brainstorm3/dev/verify/phase0"
 MATLAB="/Applications/MATLAB_R2023b.app/bin/matlab"
 [ -x "$MATLAB" ] || MATLAB="$(command -v matlab)"
-"$MATLAB" -batch "cd('$WT'); brainstorm server; bst_set('BrainstormDbDir','$DBDIR'); db_import('$DBDIR'); run('$SCRIPT'); brainstorm stop; exit(0);"
+# addpath(HARNESS): harness-local utilities (tess_repair oracle) resolve without
+# shadowing anything in the worktree (the clean branch has no tess_repair).
+"$MATLAB" -batch "cd('$WT'); brainstorm server; bst_set('BrainstormDbDir','$DBDIR'); db_import('$DBDIR'); addpath('$HARNESS'); run('$SCRIPT'); brainstorm stop; exit(0);"
 ```
 
 `chmod +x dev/verify/phase0/run_matlab.sh`. Note: if `db_import` errors on an
@@ -102,14 +105,14 @@ Expected: prints `BST OK, ver: ...` with no dialog/hang. (No commit this task; t
 
 ---
 
-### Task 2: `tess_repair` on the clean branch
+### Task 2: Harness-side manifold oracle (`tess_repair`, NOT on the clean branch)
 
 **Files:**
-- Create (worktree): `toolbox/anatomy/tess_repair.m`
+- Create (main checkout): `dev/verify/phase0/tess_repair.m` (copy of dev's function — harness utility only)
 - Create (main checkout): `dev/verify/phase0/test_tess_repair_unit.m`
 
 **Interfaces:**
-- Produces: `[Vertices, Faces, isManifold, report] = tess_repair(Vertices, Faces, 'Repair',0/1, 'RequireClosed',0/1)` — used by Tasks 3–6 to assert manifoldness.
+- Produces: `[Vertices, Faces, isManifold, report] = tess_repair(Vertices, Faces, 'Repair',0/1)` on the harness path (via run_matlab.sh addpath) — used by Tasks 3–6 tests to assert manifoldness. The clean branch itself never ships this file: icosphere output is manifold by construction, and Phase 1's tess_operators will carry its own lightweight input guard.
 
 - [ ] **Step 1: Write the unit test (main checkout)**
 
@@ -135,40 +138,34 @@ assert(isM4 && isequal(Fn, F) && isequal(Vn, V), 'repair of clean mesh must be a
 disp('test_tess_repair_unit PASSED');
 ```
 
-- [ ] **Step 2: Run it — must FAIL (function absent in worktree)**
+- [ ] **Step 2: Copy the oracle into the harness folder (main checkout — NOT the worktree)**
+
+```bash
+cd ~/workspace/research/code/brainstorm3
+git show development:toolbox/anatomy/tess_repair.m > dev/verify/phase0/tess_repair.m
+```
+
+It is a pure function (no nxr, no DB); no edits expected.
+
+- [ ] **Step 3: Run the test — must PASS (validates the oracle itself)**
 
 ```bash
 dev/verify/phase0/run_matlab.sh ~/workspace/research/code/brainstorm3/dev/verify/phase0/test_tess_repair_unit.m
 ```
 
-Expected: error `Unrecognized function ... 'tess_repair'`.
+Expected: `test_tess_repair_unit PASSED` (tess_repair resolved from the
+harness addpath, not the worktree). If assertion 3 fails on face count,
+inspect `rep3` — the repair criterion is "remove the face whose normal
+deviates most from neighbors"; the duplicated face qualifies. Debug before
+proceeding (systematic-debugging), do not relax the assertion.
 
-- [ ] **Step 3: Extract the file from development**
-
-```bash
-cd ~/workspace/research/code/brainstorm3
-git show development:toolbox/anatomy/tess_repair.m > ~/workspace/research/code/brainstorm3-clean/toolbox/anatomy/tess_repair.m
-```
-
-Then open the worktree copy and confirm: header comment mentions no nxr, no
-DB, no tess_manifold; authorship line reads Diellor Basha. It is a pure
-function — no edits expected.
-
-- [ ] **Step 4: Run the test — must PASS**
-
-Same command as Step 2. Expected: `test_tess_repair_unit PASSED`. If
-assertion 3 fails on face count, inspect `rep3` — the repair criterion is
-"remove the face whose normal deviates most from neighbors"; the duplicated
-face qualifies. Debug before proceeding (systematic-debugging), do not relax
-the assertion.
-
-- [ ] **Step 5: Commit (worktree, clean style, no trailer)**
+- [ ] **Step 4: Confirm the clean branch is untouched**
 
 ```bash
-cd ~/workspace/research/code/brainstorm3-clean
-git add toolbox/anatomy/tess_repair.m
-git commit -m "Anatomy: Add tess_repair, 2-manifold surface validation and repair"
+git -C ~/workspace/research/code/brainstorm3-clean status --short
 ```
+
+Expected: empty (no worktree changes, no commit in this task).
 
 ---
 
@@ -374,7 +371,11 @@ Open it and adjust ONLY: (a) function name to `test_import_bids_ico`; (b) it
 already targets `/Users/diellorbasha/workspace/library/datasets/omega-tutorial`
 sub-0002 with DEFAULT options and asserts an ico5 (20484) manifold cortex —
 keep those assertions verbatim; (c) if it calls dev-only helpers, inline the
-`bst_get('Subject')`/`iCortex` idiom from Task 4's test instead.
+`bst_get('Subject')`/`iCortex` idiom from Task 4's test instead; (d) set
+`Def.ProtocolName = 'CorticalFlowPhase0'` and REMOVE the end-of-run
+`DeleteProtocol` (keep the delete-if-exists at the START for idempotent
+reruns) — this protocol is deliberately KEPT for the user's Gate 0 GUI
+inspection.
 
 - [ ] **Step 2: Run it — must FAIL**
 
@@ -463,4 +464,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 4: Present Gate 0 to the user**
 
-Show: the report, `git -C ~/workspace/research/code/brainstorm3-clean log --oneline master..` (expect 4 clean commits), and ask for the Gate 0 verdict. Phase 1 planning starts only after approval. Do NOT push the clean branch anywhere until the user says so.
+Show: the report, `git -C ~/workspace/research/code/brainstorm3-clean log --oneline master..` (expect 3 clean commits: tess_downsize icosphere, FS import wiring, BIDS import wiring), and how to inspect the kept `CorticalFlowPhase0` protocol in the GUI — launch Brainstorm from the worktree so it uses the isolated DB:
+
+```bash
+/Applications/MATLAB_R2023b.app/bin/matlab -desktop -r "cd('$HOME/workspace/research/code/brainstorm3-clean'); brainstorm"
+# then in Brainstorm: File > Set database folder > dev/verify/phase0/bst_db_clean (if not already active)
+```
+
+Ask for the Gate 0 verdict. Phase 1 planning starts only after approval. Do NOT push the clean branch anywhere until the user says so.
