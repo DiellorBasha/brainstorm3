@@ -10,7 +10,9 @@ SubjTag      = 'sub-0002';
 assert(exist(BidsDir, 'dir') == 7, 'BIDS dir not found: %s', BidsDir);
 assert(exist(fullfile(ProtocolDir, 'data'), 'dir') == 7, 'Protocol data dir not found: %s', ProtocolDir);
 
-% --- Register ONLY this protocol in the isolated instance ---
+% --- Register ONLY this protocol; NEVER reuse a same-named entry that points
+%     elsewhere (the bug that shadowed the user's protocol with the isolated
+%     Gate-0 copy). Run this script in a FRESH user dir (BST_USERDIR_CLEAN). ---
 iProtocol = bst_get('Protocol', ProtocolName);
 if isempty(iProtocol)
     sProtocol = db_template('ProtocolInfo');
@@ -21,6 +23,11 @@ if isempty(iProtocol)
     assert(iProtocol > 0, 'Failed to load protocol from %s', ProtocolDir);
 end
 gui_brainstorm('SetCurrentProtocol', iProtocol);
+% HARD GUARD: the registered protocol must point at the intended folders
+ProtocolInfo = bst_get('ProtocolInfo');
+assert(strcmp(ProtocolInfo.SUBJECTS, fullfile(ProtocolDir, 'anat')), ...
+    'Registered protocol points at %s, expected %s — refusing to import.', ...
+    ProtocolInfo.SUBJECTS, fullfile(ProtocolDir, 'anat'));
 db_reload_database(iProtocol);
 bst_report('Start');
 
