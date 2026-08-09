@@ -32,4 +32,4 @@ MATLAB="/Applications/MATLAB_R2023b.app/bin/matlab"
 [ -x "$MATLAB" ] || MATLAB="$(command -v matlab)"
 # addpath(HARNESS): harness-local utilities (tess_repair oracle) resolve without
 # shadowing anything in the worktree (the clean branch has no tess_repair).
-"$MATLAB" -batch "java.lang.System.setProperty('user.home','$USERDIR'); cd('$WT'); brainstorm('server','local'); addpath('$HARNESS'); addpath('$HARNESS/../phase1'); run('$SCRIPT'); brainstorm stop; exit(0);"
+"$MATLAB" -batch "java.lang.System.setProperty('user.home','$USERDIR'); cd('$WT'); brainstorm('server','local'); addpath('$HARNESS'); addpath('$HARNESS/../phase1'); addpath('$HARNESS/../phase2'); run('$SCRIPT'); brainstorm stop; exit(0);"
