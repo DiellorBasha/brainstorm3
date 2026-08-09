@@ -1,0 +1,38 @@
+WARNING: package sun.awt.X11 not in java.desktop
+WARNING: package sun.awt.X11 not in java.desktop
+ 
+BST> Starting Brainstorm:
+BST> =================================
+BST> Version: 04-Aug-2026
+BST> Warning: Running on Apple silicon, some functions and plugins are not supported yet:
+              Use Matlab < 2023b or Matlab for Intel processor for full support
+BST> Deleting old process reports...
+BST> Loading configuration file...
+BST> Checking internet connectivity... ok
+BST> Reading process folder...
+BST> Database folder: /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/local_db
+BST> Loading current protocol...
+BST> =================================
+ 
+WARNING: The temporary directory contains 3 file(s):
+BST> /Users/diellorbasha/workspace/research/code/brainstorm3/dev/verify/phase0/bst_userdir_clean/.brainstorm/tmp/
+BST>  |- importmri_260807_160005
+BST>  |- importmri_260807_160242
+BST>  |- importmri_260807_161304
+BST> If these files are not in use from another process, they will not be deleted automatically.
+BST> To delete all the temporary files, add the following command to your script: 
+BST> gui_brainstorm('EmptyTempFolder');
+
+solve time: 0.2 s
+hemi 1: residual(vs nxr pencil)=7.69e-10, orth=6.73e-14, lambda1=-1.04e-12, lambda400=48703.2
+hemi 2: residual(vs nxr pencil)=1.48e-10, orth=6.81e-14, lambda1=-9.24e-13, lambda400=48177.2
+file: 65.6 MB -> 65.6 MB
+{Error using assert
+Eigen field looks too small for 2x10242x400 doubles
+
+Error in test_tess_eigen_cortex (line 29)
+assert(info1.bytes > info0.bytes + 40e6, 'Eigen field looks too small for 2x10242x400 doubles');
+
+Error in run (line 99)
+evalin('caller', strcat(script, ';'));
+} 
