@@ -48,5 +48,18 @@ for hh = 1:2
     assert(max(sqrt(sum(R.^2,1))./sqrt(sum(N.^2,1))) < 1e-10, 'pencil residual too large');
     assert(norm(E3.Phi{hh}'*Ms{hh}*E3.Phi{hh} - eye(50), 'fro') < 1e-10, 'not B-orthonormal');
 end
+% --- guard: reuse must NOT serve a stale cache once the Structures atlas is gone ---
+S5 = load(TestFile);
+iStruct5 = find(strcmpi({S5.Atlas.Name}, 'Structures'));
+S5.Atlas(iStruct5) = [];   % strip the Structures atlas (Eigen cache stays in the file)
+bst_save(TestFile, S5, 'v7');
+errId = '';
+try
+    tess_eigen(TestFile, 'Laplace-Beltrami', 'nModes', 30);
+catch ME
+    errId = ME.identifier;
+end
+assert(strcmp(errId, 'tess_operators:noHemisphereLabels'), ...
+    'expected tess_operators:noHemisphereLabels when Structures atlas is missing, got "%s"', errId);
 delete(TestFile);
 disp('test_tess_eigen_sphere PASSED');
