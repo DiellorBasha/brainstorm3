@@ -1,7 +1,7 @@
 # Gate 2 = Milestone 1 report — Laplace-Beltrami eigenmodes (tess_eigen)
 
 Clean-branch checkout: `~/workspace/research/code/brainstorm3-clean`
-HEAD: `c2ef53f5` — "Anatomy: Add tess_eigen, embedded per-hemisphere Laplace-Beltrami
+HEAD: `5840d76c` — "Anatomy: Add tess_eigen, embedded per-hemisphere Laplace-Beltrami
 eigenbases" (8 commits off `master`; full list at the bottom).
 
 ## 1. Pinned solver parameters (Open Question 1 — RESOLVED)
@@ -131,7 +131,7 @@ lab clean-branch checkout (`~/workspace/research/code/brainstorm3-clean`,
 5. `d190fbfa` — Anatomy: Add tess_massmatrix, Galerkin mass matrix for triangular surfaces
 6. `6fed101c` — Anatomy: Add tess_laplacian, cotangent stiffness matrix for triangular surfaces
 7. `b08b2a42` — Anatomy: Add tess_operators, per-hemisphere Laplace-Beltrami operator pencil
-8. `c2ef53f5` — Anatomy: Add tess_eigen, embedded per-hemisphere Laplace-Beltrami eigenbases
+8. `5840d76c` — Anatomy: Add tess_eigen, embedded per-hemisphere Laplace-Beltrami eigenbases
 
 ## 6. Open follow-on decisions (not resolved here)
 
@@ -159,3 +159,16 @@ lab clean-branch checkout (`~/workspace/research/code/brainstorm3-clean`,
   `dev/verify/phase0/run_matlab.sh`; pre-existing dirty files in the
   working tree (`dev/demo/_figures/*.png` deletions, `toolbox/dynamics/
   bst_dynamics.m`, `source_script_run.png`) are untouched, per instruction.
+
+## Fix wave (post final review)
+
+The Milestone-1 final review requested one hardening fix, amended in place
+(tess_eigen commit c2ef53f5 -> 5840d76c; prior 7 SHAs unchanged): the
+cache-reuse guard now verifies Structures-atlas presence (L/R labels) and
+per-hemisphere row counts via tess_hemisplit before serving a cached basis
+(protects against the known atlas-wipe gotcha), plus a forward-comment on the
+stored Tau recipe field for the future Dirac variant. Sphere test extended
+with an atlas-strip guard case (asserts tess_operators:noHemisphereLabels);
+full test re-passed. Deferred to Phase 3+: VariantToField collision edge,
+issym/datestr cosmetics, per-surface write serialization if batch concurrency
+arrives.
