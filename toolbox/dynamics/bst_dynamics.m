@@ -426,3 +426,4 @@ function G = AtomFromKernel(ax, kernelName, kernelParams, seed, thr) %#ok<DEFNU>
     G.type     = 'extended';
     G.KernelName = kernelName;  G.KernelParams = kernelParams;  G.Threshold = thr;
 end
+ 
