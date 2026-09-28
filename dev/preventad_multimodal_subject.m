@@ -138,6 +138,12 @@ try
 
     % ===== PET =====
     if ~isempty(petDir) && exist(fullfile(petDir, SubjectName), 'dir') == 7
+        % SPM (realign/coregister) must be loaded AND its batch system initialised:
+        % mri_realign builds cfg_dep batches, which a fresh headless session lacks.
+        [isOk, errMsg] = bst_plugin('Load', 'spm12');
+        assert(isOk, 'Could not load the spm12 plugin: %s', errMsg);
+        spm('defaults', 'PET');
+        spm_jobman('initcfg');
         sProtocol = bst_get('ProtocolInfo');
         imp = preventad_pet_import(petDir, SubjectName, struct('ProtocolName', sProtocol.Comment));
         for k = 1:numel(imp)
