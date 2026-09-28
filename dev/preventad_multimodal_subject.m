@@ -138,7 +138,8 @@ try
 
     % ===== PET =====
     if ~isempty(petDir) && exist(fullfile(petDir, SubjectName), 'dir') == 7
-        imp = preventad_pet_import(petDir, SubjectName, struct('ProtocolName', ''));
+        sProtocol = bst_get('ProtocolInfo');
+        imp = preventad_pet_import(petDir, SubjectName, struct('ProtocolName', sProtocol.Comment));
         for k = 1:numel(imp)
             summary.PET(end+1) = local_pet_tracer(iSubject, SubjectName, imp(k).Tracer, ...
                                                   petMethod, petFwhm, keep4D, opts.OutputDir); %#ok<AGROW>

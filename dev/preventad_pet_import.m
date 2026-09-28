@@ -53,7 +53,10 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
                  'ProtocolName','preventad');
     fn = fieldnames(Def);
     for i = 1:numel(fn)
-        if ~isfield(Opts, fn{i}) || isempty(Opts.(fn{i})), Opts.(fn{i}) = Def.(fn{i}); end
+        % ProtocolName '' is meaningful (= current protocol): only default it when absent
+        if ~isfield(Opts, fn{i}) || (isempty(Opts.(fn{i})) && ~strcmp(fn{i}, 'ProtocolName'))
+            Opts.(fn{i}) = Def.(fn{i});
+        end
     end
     if ~file_exist(BidsPetDir)
         error('PET BIDS directory not found: %s', BidsPetDir);
