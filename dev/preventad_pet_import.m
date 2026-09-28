@@ -29,6 +29,8 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
 %                                     collapse instead.
 %       .CoregMethod       'spm'     mri_coregister method
 %       .KeepIntermediates 0         if 1, keep the raw + realigned volumes too
+%       .ProtocolName      'preventad' protocol to use; '' = the current protocol
+%                                     (headless HPC workers load a per-subject one)
 %
 % OUTPUT:
 %   Out : struct array (one per tracer) with fields .Subject .Tracer .Base .Skipped
@@ -47,7 +49,8 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         error('SubjectName is required (e.g. ''sub-MTL0002'').');
     end
     if (nargin < 3) || isempty(Opts), Opts = struct(); end
-    Def = struct('Aggregation','ignore', 'CoregMethod','spm', 'KeepIntermediates',0);
+    Def = struct('Aggregation','ignore', 'CoregMethod','spm', 'KeepIntermediates',0, ...
+                 'ProtocolName','preventad');
     fn = fieldnames(Def);
     for i = 1:numel(fn)
         if ~isfield(Opts, fn{i}) || isempty(Opts.(fn{i})), Opts.(fn{i}) = Def.(fn{i}); end
@@ -56,15 +59,20 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         error('PET BIDS directory not found: %s', BidsPetDir);
     end
 
-    % ---- select existing protocol ----
-    ProtocolName = 'preventad';
+    % ---- select existing protocol ('' = the current one, e.g. a per-subject
+    %      protocol just loaded with import_protocol on HPC) ----
+    ProtocolName = Opts.ProtocolName;
     if ~brainstorm('status'), brainstorm nogui; end
-    iProtocol = bst_get('Protocol', ProtocolName);
-    if isempty(iProtocol)
-        error('Unknown protocol: %s (run the MEG import first).', ProtocolName);
-    end
-    if (iProtocol ~= bst_get('iProtocol'))
-        gui_brainstorm('SetCurrentProtocol', iProtocol);
+    if isempty(ProtocolName)
+        ProtocolName = bst_get('ProtocolInfo'); ProtocolName = ProtocolName.Comment;
+    else
+        iProtocol = bst_get('Protocol', ProtocolName);
+        if isempty(iProtocol)
+            error('Unknown protocol: %s (run the MEG import first).', ProtocolName);
+        end
+        if (iProtocol ~= bst_get('iProtocol'))
+            gui_brainstorm('SetCurrentProtocol', iProtocol);
+        end
     end
 
     % ---- resolve the EXISTING subject + its T1 ----
@@ -135,7 +143,9 @@ function Out = preventad_pet_import(BidsPetDir, SubjectName, Opts)
         Out(end+1) = o; %#ok<AGROW>
     end
 
-    panel_protocols('UpdateNode', 'Subject', iSubject);
+    if bst_get('isGUI')
+        panel_protocols('UpdateNode', 'Subject', iSubject);
+    end
 end
 
 
