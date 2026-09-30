@@ -37,6 +37,9 @@ function preventad_multimodal_subject(BidsDir, OutputDir, SubjectLabel, Module, 
 %                     ~0.4 GB per tracer and is reproducible from the raw PET)
 %   NSP_SESSIONS      'meg=ses-02;pet=ses-01;dwi=ses-FU48A' provenance, recorded as-is
 %   NSP_BASE          which protocol was extended ('fibers' | 'meg'), recorded as-is
+%   NSP_BAD_SEGMENTS  '1' runs Brainstorm's bad-segment detector on every task-rest recording
+%                     (1–7 Hz eye/movement, 40–240 Hz muscle, sensitivity 3 — preventad_import's
+%                     settings) and names what it finds bad_1-7Hz / bad_40-240Hz; kept if present
 %   NSP_MEG_INVERSES  'mne,dspm' adds orientation-constrained MNE / dSPM kernels to every
 %                     task-rest recording (existing head model + noise covariance); empty = none
 %
@@ -159,6 +162,12 @@ try
     end
     db_save();
 
+    % ===== MEG: bad segments (Brainstorm's detector; events named bad_*) =====
+    if strcmp(getenv('NSP_BAD_SEGMENTS'), '1')
+        summary.BadSegments = local_bad_segments(iSubject);
+        db_save();
+    end
+
     % ===== MEG: extra inverse kernels (orientation-constrained) =====
     megInverses = strtrim(strsplit(getenv('NSP_MEG_INVERSES'), ','));
     megInverses = megInverses(~cellfun(@isempty, megInverses));
@@ -250,6 +259,49 @@ end
 
 
 %% ===== helpers =====
+%% ===== MEG: bad segments =====
+function out = local_bad_segments(iSubject)
+% Brainstorm's own detector (process_evt_detect_badsegment) on each task-rest raw recording, with the
+% settings of preventad_import.m, then the rename to bad_* that makes Brainstorm (and the converter,
+% and the atlas) treat the segments as bad. A recording that already has bad_* events is left alone.
+    sSubject = bst_get('Subject', iSubject);
+    sStudies = bst_get('StudyWithSubject', sSubject.FileName, 'intra_subject');
+    out = struct('File', {}, 'Segments', {}, 'Seconds', {}, 'Detected', {});
+    for i = 1:numel(sStudies)
+        for k = 1:numel(sStudies(i).Data)
+            f = sStudies(i).Data(k).FileName;
+            if isempty(strfind(f, 'task-rest')) || ~strcmpi(sStudies(i).Data(k).DataType, 'raw'), continue; end
+            ev = local_events(f);
+            has = any(strncmpi({ev.label}, 'bad', 3));
+            if ~has
+                bst_process('CallProcess', 'process_evt_detect_badsegment', {f}, [], ...
+                    'timewindow', [], 'sensortypes', 'MEG', 'threshold', 3, 'isLowFreq', 1, 'isHighFreq', 1);
+                bst_process('CallProcess', 'process_evt_rename', {f}, [], ...
+                    'src', '1-7Hz, 40-240Hz', 'dest', 'bad_1-7Hz, bad_40-240Hz');
+                ev = local_events(f);
+            end
+            bad = ev(strncmpi({ev.label}, 'bad', 3));
+            n = 0; sec = 0;
+            for b = 1:numel(bad)
+                n = n + size(bad(b).times, 2);
+                if size(bad(b).times, 1) == 2, sec = sec + sum(diff(bad(b).times, 1, 1)); end
+            end
+            out(end+1) = struct('File', f, 'Segments', n, 'Seconds', sec, 'Detected', ~has); %#ok<AGROW>
+            note = ''; if has, note = ' (already marked, kept)'; end
+            fprintf('bad segments: %s -> %d segment(s), %.1f s%s\n', f, n, sec, note);
+        end
+    end
+end
+
+function ev = local_events(dataFile)
+    D = in_bst_data(dataFile, 'F');
+    if isfield(D.F, 'events') && ~isempty(D.F.events)
+        ev = D.F.events;
+    else
+        ev = struct('label', {}, 'times', {});
+    end
+end
+
 %% ===== MEG: constrained MNE / dSPM kernels =====
 function out = local_meg_inverses(iSubject, methods)
 % One shared kernel per resting-state recording, from the protocol's existing
