@@ -37,6 +37,8 @@ function preventad_multimodal_subject(BidsDir, OutputDir, SubjectLabel, Module, 
 %                     ~0.4 GB per tracer and is reproducible from the raw PET)
 %   NSP_SESSIONS      'meg=ses-02;pet=ses-01;dwi=ses-FU48A' provenance, recorded as-is
 %   NSP_BASE          which protocol was extended ('fibers' | 'meg'), recorded as-is
+%   NSP_MEG_INVERSES  'mne,dspm' adds orientation-constrained MNE / dSPM kernels to every
+%                     task-rest recording (existing head model + noise covariance); empty = none
 %
 % OUTPUT (to OutputDir):
 %   <Subject>_brainstorm.zip            the multimodal protocol
@@ -157,6 +159,14 @@ try
     end
     db_save();
 
+    % ===== MEG: extra inverse kernels (orientation-constrained) =====
+    megInverses = strtrim(strsplit(getenv('NSP_MEG_INVERSES'), ','));
+    megInverses = megInverses(~cellfun(@isempty, megInverses));
+    if ~isempty(megInverses)
+        summary.MEGInverses = local_meg_inverses(iSubject, lower(megInverses));
+        db_save();
+    end
+
     % ===== Export the multimodal protocol =====
     exportZip = fullfile(opts.OutputDir, [SubjectName '_brainstorm.zip']);
     if exist(exportZip, 'file') == 2; delete(exportZip); end
@@ -240,6 +250,60 @@ end
 
 
 %% ===== helpers =====
+%% ===== MEG: constrained MNE / dSPM kernels =====
+function out = local_meg_inverses(iSubject, methods)
+% One shared kernel per resting-state recording, from the protocol's existing
+% overlapping-spheres head model and empty-room noise covariance, with sources
+% constrained normal to the cortex (the base protocol's dSPM is unconstrained).
+%   'mne'  -> minimum-norm current density ("MNE: MEG (constr)")
+%   'dspm' -> dSPM                          ("dSPM: MEG (constr)")
+    measures = struct('mne', 'amplitude', 'dspm', 'dspm2018');
+    labels   = struct('mne', 'MNE',       'dspm', 'dSPM');
+    bad = setdiff(methods, fieldnames(measures));
+    assert(isempty(bad), 'NSP_MEG_INVERSES: unknown method(s) %s (mne|dspm)', strjoin(bad, ','));
+    sSubject = bst_get('Subject', iSubject);
+    sStudies = bst_get('StudyWithSubject', sSubject.FileName, 'intra_subject');
+    dataFiles = {};
+    for i = 1:numel(sStudies)
+        s = sStudies(i);
+        if isempty(s.Data) || isempty(s.HeadModel) || isempty(s.NoiseCov), continue; end
+        for k = 1:numel(s.Data)
+            if ~isempty(strfind(s.Data(k).FileName, 'task-rest'))
+                dataFiles{end+1} = s.Data(k).FileName; %#ok<AGROW>
+            end
+        end
+    end
+    assert(~isempty(dataFiles), 'No task-rest recording with a head model and noise covariance');
+    fprintf('MEG inverses (%s) on %d recording(s)\n', strjoin(methods, ','), numel(dataFiles));
+    out = struct('Method', {}, 'Comment', {}, 'Orientation', {}, 'Files', {});
+    for m = 1:numel(methods)
+        comment = sprintf('%s: MEG (constr)', labels.(methods{m}));
+        sRes = bst_process('CallProcess', 'process_inverse_2018', dataFiles, [], ...
+            'output',  2, ...  % Kernel only: one per file
+            'inverse', struct(...
+                 'Comment',        comment, ...
+                 'InverseMethod',  'minnorm', ...
+                 'InverseMeasure', measures.(methods{m}), ...
+                 'SourceOrient',   {{'fixed'}}, ...
+                 'Loose',          0.2, ...
+                 'UseDepth',       1, ...
+                 'WeightExp',      0.5, ...
+                 'WeightLimit',    10, ...
+                 'NoiseMethod',    'reg', ...
+                 'NoiseReg',       0.1, ...
+                 'SnrMethod',      'fixed', ...
+                 'SnrRms',         1e-06, ...
+                 'SnrFixed',       3, ...
+                 'ComputeKernel',  1, ...
+                 'DataTypes',      {{'MEG'}}));
+        assert(numel(sRes) == numel(dataFiles), '%s: %d kernel(s) for %d recording(s)', ...
+            comment, numel(sRes), numel(dataFiles));
+        out(end+1) = struct('Method', methods{m}, 'Comment', comment, ...
+                            'Orientation', 'constrained', 'Files', {{sRes.FileName}}); %#ok<AGROW>
+        fprintf('  %s -> %d kernel(s)\n', comment, numel(sRes));
+    end
+end
+
 function [sSubject, iSubject] = local_subject(SubjectName)
     [sSubject, iSubject] = bst_get('Subject', SubjectName);
     if isempty(sSubject)   % per-subject exports hold one real subject
