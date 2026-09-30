@@ -257,6 +257,7 @@ function out = local_meg_inverses(iSubject, methods)
 % constrained normal to the cortex (the base protocol's dSPM is unconstrained).
 %   'mne'  -> minimum-norm current density ("MNE: MEG (constr)")
 %   'dspm' -> dSPM                          ("dSPM: MEG (constr)")
+    out = struct('Method', {}, 'Comment', {}, 'Orientation', {}, 'Files', {});
     measures = struct('mne', 'amplitude', 'dspm', 'dspm2018');
     labels   = struct('mne', 'MNE',       'dspm', 'dSPM');
     bad = setdiff(methods, fieldnames(measures));
@@ -273,9 +274,11 @@ function out = local_meg_inverses(iSubject, methods)
             end
         end
     end
-    assert(~isempty(dataFiles), 'No task-rest recording with a head model and noise covariance');
+    if isempty(dataFiles)   % e.g. the MEG protocol never got sources: nothing to invert
+        warning('No task-rest recording with a head model and noise covariance: no MEG inverses');
+        return;
+    end
     fprintf('MEG inverses (%s) on %d recording(s)\n', strjoin(methods, ','), numel(dataFiles));
-    out = struct('Method', {}, 'Comment', {}, 'Orientation', {}, 'Files', {});
     for m = 1:numel(methods)
         comment = sprintf('%s: MEG (constr)', labels.(methods{m}));
         sRes = bst_process('CallProcess', 'process_inverse_2018', dataFiles, [], ...
