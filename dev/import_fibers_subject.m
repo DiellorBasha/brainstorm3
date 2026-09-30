@@ -13,6 +13,8 @@ function import_fibers_subject(BidsDir, OutputDir, SubjectLabel, Module, varargi
 %   import_protocol                    load the exported per-subject protocol
 %   bst_get('Subject')                 resolve the subject index
 %   import_fibers                      trk_read/trk_interp/cs_convert/ComputeColor/save
+%   in_mri + mri_coregister('spm')     the DWI's anatomical frame onto the subject MRI (NSP_ACPC_T1)
+%   cs_convert                         ACPC world -> that volume's MRI coords -> subject SCS
 %   in_tess_bst                        load cortex surface + atlases
 %   fibers_helper('AssignToScouts')    assign streamline endpoints to scouts
 %   export_protocol                    write the augmented protocol back out
@@ -24,7 +26,14 @@ function import_fibers_subject(BidsDir, OutputDir, SubjectLabel, Module, varargi
 % Env inputs (set by the nsp template's apptainer --env):
 %   NSP_PROTOCOL_ZIP  exported protocol .zip to augment          (required)
 %   NSP_TRK           TrackVis .trk streamlines                  (required)
-%   NSP_CS            .trk coordinate system {scs|mni|world|mri} (default 'world')
+%   NSP_ACPC_T1       the T1w that defines the .trk's frame (QSIPrep space-ACPC_desc-preproc_T1w).
+%                     When set, the fibres are REGISTERED (below) and NSP_CS is ignored.
+%   NSP_CS            legacy, without NSP_ACPC_T1 only: import_fibers' CS {scs|mni|world|mri}.
+%                     NOTE import_fibers maps 'world' to the 'mri' conversion and trk_read
+%                     returns TrackVis voxmm, so the points are taken as millimetres on the
+%                     subject MRI's own grid: correct only when the .trk grid IS that grid.
+%   NSP_MIN_NEAR_WHITE  registration gate: fraction of fibre ends within 5 mm of the
+%                     subject's white surface below which the subject fails (default 0.6)
 %   NSP_NPOINTS       points per streamline after resampling     (default 100)
 %   NSP_ATLASES       comma-list of cortical atlases for connectomes
 %                     (default 'Desikan-Killiany,Destrieux')
@@ -32,6 +41,17 @@ function import_fibers_subject(BidsDir, OutputDir, SubjectLabel, Module, varargi
 % OUTPUT (to OutputDir):
 %   <Subject>_brainstorm.zip            augmented protocol (anatomy + fibers)
 %   <Subject>_connectome_<atlas>.mat    NxN streamline-count matrix + labels
+%   <Subject>_fibers_registration.mat   the registration and its check (NSP_ACPC_T1 path)
+%
+% REGISTRATION (NSP_ACPC_T1): tractography from QSIPrep/QSIRecon lives in space-ACPC —
+% the DWI session's T1w rigidly re-oriented to AC-PC — a frame Brainstorm's subject MRI
+% knows nothing of. So the points are read in the .trk's own frame (trk_read_rasmm:
+% voxmm + vox_to_ras -> ACPC world RAS mm), the ACPC T1w is loaded and co-registered to
+% the subject MRI with Brainstorm's mri_coregister('spm', no reslice) — as the PET
+% import does — and each point goes ACPC world -> the ACPC volume's MRI coordinates ->
+% the subject's SCS through the registered volume (whose SCS mri_coregister set from the
+% subject's). Then a GATE: the fibre ends must lie near the subject's white surface
+% (ACT ends at grey/white), or the subject fails rather than save misplaced fibres.
 %
 % Authors: Diellor Basha, 2026 (nsp brainstorm-fibers pathway)
 
@@ -53,6 +73,9 @@ SubjectName  = ['sub-' SubjectLabel];
 % ===== Fiber inputs from environment =====
 protocolZip = getenv('NSP_PROTOCOL_ZIP');
 trkFile     = getenv('NSP_TRK');
+acpcFile    = getenv('NSP_ACPC_T1');
+minNear     = str2double(getenv('NSP_MIN_NEAR_WHITE'));
+if isnan(minNear); minNear = 0.6; end
 csEnv       = lower(getenv('NSP_CS'));
 nPointsEnv  = getenv('NSP_NPOINTS');
 atlasEnv    = getenv('NSP_ATLASES');
@@ -91,7 +114,13 @@ diary(reportFile); diary on;
 fprintf('=== import_fibers_subject: %s ===\n', SubjectName);
 fprintf('protocol : %s\n', protocolZip);
 fprintf('trk      : %s\n', trkFile);
-fprintf('CS       : %s | nPoints: %d | atlases: %s\n', csEnv, nPoints, strjoin(atlasList, ', '));
+if isempty(acpcFile)
+    fprintf('CS       : %s (UNREGISTERED legacy path) | nPoints: %d | atlases: %s\n', csEnv, nPoints, strjoin(atlasList, ', '));
+else
+    assert(exist(acpcFile, 'file') == 2, 'NSP_ACPC_T1 not found: %s', acpcFile);
+    csEnv = 'scs (registered: ACPC T1w -> subject MRI, spm)';
+    fprintf('ACPC T1w : %s | nPoints: %d | atlases: %s\n', acpcFile, nPoints, strjoin(atlasList, ', '));
+end
 
 % ===== Init Brainstorm (headless server) =====
 % Pre-seed ~/.brainstorm/brainstorm.mat so `brainstorm server` starts without the
@@ -132,9 +161,13 @@ try
         'Subject %s has no cortex in protocol', SubjectName);
     fprintf('Subject #%d: %s (%d surfaces)\n', iSubject, sSubject.Name, numel(sSubject.Surface));
 
-    % ===== Import fibers (Brainstorm import_fibers) =====
-    fprintf('Importing fibers via import_fibers (CS=%s, nPoints=%d)...\n', csEnv, nPoints);
-    [iNewFibers, OutputFiles, nFibers] = import_fibers(iSubject, {trkFile}, 'TRK', nPoints, csEnv); %#ok<ASGLU>
+    % ===== Import fibers =====
+    if isempty(acpcFile)
+        fprintf('Importing fibers via import_fibers (CS=%s, nPoints=%d)...\n', csEnv, nPoints);
+        [iNewFibers, OutputFiles, nFibers] = import_fibers(iSubject, {trkFile}, 'TRK', nPoints, csEnv); %#ok<ASGLU>
+    else
+        [OutputFiles, nFibers, reg] = local_import_registered(iSubject, sSubject, trkFile, acpcFile, nPoints, minNear, opts.OutputDir, SubjectName);
+    end
     if iscell(OutputFiles); fibersFile = OutputFiles{1}; else; fibersFile = OutputFiles; end
     fprintf('Imported %d fibers -> %s\n', nFibers, fibersFile);
 
@@ -201,3 +234,91 @@ catch ME
     rethrow(ME);
 end
 end
+
+
+function [OutputFiles, nFibers, reg] = local_import_registered(iSubject, sSubject, trkFile, acpcFile, nPoints, minNear, OutputDir, SubjectName)
+% The .trk in its own frame -> co-registered to the subject MRI -> SCS; gated; imported.
+fprintf('Reading %s in its own frame (voxmm + vox_to_ras)...\n', trkFile);
+[tracks, hdr] = trk_read_rasmm(trkFile);
+nFibers = numel(tracks);
+fprintf('  %d streamlines, voxel order %s, voxel %s mm\n', nFibers, hdr.voxel_order, mat2str(hdr.voxel_size));
+P = trk_interp(tracks, nPoints);                     % [nPoints x 3 x nFibers], TrackVis voxmm
+clear tracks;
+% voxmm -> voxel (centre-based) -> ACPC world RAS mm (nibabel's trackvis-to-rasmm)
+A  = hdr.vox_to_ras;
+X  = reshape(permute(P, [2 1 3]), 3, []) ./ hdr.voxel_size(:) - 0.5;
+clear P;
+Y  = A(1:3,1:3) * X + A(1:3,4);                      % RAS mm
+clear X;
+pts2D = Y' ./ 1000;                                  % Brainstorm world coordinates, metres
+clear Y;
+
+% the ACPC T1w onto the subject MRI (Brainstorm + SPM, no reslice)
+sMriRef = in_mri_bst(sSubject.Anatomy(sSubject.iAnatomy).FileName);
+sAcpc   = in_mri(acpcFile, 'ALL', 0, 0);
+[isOk, errMsg] = bst_plugin('Load', 'spm12');
+assert(isOk, 'Could not load the spm12 plugin: %s', errMsg);
+spm('defaults', 'PET');
+spm_jobman('initcfg');
+[~, errMsg, ~, sAcpcReg] = mri_coregister(sAcpc, sMriRef, 'spm', 0);
+if ~isempty(errMsg) || isempty(sAcpcReg)
+    error('Registering the ACPC T1w to the subject MRI failed: %s', errMsg);
+end
+ptsMri = cs_convert(sAcpc,    'world', 'mri', pts2D);   % the ACPC volume's own MRI coordinates
+clear pts2D;
+ptsScs = cs_convert(sAcpcReg, 'mri',   'scs', ptsMri);  % -> the subject's SCS, through the registration
+clear ptsMri;
+if isempty(ptsScs)
+    error('cs_convert could not map the fibres to SCS (missing vox2ras or SCS on the volumes)');
+end
+Points = permute(reshape(ptsScs, nPoints, nFibers, 3), [2 1 3]);   % [nFibers x nPoints x 3]
+clear ptsScs;
+
+% THE GATE: ACT tractography ends at the grey/white boundary, so the ends must lie near
+% the subject's white surface; a mis-registration puts most of them centimetres away.
+iWhite = find(~cellfun(@isempty, regexpi({sSubject.Surface.FileName}, 'cortex_white_low')), 1);
+if isempty(iWhite); iWhite = find(~cellfun(@isempty, regexpi({sSubject.Surface.FileName}, 'cortex_white')), 1); end
+reg = struct('Method', 'mri_coregister spm (no reslice): ACPC T1w -> subject MRI', 'AcpcT1', acpcFile, ...
+             'Trk', trkFile, 'VoxToRas', A, 'nFibers', nFibers, 'nPoints', nPoints);
+if isempty(iWhite)
+    warning('No white surface in the protocol: the registration gate is skipped');
+    reg.Gate = 'skipped (no white surface)';
+else
+    sWhite = in_tess_bst(sSubject.Surface(iWhite).FileName);
+    ends = [reshape(Points(:,1,:), [], 3); reshape(Points(:,end,:), [], 3)];
+    [~, d] = bst_nearest(sWhite.Vertices, ends, 1, 0);
+    d = d * 1000;
+    reg.WhiteSurface = sSubject.Surface(iWhite).FileName;
+    reg.EndToWhite_mm = struct('median', median(d), 'p75', local_quantile(d, 0.75), 'p95', local_quantile(d, 0.95), ...
+                               'within3mm', mean(d < 3), 'within5mm', mean(d < 5));
+    fprintf('  ends -> white surface: median %.2f mm, within 3 mm %.1f%%, within 5 mm %.1f%%\n', ...
+            reg.EndToWhite_mm.median, 100*reg.EndToWhite_mm.within3mm, 100*reg.EndToWhite_mm.within5mm);
+    if reg.EndToWhite_mm.within5mm < minNear
+        save(fullfile(OutputDir, [SubjectName '_fibers_registration.mat']), '-struct', 'reg');
+        error('Registration gate failed: only %.1f%% of fibre ends within 5 mm of the white surface (need %.0f%%)', ...
+              100*reg.EndToWhite_mm.within5mm, 100*minNear);
+    end
+    reg.Gate = sprintf('passed (>= %.0f%% of ends within 5 mm of white)', 100*minNear);
+end
+save(fullfile(OutputDir, [SubjectName '_fibers_registration.mat']), '-struct', 'reg');
+
+% save as a Brainstorm fibres file in SCS and import it as such (no further conversion)
+FibMat = db_template('fibersmat');
+FibMat.Points  = Points;
+FibMat.Header  = hdr;
+FibMat.Comment = sprintf('fibers_%dPt_%dFib', nPoints, nFibers);
+FibMat = fibers_helper('ComputeColor', FibMat);
+tmpFile = fullfile(tempdir, [SubjectName '_fibers_scs.mat']);
+save(tmpFile, '-struct', 'FibMat', '-v7.3');
+clear FibMat Points;
+[~, OutputFiles] = import_fibers(iSubject, {tmpFile}, 'BST', nPoints, 'scs');
+delete(tmpFile);
+end
+
+
+function q = local_quantile(x, p)
+% The p-quantile of x (nearest rank) — no Statistics Toolbox.
+x = sort(x(:));
+q = x(max(1, min(numel(x), ceil(p * numel(x)))));
+end
+
