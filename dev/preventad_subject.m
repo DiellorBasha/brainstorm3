@@ -331,6 +331,7 @@ for iR = 1:numel(sFilesRest)
         db_set_noisecov(iSrcCh, iDstCh, 0, 1);
     end
     fprintf('Noise cov: %s <- %s\n', sFilesRest(iR).FileName, sFilesNoise(iN).FileName);
+    pa_sync_badchannels(sFilesRest(iR).FileName);
 end
 pa_assert_study(sFilesRest, 'NoiseCov', 'noise covariance');
 
@@ -338,8 +339,22 @@ pa_assert_study(sFilesRest, 'NoiseCov', 'noise covariance');
 % of process_headmodel is OpenMEEG BEM (eeg=3), which needs an inner skull. ⚠ OMEGA
 % recordings that carry EEG-typed channels therefore failed the WHOLE head model
 % with "OpenMEEG: Inner skull surface not available" — silently.
-pa_call('process_headmodel', sFilesRest, ...
-    'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
+% Registration fallback: when the head-point refinement (ICP, pa_import) pulls the helmet into
+% the head ("sensors ... inside the brain volume"; OMEGA sub-0153, sub-CONP0078 = PREVENT-AD
+% sub-MTL0160, sub-MNI0079), remove that refinement -- back to the head-coil/fiducial alignment
+% -- and retry ONCE. A second failure is a data problem (MRI or digitisation) and fails the task.
+try
+    pa_call('process_headmodel', sFilesRest, ...
+        'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
+catch err
+    if isempty(strfind(err.message, 'inside the brain')), rethrow(err); end
+    fprintf('REGISTRATION FALLBACK: %s\n  -> removing the head-point refinement, retrying the head model (fiducials only)\n', err.message);
+    pa_call('process_adjust_coordinates', sFilesRest, ...
+        'reset', 0, 'head', 0, 'points', 1, 'remove', 1, 'display', 0);
+    pa_call('process_headmodel', sFilesRest, ...
+        'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
+    fprintf('REGISTRATION FALLBACK: head model OK without the head-point refinement\n');
+end
 pa_assert_study(sFilesRest, 'HeadModel', 'head model');
 
 % nxr manifold backbone (find-or-create) — needs nxr-compute plugin
@@ -361,6 +376,29 @@ pa_call('process_inverse_dirac', sFilesRest, ...
     'noisereg',0.1, 'sensortypes','MEG');
 
 pa_assert_kernels(sFilesRest);
+end
+
+
+%% ===== SOURCE helper: bad channels of the noise run are bad in the rest run =====
+function pa_sync_badchannels(restFile)
+% A channel that was bad in the noise recording has an all-zero row/column in the noise
+% covariance; if it is good in the rest run, process_inverse_2018 refuses with "Bad channels in
+% noise covariance are different from bad channels in recordings" (OMEGA sub-PD0457). Mark such
+% MEG channels bad in the rest run too: they cannot be whitened, so they are left out.
+[~, iStudy] = bst_get('AnyFile', restFile);
+[sCh, iChStudy] = bst_get('ChannelForStudy', iStudy);
+sStCh = bst_get('Study', iChStudy);
+if isempty(sStCh.NoiseCov), return; end
+N = load(file_fullpath(sStCh.NoiseCov(1).FileName), 'NoiseCov');
+if isempty(N.NoiseCov), return; end
+ChannelMat = in_bst_channel(sCh.FileName);
+D = in_bst_data(restFile, 'ChannelFlag');
+iGood = good_channel(ChannelMat.Channel, D.ChannelFlag, 'MEG');
+iBad = intersect(find(~any(N.NoiseCov, 1) & ~any(N.NoiseCov, 2)'), iGood);
+if isempty(iBad), return; end
+names = strjoin({ChannelMat.Channel(iBad).Name}, ', ');
+fprintf('Bad in the noise run, now bad in %s: %s\n', restFile, names);
+pa_call('process_channel_setbad', restFile, 'sensortypes', names);
 end
 
 
