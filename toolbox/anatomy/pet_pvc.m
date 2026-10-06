@@ -1,13 +1,15 @@
-function [MriFilePvc, errMsg, fileTag] = pet_pvc(PetFile, MriFileRef, fwhm, pvcOpts)
-% PET_PVC: Partial volume correction for PET volumes using PETPVE12 (Muller-Gartner method).
+function [MriFilePvc, errMsg, fileTag, regTable] = pet_pvc(PetFile, MriFileRef, fwhm, pvcOpts)
+% PET_PVC: Partial volume correction for PET volumes (GTM, or Muller-Gartner with PETPVE12).
 %
 % USAGE:
 %   [MriFilePvc, errMsg, fileTag] = pet_pvc(PetFile, MriFileRef, fwhm)
-%   [MriFilePvc, errMsg, fileTag] = pet_pvc(PetFile, MriFileRef, fwhm, pvcOpts)
+%   [MriFilePvc, errMsg, fileTag, regTable] = pet_pvc(PetFile, MriFileRef, fwhm, pvcOpts)
 %
 % DESCRIPTION:
-%   Performs partial volume correction on a PET volume using the Muller-Gartner
-%   method implemented in PETPVE12. The function:
+%   Two methods, selected with pvcOpts.method:
+%   - 'gtm' (DEFAULT): Rousset geometric transfer matrix on the subject's parcellation,
+%     native Brainstorm code, no plugin needed (see pet_gtm). Regional values: regTable.
+%   - 'mg': voxelwise Muller-Gartner method implemented in PETPVE12. The function:
 %     1. Exports the reference MRI to NIfTI in a temp directory
 %     2. Runs SPM Segment on the MRI to produce probabilistic tissue maps (c1, c2, c3)
 %     3. Exports the PET volume to NIfTI in the same temp directory
@@ -18,8 +20,13 @@ function [MriFilePvc, errMsg, fileTag] = pet_pvc(PetFile, MriFileRef, fwhm, pvcO
 % INPUTS:
 %   - PetFile    : PET MRI file to correct (Brainstorm relative path)
 %   - MriFileRef : Reference MRI file for tissue segmentation (Brainstorm relative path)
-%   - fwhm       : PSF FWHM in mm (scalar or [x y z] vector)
+%   - fwhm       : scanner PSF FWHM in mm (scalar), or [] to use the value stored with the
+%                  PET at import (PET.PsfFwhm; 6 mm when the scanner was not identified).
+%                  Smoothing recorded in PET.SmoothFwhm is added in quadrature (pet_psf_fwhm).
 %   - pvcOpts    : (optional) Structure with additional PVC options:
+%       .method      : 'gtm' (default) | 'mg'
+%       (GTM)          .AtlasComment, .minVox: see pet_gtm
+%       (Muller-Gartner):
 %       .gmThresh    : GM threshold for masking (default: 0.5)
 %       .csfZeroing  : If 1, assume CSF signal = 0 (default: 1)
 %       .wmcsfMethod : WM/CSF constant estimation method (default: 'threshold')
@@ -30,8 +37,9 @@ function [MriFilePvc, errMsg, fileTag] = pet_pvc(PetFile, MriFileRef, fwhm, pvcO
 %   - MriFilePvc : Relative path to the PVC-corrected PET file in Brainstorm DB
 %   - errMsg     : Error message, if any
 %   - fileTag    : File tag used for output file
+%   - regTable   : GTM only: regional observed and corrected values (see pet_gtm)
 %
-% REQUIRES:
+% REQUIRES (Muller-Gartner only):
 %   - SPM12 plugin (for tissue segmentation)
 %   - PETPVE12 plugin (for Muller-Gartner PVC)
 
@@ -60,35 +68,46 @@ MriFilePvc = [];
 errMsg = '';
 fileTag = '_pvc';
 
+regTable = [];
 % ===== PARSE INPUTS =====
-if nargin < 3 || isempty(fwhm)
-    % No FWHM supplied: derive it from the PET metadata (scanner model + recon
-    % filter), falling back to a generic clinical value if the scanner is unknown.
-    PET = [];
-    try
-        w = load(file_fullpath(PetFile), 'PET');
-        if isfield(w, 'PET'), PET = w.PET; end
-    catch
-    end
-    [fwhm, fwhmSrc] = pet_scanner_fwhm(PET);
-    fprintf('BST> PET PVC: PSF FWHM = %.1f mm [%s]\n', fwhm, fwhmSrc);
+if (nargin < 3)
+    fwhm = [];
 end
-% Expand scalar FWHM to 3D vector
-if isscalar(fwhm)
-    fwhm = [fwhm fwhm fwhm];
-end
-% Default PVC options
-if nargin < 4 || isempty(pvcOpts)
-    pvcOpts = struct();
-end
-% ===== METHOD DISPATCH =====
-% GTM (regional Rousset) is a native path - corrects all regions, needs neither SPM nor
-% PETPVE12 (uses the subject's parcellation directly). MG (default) continues below.
-if isfield(pvcOpts, 'method') && strcmpi(pvcOpts.method, 'gtm')
-    [MriFilePvc, errMsg] = pet_gtm(PetFile, fwhm, pvcOpts);
-    fileTag = '_gtmpvc';
+if ~isempty(fwhm) && (~isnumeric(fwhm) || any(~isfinite(fwhm(:))) || any(fwhm(:) <= 0))
+    errMsg = 'PSF FWHM must be a positive number (mm).';
     return;
 end
+% Default PVC options
+if (nargin < 4) || isempty(pvcOpts)
+    pvcOpts = struct();
+end
+if ~isfield(pvcOpts, 'method') || isempty(pvcOpts.method)
+    pvcOpts.method = 'gtm';
+end
+% ===== METHOD DISPATCH =====
+% GTM (regional Rousset, default) is a native path - corrects all regions, needs neither SPM
+% nor PETPVE12 (uses the subject's parcellation directly). It resolves the PSF itself.
+switch lower(pvcOpts.method)
+    case 'gtm'
+        [MriFilePvc, errMsg, regTable] = pet_gtm(PetFile, fwhm, pvcOpts);
+        fileTag = '_gtmpvc';
+        return;
+    case 'mg'
+        % Continue below
+    otherwise
+        errMsg = ['Unknown PVC method: ' pvcOpts.method];
+        return;
+end
+% Effective PSF: scanner resolution (given, or stored at import) + recorded smoothing
+PET = [];
+try
+    w = load(file_fullpath(PetFile), 'PET');
+    if isfield(w, 'PET'), PET = w.PET; end
+catch
+end
+[fwhm, fwhmSrc] = pet_psf_fwhm(PET, fwhm);
+fprintf('BST> PET PVC: PSF FWHM = %.2f mm [%s]\n', fwhm, fwhmSrc);
+fwhm = [fwhm fwhm fwhm];
 if ~isfield(pvcOpts, 'gmThresh')    || isempty(pvcOpts.gmThresh),    pvcOpts.gmThresh    = 0.5;         end
 if ~isfield(pvcOpts, 'csfZeroing')  || isempty(pvcOpts.csfZeroing),  pvcOpts.csfZeroing  = 1;           end
 if ~isfield(pvcOpts, 'wmcsfMethod') || isempty(pvcOpts.wmcsfMethod), pvcOpts.wmcsfMethod = 'threshold'; end
@@ -244,6 +263,9 @@ try
     sMriPvc.SCS    = sMriPet.SCS;
     sMriPvc.NCS    = sMriPet.NCS;
     sMriPvc.Header = sMriPet.Header;
+    if isfield(sMriPet, 'PET')
+        sMriPvc.PET = sMriPet.PET;
+    end
 
     % ===== CLEAN UP TEMP DIRECTORY =====
     file_delete(TmpDir, 1, 1);
@@ -265,10 +287,10 @@ try
     MriFilePvcFull = file_unique(fullfile(folder, [newBase, ext]));
     MriFilePvc = file_short(MriFilePvcFull);
     % Update comment
-    sMriPvc.Comment = file_unique([sMriPet.Comment, fileTag], {sSubject.Anatomy.Comment});
+    sMriPvc.Comment = file_unique(sprintf('%s | PVC MG %.1fmm', sMriPet.Comment, fwhm(1)), {sSubject.Anatomy.Comment});
     % Add history entry
     sMriPvc = bst_history('add', sMriPvc, 'pvc', ...
-        sprintf('Partial volume correction (Muller-Gartner, FWHM=[%g %g %g]mm)', fwhm(1), fwhm(2), fwhm(3)));
+        sprintf('Partial volume correction (Muller-Gartner, FWHM=%.2fmm [%s])', fwhm(1), fwhmSrc));
     % Save new MRI in Brainstorm format
     sMriPvc = out_mri_bst(sMriPvc, MriFilePvcFull);
     % Register new MRI in subject
