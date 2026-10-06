@@ -11,7 +11,7 @@ function [OutputFile, errorMsg] = mri_interp_vol2tess(MriFileSrc, MriFileRef, Co
 %    - Condition  : Condition name for the projection
 %    - DisplayUnits:  Units of projected data for display
 %    - ProjFrac   : Weights for depth-weighted projection of data,
-%                   give as a 3-element vector for white matter, mid and 
+%                   given as a 3-element vector for white matter, mid and
 %                   pial surface, respectively (default: [0.1 0.8 0.1])
 %                 
 
@@ -114,8 +114,9 @@ sPial  = in_tess_bst(pialFile);
 sMid   = in_tess_bst(midFile);
 sWhite = in_tess_bst(whiteFile);
 
-SurfaceFiles = {pialFile, midFile, whiteFile};
-sSurf = {sPial, sMid, sWhite};
+% Same order as ProjFrac [white, mid, pial]: the samples of surface k are weighted by ProjFrac(k)
+SurfaceFiles = {whiteFile, midFile, pialFile};
+sSurf = {sWhite, sMid, sPial};
 vol2tess = cell(1, numel(SurfaceFiles)); % Use cell array to handle different vertex counts
 
 cube2vec = double(sMriSrc.Cube(:,:,:,1));
