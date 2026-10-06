@@ -20,9 +20,15 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
 %   sMriPet : (PVC'd) static PET MRI struct, resliced to the anatomy grid.
 %   sAseg   : ASEG volume atlas struct (.Cube of integer labels) on the same grid. May be []
 %             if Opts.RefMask is supplied.
-%   Opts    : .RefMask (precomputed binary reference mask; overrides RefLabels/sAseg)
+%   Opts    : .Reference 'robust' (default) | 'plain'
+%                 'robust': reference = 10% trimmed mean of the reference region eroded by
+%                           1 voxel (positive finite voxels only). DEFAULT since this version.
+%                 'plain' : reference = plain mean of all voxels of the region, no erosion:
+%                           the previous behaviour (mri_rescale), for backward compatibility.
+%             .RefMask (precomputed binary reference mask; overrides RefLabels/sAseg)
 %             .RefLabels (default [8 47]) .Erode (voxels, 1) .Robust ('trim'|'mean'|'median')
-%             .TrimPct (each-tail fraction for 'trim', 0.10).
+%             .TrimPct (each-tail fraction for 'trim', 0.10). Erode/Robust/TrimPct apply
+%             to 'robust' only.
 %
 % OUTPUTS:
 %   sMriSuvr : SUVR volume (Cube ./ reference), Comment/History updated.
@@ -51,15 +57,17 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
 % Authors: Diellor Basha, 2026
 
     if (nargin<3)||isempty(Opts), Opts=struct(); end
-    Def=struct('RefMask',[],'RefLabels',[8 47],'Erode',1,'Robust','trim','TrimPct',0.10);
+    Def=struct('Reference','robust','RefMask',[],'RefLabels',[8 47],'Erode',1,'Robust','trim','TrimPct',0.10);
     fn=fieldnames(Def); for i=1:numel(fn), if ~isfield(Opts,fn{i}), Opts.(fn{i})=Def.(fn{i}); end; end
 
     cube = double(sMriPet.Cube(:,:,:,1));
     % Reference mask: precomputed (any region, from the caller) or built from ASEG labels.
     if ~isempty(Opts.RefMask)
         mask = logical(Opts.RefMask);
+        refDesc = 'mask';
     elseif ~isempty(sAseg)
         mask = ismember(sAseg.Cube, Opts.RefLabels);
+        refDesc = ['labels ' mat2str(Opts.RefLabels)];
     else
         error('pet_suvr:ref', 'Provide Opts.RefMask, or sAseg + Opts.RefLabels.');
     end
@@ -67,12 +75,22 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
         error('pet_suvr:grid', 'PET grid %s != reference mask grid %s (reslice PET to anatomy first).', ...
               mat2str(size(cube)), mat2str(size(mask)));
     end
-    er = mask; for k=1:Opts.Erode, er = local_erode(er); end
-    if nnz(er) < 50, er = mask; end                      % erosion too aggressive -> fall back
-
-    vals = cube(er); vals = vals(isfinite(vals) & vals>0);
-    if isempty(vals)
-        error('pet_suvr:emptyref', 'Reference region contains no positive finite PET values.');
+    isPlain = strcmpi(Opts.Reference, 'plain');
+    if isPlain
+        % Backward compatible: plain mean over the whole region (as mri_rescale)
+        er = mask;
+        vals = cube(mask);
+        if isempty(vals) || all(vals == 0) || ~all(isfinite(vals))
+            error('pet_suvr:emptyref', 'Reference region is empty, all zero or not finite.');
+        end
+        Opts.Erode = 0; Opts.Robust = 'mean';
+    else
+        er = mask; for k=1:Opts.Erode, er = local_erode(er); end
+        if nnz(er) < 50, er = mask; end                  % erosion too aggressive -> fall back
+        vals = cube(er); vals = vals(isfinite(vals) & vals>0);
+        if isempty(vals)
+            error('pet_suvr:emptyref', 'Reference region contains no positive finite PET values.');
+        end
     end
     vs = sort(vals); t = round(Opts.TrimPct*numel(vs));
     if (2*t >= numel(vs)), t = 0; end                    % too few voxels to trim
@@ -87,12 +105,12 @@ function [sMriSuvr, info] = pet_suvr(sMriPet, sAseg, Opts)
     sMriSuvr.Cube = double(sMriPet.Cube) ./ ref;         % double: an integer cube would round the SUVR
     sMriSuvr.Comment = [sMriPet.Comment '_suvr'];
     sMriSuvr = bst_history('add', sMriSuvr, 'suvr', sprintf( ...
-        'SUVR ref=%.4g (labels %s, erode %d, %s); mask %d->%d vox', ...
-        ref, mat2str(Opts.RefLabels), Opts.Erode, Opts.Robust, nnz(mask), nnz(er)));
+        'SUVR ref=%.4g (%s reference, %s, erode %d, %s); mask %d->%d vox', ...
+        ref, lower(Opts.Reference), refDesc, Opts.Erode, Opts.Robust, nnz(mask), nnz(er)));
 
     info = struct('RefValue',ref,'nVoxMask',nnz(mask),'nVoxEroded',nnz(er), ...
                   'RefMean',mean(vals),'RefMedian',median(vals),'RefTrim',refTrim, ...
-                  'Erode',Opts.Erode,'Robust',Opts.Robust);
+                  'Erode',Opts.Erode,'Robust',Opts.Robust,'Reference',lower(Opts.Reference));
 end
 
 function e = local_erode(m)

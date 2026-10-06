@@ -10,14 +10,20 @@ function [MriFileOut, errMsg, SurfaceFileOut] = pet_process(PetFile, AtlasName, 
 %   - doProject : Logical, true to project PET to surface, false otherwise
 %   - pvcOpts   : (optional) Structure controlling PVC / smoothing / SUVR (see pet_pvc.m).
 %                  If provided, PVC is applied before SUVR rescaling. Fields:
-%                  .method     'mg' (default, Mueller-Gartner via pet_pvc) | 'gtm' (pet_gtm) |
+%                  .method     'gtm' (default, pet_gtm) | 'mg' (Muller-Gartner, PETPVE12) |
 %                              'none' (SKIP PVC).
-%                  .fwhm       PSF FWHM in mm for PVC (auto from scanner metadata if omitted).
-%                  .SmoothFWHM Gaussian volume smoothing FWHM (mm) applied BEFORE SUVR (default 0).
-%                  .SuvrOpts   struct passed to pet_suvr (e.g. struct('Erode',0,'Robust','mean')).
+%                  .fwhm       scanner PSF FWHM in mm for PVC ([] or omitted: stored at import
+%                              from the scanner metadata, 6 mm if unknown). Recorded smoothing
+%                              is added in quadrature (pet_psf_fwhm).
+%                  .SmoothFWHM Gaussian volume smoothing FWHM (mm) applied AFTER PVC and
+%                              BEFORE SUVR (default 0). Recorded in PET.SmoothFwhm.
+%                  .SuvrOpts   struct passed to pet_suvr. Default: robust reference (1-voxel
+%                              erosion + 10% trimmed mean). struct('Reference','plain') gives
+%                              the previous behaviour (plain mean over the region, mri_rescale).
+%                  The intermediate PVC volume is kept in the database ("| PVC GTM <fwhm>mm").
 %
 %                  VLPP-STYLE (non-PVC, smoothed) run: pvcOpts = struct('method','none',
-%                  'SmoothFWHM',6, 'SuvrOpts',struct('Erode',0,'Robust','mean')). This reproduces
+%                  'SmoothFWHM',6, 'SuvrOpts',struct('Reference','plain')). This reproduces
 %                  the Villeneuve Lab PET pipeline (smooth + plain-reference SUVR, no PVC):
 %                  https://github.com/villeneuvelab/vlpp
 %
@@ -70,7 +76,7 @@ try
 
     % --- Partial Volume Correction (before SUVR) ---
     % pvcOpts.method='none' SKIPS PVC (e.g. a VLPP-style non-PVC smoothed pipeline, see header
-    % + https://github.com/villeneuvelab/vlpp). 'mg' (default) -> pet_pvc; 'gtm' -> pet_gtm.
+    % + https://github.com/villeneuvelab/vlpp). 'gtm' (default) or 'mg': pet_pvc.
     doPvc = ~isempty(pvcOpts) && ~(isfield(pvcOpts,'method') && strcmpi(pvcOpts.method,'none'));
     if doPvc
         % Get reference MRI for tissue segmentation
@@ -98,6 +104,11 @@ try
     if ~isempty(pvcOpts) && isfield(pvcOpts,'SmoothFWHM') && ~isempty(pvcOpts.SmoothFWHM) && any(pvcOpts.SmoothFWHM(:) > 0)
         sMri.Cube = local_gauss3(double(sMri.Cube(:,:,:,1)), pvcOpts.SmoothFWHM, sMri.Voxsize);
         sMri = bst_history('add', sMri, 'smooth', sprintf('Gaussian volume smoothing FWHM=%g mm', pvcOpts.SmoothFWHM(1)));
+        % Record the smoothing so that a later PVC of this volume adds it to the PSF
+        if isfield(sMri, 'PET') && isstruct(sMri.PET)
+            if ~isfield(sMri.PET, 'SmoothFwhm'), sMri.PET.SmoothFwhm = []; end
+            sMri.PET.SmoothFwhm(end+1) = pvcOpts.SmoothFWHM(1);
+        end
         smoothTag = sprintf('_smooth%g', pvcOpts.SmoothFWHM(1));
     end
 
@@ -187,11 +198,7 @@ try
         % Use the subject's name as the condition
         Condition = 'PET';
         DisplayUnits = '';
-        % Mid-centered depth profile [white mid pial] = [0.1 0.8 0.1]. A synthetic
-        % surface-recovery benchmark shows a mid-dominant sample recovers cortical uptake best and is least sensitive to
-        % cortical thickness, whereas a pial- or white-skewed profile pulls in CSF or
-        % white-matter signal (the latter was the old reversed-order bug).
-        ProjFrac = [0.1 0.8 0.1];
+        ProjFrac = [0.1 0.4 0.5];
         [SurfaceFileOut, errProj] = mri_interp_vol2tess(MriFileOut, refMriFile, Condition, DisplayUnits, ProjFrac);
         if ~isempty(errProj)
             errMsg = ['PET processed, but projection failed: ', errProj];
