@@ -210,21 +210,24 @@ sFilesRaw = bst_process('CallProcess', 'process_import_bids', [], [], ...
     'nvertices',        15000, ...        % ignored on the icosphere path
     'channelalign',     0);
 
-% process_import_bids often returns [] even when the recordings WERE imported
-% (raw CTF links). Recover the handles from the DB by scanning ALL of the
-% subject's studies (NOT just @intra_subject, which never holds raw recordings).
-if isempty(sFilesRaw)
-    fprintf('process_import_bids returned no handles; recovering from protocol DB...\n');
-    [sSubject, iSubject] = bst_get('Subject', SubjectName); %#ok<ASGLU>
-    if ~isempty(iSubject)
-        sStudies = bst_get('StudyWithSubject', sSubject.FileName);   % all studies
-        for iSt = 1:numel(sStudies)
-            for iData = 1:numel(sStudies(iSt).Data)
-                sFilesRaw(end+1).FileName = sStudies(iSt).Data(iData).FileName; %#ok<AGROW>
-            end
+% process_import_bids returns [] -- or a PARTIAL list (rest only: 20 OMEGA controls, array
+% 63280594, lost their task-noise run this way) -- even when every recording WAS imported (raw
+% CTF links). So the handle list is ALWAYS rebuilt from the DB, scanning ALL of the subject's
+% studies (NOT just @intra_subject, which never holds raw recordings).
+nReturned = numel(sFilesRaw);
+[sSubject, iSubject] = bst_get('Subject', SubjectName); %#ok<ASGLU>
+if ~isempty(iSubject)
+    sFilesDb = struct('FileName', {});
+    sStudies = bst_get('StudyWithSubject', sSubject.FileName);   % all studies
+    for iSt = 1:numel(sStudies)
+        for iData = 1:numel(sStudies(iSt).Data)
+            sFilesDb(end+1).FileName = sStudies(iSt).Data(iData).FileName; %#ok<AGROW>
         end
     end
-    fprintf('Recovered %d data file(s) from DB.\n', numel(sFilesRaw));
+    fprintf('Recordings: %d returned by process_import_bids, %d in the protocol DB.\n', nReturned, numel(sFilesDb));
+    if numel(sFilesDb) >= nReturned
+        sFilesRaw = sFilesDb;
+    end
 end
 if isempty(sFilesRaw)
     error('BIDS import produced no data files for %s', SubjectName);
