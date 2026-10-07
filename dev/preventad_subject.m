@@ -506,22 +506,32 @@ end
 %% MODULE: TIMEFREQ  (band-power maps on dSPM sources, projected to template)
 %% ########################################################################
 function pa_power(sFilesRest)
-% Resolve the standard-dSPM source links for these rest recordings.
-srcLinks = {};
+% Resolve the standard-dSPM source files of these rest recordings.
+% ⚠ pa_source computes dSPM with 'output',2 (kernel only, ONE PER FILE): the kernel is a plain
+% results_*_KERNEL_* entry in the data study with DataFile = the rest run, NOT a 'link|' entry.
+% Only SHARED kernels (the Dirac one, DataFile '') become 'link|<kernel>|<data>' entries. The old
+% 'link|' scan therefore found nothing and every timefreq task died with "No dSPM source links"
+% (fir 63375311, 63375289). Ask the DB which results belong to each data file, as Brainstorm's
+% own processes do (bst_get ResultsForDataFile): per-file kernels and shared-kernel links alike.
+srcFiles = {};
 for iR = 1:numel(sFilesRest)
-    sStudyR = bst_get('AnyFile', sFilesRest(iR).FileName);
-    if isempty(sStudyR) || isempty(sStudyR.Result); continue; end
-    for iRes = 1:numel(sStudyR.Result)
-        fn = sStudyR.Result(iRes).FileName;
-        if ~isempty(strfind(fn,'link|')) && isempty(strfind(fn,'DiracEig'))
-            srcLinks{end+1} = fn; %#ok<AGROW>
-        end
+    [sStudyR, iStudyR] = bst_get('AnyFile', sFilesRest(iR).FileName);
+    if isempty(sStudyR); continue; end
+    [~, ~, iRes] = bst_get('ResultsForDataFile', sFilesRest(iR).FileName, iStudyR);
+    for k = iRes(:)'
+        sRes = sStudyR.Result(k);
+        if contains(sRes.FileName, 'DiracEig') || startsWith(sRes.Comment, 'Dirac'); continue; end
+        if ~contains(sRes.FileName, '_KERNEL_'); continue; end   % kernels only (dSPM, kernel-only)
+        srcFiles{end+1} = sRes.FileName; %#ok<AGROW>
     end
 end
-if isempty(srcLinks)
-    error('No dSPM source links found for the rest recordings; cannot compute power maps.');
+srcFiles = unique(srcFiles, 'stable');
+if isempty(srcFiles)
+    error('No dSPM source files found for the rest recordings; cannot compute power maps.');
 end
-sP = bst_process('CallProcess', 'process_psd', srcLinks, [], ...
+fprintf('Power maps from %d dSPM source file(s):\n', numel(srcFiles));
+fprintf('  %s\n', srcFiles{:});
+sP = bst_process('CallProcess', 'process_psd', srcFiles, [], ...
     'timewindow', [0 100], 'win_length', 4, 'win_overlap', 50, 'scoutfunc', 1, ...
     'edit', struct('Comment','Power,FreqBands', 'TimeBands',[], ...
         'Freqs',{{'delta','2, 4','mean'; 'theta','5, 7','mean'; 'alpha','8, 12','mean'; ...
