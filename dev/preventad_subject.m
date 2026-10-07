@@ -217,16 +217,20 @@ sFilesRaw = bst_process('CallProcess', 'process_import_bids', [], [], ...
 nReturned = numel(sFilesRaw);
 [sSubject, iSubject] = bst_get('Subject', SubjectName); %#ok<ASGLU>
 if ~isempty(iSubject)
-    sFilesDb = struct('FileName', {});
+    DbFileNames = {};
     sStudies = bst_get('StudyWithSubject', sSubject.FileName);   % all studies
     for iSt = 1:numel(sStudies)
         for iData = 1:numel(sStudies(iSt).Data)
-            sFilesDb(end+1).FileName = sStudies(iSt).Data(iData).FileName; %#ok<AGROW>
+            DbFileNames{end+1} = sStudies(iSt).Data(iData).FileName; %#ok<AGROW>
         end
     end
-    fprintf('Recordings: %d returned by process_import_bids, %d in the protocol DB.\n', nReturned, numel(sFilesDb));
-    if numel(sFilesDb) >= nReturned
-        sFilesRaw = sFilesDb;
+    fprintf('Recordings: %d returned by process_import_bids, %d in the protocol DB.\n', nReturned, numel(DbFileNames));
+    % ⚠ The rebuilt list must be a FULL processfile struct (FileType, iStudy, ChannelFile ...):
+    % CallProcess passes any struct through unchecked, so a FileName-only struct dies in
+    % bst_process Run with 'Unrecognized field name "FileType"' (fir canaries 63372975 /
+    % 63372965 on 8ed040b0). GetInputStruct builds it from the DB.
+    if ~isempty(DbFileNames) && numel(DbFileNames) >= nReturned
+        sFilesRaw = bst_process('GetInputStruct', DbFileNames);
     end
 end
 if isempty(sFilesRaw)
