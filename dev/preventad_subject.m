@@ -215,6 +215,7 @@ sFilesRaw = bst_process('CallProcess', 'process_import_bids', [], [], ...
 % CTF links). So the handle list is ALWAYS rebuilt from the DB, scanning ALL of the subject's
 % studies (NOT just @intra_subject, which never holds raw recordings).
 nReturned = numel(sFilesRaw);
+if ~isempty(sFilesRaw), pa_dump('returned by process_import_bids', sFilesRaw); end
 [sSubject, iSubject] = bst_get('Subject', SubjectName); %#ok<ASGLU>
 if ~isempty(iSubject)
     DbFileNames = {};
@@ -225,6 +226,7 @@ if ~isempty(iSubject)
         end
     end
     fprintf('Recordings: %d returned by process_import_bids, %d in the protocol DB.\n', nReturned, numel(DbFileNames));
+    pa_dump('DB', DbFileNames);
     % ⚠ The rebuilt list must be a FULL processfile struct (FileType, iStudy, ChannelFile ...):
     % CallProcess passes any struct through unchecked, so a FileName-only struct dies in
     % bst_process Run with 'Unrecognized field name "FileType"' (fir canaries 63372975 /
@@ -248,9 +250,36 @@ end
 
 % Head points cleanup + continuous CTF (resample happens in preprocess so the
 % pre-resample raw handle survives for the 3-way folder cleanup there).
+pa_dump('import', sFilesRaw);
 sFilesRaw = bst_process('CallProcess', 'process_headpoints_remove', sFilesRaw, [], 'zlimit', 0);
+pa_dump('headpoints_remove', sFilesRaw);
 sFilesRaw = bst_process('CallProcess', 'process_headpoints_refine', sFilesRaw, []);
+pa_dump('headpoints_refine', sFilesRaw);
 sFilesRaw = bst_process('CallProcess', 'process_ctf_convert',       sFilesRaw, [], 'rectype', 2);
+pa_dump('ctf_convert', sFilesRaw);
+end
+
+
+%% ===== DIAGNOSTIC: the recording list at each step, with its sampling rate =====
+function pa_dump(stage, sFiles)
+% One line per recording: stage, file, sampling rate and duration read from the DB file.
+% Added to find where task-noise drops out (5664c598: sub-0166 canary 63518193 resampled
+% only the rest run although both runs were in the DB). Prints only; changes nothing.
+if isstruct(sFiles), names = {sFiles.FileName}; else, names = cellstr(sFiles); end
+fprintf('PA_DUMP %s: %d file(s)\n', stage, numel(names));
+for k = 1:numel(names)
+    try
+        M = in_bst_data(names{k}, 'Time', 'F');
+        if isstruct(M.F) && isfield(M.F, 'prop')       % raw link: Time is only [t0 tEnd]
+            fs = M.F.prop.sfreq;  dur = diff(M.F.prop.times);
+        else
+            fs = 1 / (M.Time(2) - M.Time(1));  dur = M.Time(end) - M.Time(1);
+        end
+        fprintf('PA_DUMP   %s  fs=%.2f Hz  dur=%.1f s\n', names{k}, fs, dur);
+    catch e
+        fprintf('PA_DUMP   %s  (unreadable: %s)\n', names{k}, e.message);
+    end
+end
 end
 
 
@@ -260,12 +289,15 @@ end
 function [sFilesRest, sFilesBand] = pa_preprocess(sFilesRaw)
 % Resample 2400->1200 FIRST (lossless for <=300 Hz; halves samples/file size),
 % then notch 60/120/180/240/300 + high-pass 0.3 Hz.
+pa_dump('preprocess input', sFilesRaw);
 sFilesResample = bst_process('CallProcess', 'process_resample', sFilesRaw, [], 'freq', 1200);
+pa_dump('resample', sFilesResample);
 sFilesNotch = bst_process('CallProcess', 'process_notch', sFilesResample, [], ...
     'freqlist', [60 120 180 240 300], 'sensortypes', 'MEG, EEG', 'read_all', 1);
 sFilesBand  = bst_process('CallProcess', 'process_bandpass', sFilesNotch, [], ...
     'sensortypes', 'MEG, EEG', 'highpass', 0.3, 'lowpass', 0, ...
     'attenuation', 'strict', 'mirror', 0, 'useold', 0, 'read_all', 1);
+pa_dump('bandpass', sFilesBand);
 
 % PSD (Welch) over the FULL recording, FULL spectrum (timewindow []=whole file,
 % Freqs []=all bins). Sensor-level QC of the cleaned band-pass data.
@@ -312,6 +344,7 @@ function sSrc = pa_source(sFilesRest, sFilesBand)
 if isempty(sFilesRest)
     error('pa_source: no task-rest recording to source-localise.');
 end
+pa_dump('source input (band)', sFilesBand);
 sFilesNoise = bst_process('CallProcess', 'process_select_tag', sFilesBand, [], ...
     'tag', 'task-noise', 'search', 1, 'select', 1);
 if isempty(sFilesNoise)
