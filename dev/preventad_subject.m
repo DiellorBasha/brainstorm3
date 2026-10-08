@@ -261,6 +261,24 @@ end
 
 
 %% ===== DIAGNOSTIC: the recording list at each step, with its sampling rate =====
+function isWhole = pa_needs_read_all(sFiles)
+% True for each raw CTF recording whose stored compensation grade differs from the target
+% grade: bst_process cannot process it channel by channel (see pa_preprocess).
+isWhole = false(1, numel(sFiles));
+for k = 1:numel(sFiles)
+    M = in_bst_data(sFiles(k).FileName, 'F');
+    if isstruct(M.F) && isfield(M.F, 'prop') && isfield(M.F.prop, 'currCtfComp') ...
+            && isfield(M.F.prop, 'destCtfComp') && ~isempty(M.F.prop.destCtfComp) ...
+            && ismember(M.F.format, {'CTF', 'CTF-CONTINUOUS'}) ...
+            && (M.F.prop.currCtfComp ~= M.F.prop.destCtfComp)
+        isWhole(k) = true;
+        fprintf('PA_CTFCOMP %s: stored grade %d, target %d -> resample whole file\n', ...
+            sFiles(k).FileName, M.F.prop.currCtfComp, M.F.prop.destCtfComp);
+    end
+end
+end
+
+
 function pa_dump(stage, sFiles)
 % One line per recording: stage, file, sampling rate and duration read from the DB file.
 % Added to find where task-noise drops out (5664c598: sub-0166 canary 63518193 resampled
@@ -290,7 +308,24 @@ function [sFilesRest, sFilesBand] = pa_preprocess(sFilesRaw)
 % Resample 2400->1200 FIRST (lossless for <=300 Hz; halves samples/file size),
 % then notch 60/120/180/240/300 + high-pass 0.3 Hz.
 pa_dump('preprocess input', sFilesRaw);
-sFilesResample = bst_process('CallProcess', 'process_resample', sFilesRaw, [], 'freq', 1200);
+% process_resample works channel by channel, and bst_process refuses that for a CTF file
+% whose stored compensation grade differs from the target grade (OMEGA sub-0166: noise
+% run stored at grade 0, rest at grade 3; target 3). The refusal is only a bst_report
+% Error, so the file silently vanished and SOURCE later failed with "No task-noise
+% recording found" (5664c598). Such files are resampled whole ('read_all'), which also
+% applies the grade-3 compensation, so noise and rest end up on the same grade.
+isWhole = pa_needs_read_all(sFilesRaw);
+cOut = cell(1, numel(sFilesRaw));
+for k = 1:numel(sFilesRaw)
+    sOut = bst_process('CallProcess', 'process_resample', sFilesRaw(k), [], ...
+        'freq', 1200, 'read_all', double(isWhole(k)));
+    if isempty(sOut)
+        error('Resample dropped %s (read_all=%d); see the Brainstorm report.', ...
+            sFilesRaw(k).FileName, isWhole(k));
+    end
+    cOut{k} = sOut;
+end
+sFilesResample = [cOut{:}];
 pa_dump('resample', sFilesResample);
 sFilesNotch = bst_process('CallProcess', 'process_notch', sFilesResample, [], ...
     'freqlist', [60 120 180 240 300], 'sensortypes', 'MEG, EEG', 'read_all', 1);
