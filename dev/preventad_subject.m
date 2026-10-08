@@ -279,6 +279,17 @@ end
 end
 
 
+function fs = pa_sfreq(FileName)
+% Sampling rate of a DB recording: from the raw-link header, else from its time vector.
+M = in_bst_data(FileName, 'Time', 'F');
+if isstruct(M.F) && isfield(M.F, 'prop') && isfield(M.F.prop, 'sfreq')
+    fs = M.F.prop.sfreq;
+else
+    fs = 1 / (M.Time(2) - M.Time(1));
+end
+end
+
+
 function pa_dump(stage, sFiles)
 % One line per recording: stage, file, sampling rate and duration read from the DB file.
 % Added to find where task-noise drops out (5664c598: sub-0166 canary 63518193 resampled
@@ -314,9 +325,18 @@ pa_dump('preprocess input', sFilesRaw);
 % Error, so the file silently vanished and SOURCE later failed with "No task-noise
 % recording found" (5664c598). Such files are resampled whole ('read_all'), which also
 % applies the grade-3 compensation, so noise and rest end up on the same grade.
+% A file already at 1200 Hz (OMEGA sub-0020: task-noise recorded at 1200 Hz, rest at 2400)
+% cannot be resampled: process_resample refuses with "Sampling frequency was not changed" and
+% returns nothing. Such a file passes through unchanged; notch and band-pass below run with
+% read_all = 1, so a grade-mismatched one is still compensated to the target grade there.
 isWhole = pa_needs_read_all(sFilesRaw);
 cOut = cell(1, numel(sFilesRaw));
 for k = 1:numel(sFilesRaw)
+    if abs(pa_sfreq(sFilesRaw(k).FileName) - 1200) < 0.05
+        fprintf('PA_RESAMPLE_SKIP %s: already at 1200 Hz, passed through\n', sFilesRaw(k).FileName);
+        cOut{k} = sFilesRaw(k);
+        continue;
+    end
     sOut = bst_process('CallProcess', 'process_resample', sFilesRaw(k), [], ...
         'freq', 1200, 'read_all', double(isWhole(k)));
     if isempty(sOut)
