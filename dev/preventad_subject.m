@@ -156,7 +156,7 @@ try
             case 'preprocess'
                 [sFilesRest, sFilesBand] = pa_preprocess(sFilesRaw);
             case 'source'
-                sSrc       = pa_source(sFilesRest, sFilesBand); %#ok<NASGU>
+                [sSrc, sFilesRest] = pa_source(sFilesRest, sFilesBand); %#ok<ASGLU>
             case 'timefreq'
                 pa_power(sFilesRest);
         end
@@ -402,7 +402,7 @@ end
 %% ########################################################################
 %% MODULE: SOURCE  (noise cov, OS head model, nxr manifold, dSPM + Dirac dSPM)
 %% ########################################################################
-function sSrc = pa_source(sFilesRest, sFilesBand)
+function [sSrc, sFilesRest] = pa_source(sFilesRest, sFilesBand)
 % ⚠ bst_process NEVER throws: a failing process writes an 'error' line into the
 % Brainstorm report and returns. Every call below goes through pa_call, which turns
 % such an entry into a MATLAB error, and every product (noise cov, head model, dSPM
@@ -457,7 +457,12 @@ pa_assert_study(sFilesRest, 'NoiseCov', 'noise covariance');
 %    sub-MNI0079), or the fit still fails, remove that refinement -- back to the head-coil/fiducial
 %    alignment -- and retry ONCE. A failure after that is a data problem (MRI or digitisation) and
 %    fails the task.
-pa_headmodel_robust(sFilesRest);
+%  - run: when the OS fit still fails after the new head surface and the subject has several rest
+%    runs, fit each run alone (each run has its own channel file / head position); the runs that
+%    fit are kept, the others are deleted from the protocol and logged ('RUN FALLBACK'), so every
+%    rest run in the archive has its head model and kernels (PREVENT-AD sub-MTL0304: run-01 fits,
+%    run-02 does not). No run fits -> the registration fallback.
+sFilesRest = pa_headmodel_robust(sFilesRest);
 pa_assert_study(sFilesRest, 'HeadModel', 'head model');
 
 % nxr manifold backbone (find-or-create) — needs nxr-compute plugin
@@ -483,7 +488,8 @@ end
 
 
 %% ===== SOURCE helper: head model with the head-surface and registration fallbacks =====
-function pa_headmodel_robust(sFilesRest)
+function sFilesRest = pa_headmodel_robust(sFilesRest)
+% Returns the rest runs that have a head model (all of them unless the run fallback dropped some).
 [ok, msg] = pa_try_headmodel(sFilesRest);
 if ok, return; end
 isOS = ~isempty(strfind(msg, 'bst_os'));
@@ -495,6 +501,23 @@ if isOS
     if ok
         fprintf('HEAD SURFACE FALLBACK: head model OK with the regenerated head surface\n');
         return;
+    end
+    if ~isempty(strfind(msg, 'bst_os')) && numel(sFilesRest) > 1
+        keep = false(1, numel(sFilesRest));
+        for k = 1:numel(sFilesRest)
+            [keep(k), mk] = pa_try_headmodel(sFilesRest(k));
+            if ~keep(k)
+                fprintf('RUN FALLBACK: no head model for %s: %s\n', sFilesRest(k).FileName, mk);
+            end
+        end
+        if any(keep)
+            drop = sFilesRest(~keep);
+            fprintf('RUN FALLBACK: keeping %d of %d rest runs; deleting from the protocol: %s\n', ...
+                nnz(keep), numel(keep), strjoin({drop.FileName}, ', '));
+            bst_process('CallProcess', 'process_delete', drop, [], 'target', 2);
+            sFilesRest = sFilesRest(keep);
+            return;
+        end
     end
 end
 if isempty(strfind(msg, 'inside the brain')) && isempty(strfind(msg, 'bst_os'))
