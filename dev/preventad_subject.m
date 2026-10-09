@@ -434,22 +434,17 @@ pa_assert_study(sFilesRest, 'NoiseCov', 'noise covariance');
 % of process_headmodel is OpenMEEG BEM (eeg=3), which needs an inner skull. ⚠ OMEGA
 % recordings that carry EEG-typed channels therefore failed the WHOLE head model
 % with "OpenMEEG: Inner skull surface not available" — silently.
-% Registration fallback: when the head-point refinement (ICP, pa_import) pulls the helmet into
-% the head ("sensors ... inside the brain volume"; OMEGA sub-0153, sub-CONP0078 = PREVENT-AD
-% sub-MTL0160, sub-MNI0079), remove that refinement -- back to the head-coil/fiducial alignment
-% -- and retry ONCE. A second failure is a data problem (MRI or digitisation) and fails the task.
-try
-    pa_call('process_headmodel', sFilesRest, ...
-        'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
-catch err
-    if isempty(strfind(err.message, 'inside the brain')), rethrow(err); end
-    fprintf('REGISTRATION FALLBACK: %s\n  -> removing the head-point refinement, retrying the head model (fiducials only)\n', err.message);
-    pa_call('process_adjust_coordinates', sFilesRest, ...
-        'reset', 0, 'head', 0, 'points', 1, 'remove', 1, 'display', 0);
-    pa_call('process_headmodel', sFilesRest, ...
-        'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
-    fprintf('REGISTRATION FALLBACK: head model OK without the head-point refinement\n');
-end
+% Head model with two fallbacks (pa_headmodel_robust):
+%  - head surface: when the overlapping-spheres fit diverges on the scalp (bst_os: "check
+%    scalp/sensors alignment; make sure the scalp is clean"; OMEGA sub-CONP0091, PREVENT-AD
+%    sub-MTL0304), regenerate the head surface from the MRI (Brainstorm "Generate head surface",
+%    10000 vertices, erode 0, fill 2; it becomes the default scalp) and retry ONCE;
+%  - registration: when the head-point refinement (ICP, pa_import) pulls the helmet into the head
+%    ("sensors ... inside the brain volume"; OMEGA sub-0153, sub-CONP0078 = PREVENT-AD sub-MTL0160,
+%    sub-MNI0079), or the fit still fails, remove that refinement -- back to the head-coil/fiducial
+%    alignment -- and retry ONCE. A failure after that is a data problem (MRI or digitisation) and
+%    fails the task.
+pa_headmodel_robust(sFilesRest);
 pa_assert_study(sFilesRest, 'HeadModel', 'head model');
 
 % nxr manifold backbone (find-or-create) — needs nxr-compute plugin
@@ -471,6 +466,44 @@ pa_call('process_inverse_dirac', sFilesRest, ...
     'noisereg',0.1, 'sensortypes','MEG');
 
 pa_assert_kernels(sFilesRest);
+end
+
+
+%% ===== SOURCE helper: head model with the head-surface and registration fallbacks =====
+function pa_headmodel_robust(sFilesRest)
+[ok, msg] = pa_try_headmodel(sFilesRest);
+if ok, return; end
+isOS = ~isempty(strfind(msg, 'bst_os'));
+if isOS
+    fprintf('HEAD SURFACE FALLBACK: %s\n  -> regenerating the head surface from the MRI, retrying the head model\n', msg);
+    pa_call('process_generate_head', [], 'subjectname', sFilesRest(1).SubjectName, ...
+        'nvertices', 10000, 'erodefactor', 0, 'fillfactor', 2);
+    [ok, msg] = pa_try_headmodel(sFilesRest);
+    if ok
+        fprintf('HEAD SURFACE FALLBACK: head model OK with the regenerated head surface\n');
+        return;
+    end
+end
+if isempty(strfind(msg, 'inside the brain')) && isempty(strfind(msg, 'bst_os'))
+    error('%s', msg);
+end
+fprintf('REGISTRATION FALLBACK: %s\n  -> removing the head-point refinement, retrying the head model (fiducials only)\n', msg);
+pa_call('process_adjust_coordinates', sFilesRest, ...
+    'reset', 0, 'head', 0, 'points', 1, 'remove', 1, 'display', 0);
+pa_call('process_headmodel', sFilesRest, ...
+    'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
+fprintf('REGISTRATION FALLBACK: head model OK without the head-point refinement\n');
+end
+
+function [ok, msg] = pa_try_headmodel(sFilesRest)
+% ONE overlapping-spheres head model, MEG ONLY (see pa_source).
+ok = true; msg = '';
+try
+    pa_call('process_headmodel', sFilesRest, ...
+        'sourcespace', 1, 'meg', 3, 'eeg', 1, 'ecog', 1, 'seeg', 1);
+catch e
+    ok = false; msg = e.message;
+end
 end
 
 
