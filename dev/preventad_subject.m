@@ -316,8 +316,11 @@ end
 %% MODULE: PREPROCESS  (notch harmonics, hp 0.3, SSP, bad segments)
 %% ########################################################################
 function [sFilesRest, sFilesBand] = pa_preprocess(sFilesRaw)
-% Resample 2400->1200 FIRST (lossless for <=300 Hz; halves samples/file size),
-% then notch 60/120/180/240/300 + high-pass 0.3 Hz.
+% Resample every recording to ONE rate FIRST, file by file: 1200 Hz (lossless for <=300 Hz;
+% halves samples/file size), or the subject's slowest rate when lower (preventad_rate), then
+% notch the 60 Hz harmonics below Nyquist + high-pass 0.3 Hz. Noise and rest arrive at mixed
+% rates (OMEGA: noise 6000/rest 2400, rest 6000/noise 2400, noise 1200, noise 600 for
+% sub-PD1306), and the noise covariance must describe the same band as the rest data.
 pa_dump('preprocess input', sFilesRaw);
 % process_resample works channel by channel, and bst_process refuses that for a CTF file
 % whose stored compensation grade differs from the target grade (OMEGA sub-0166: noise
@@ -330,15 +333,19 @@ pa_dump('preprocess input', sFilesRaw);
 % returns nothing. Such a file passes through unchanged; notch and band-pass below run with
 % read_all = 1, so a grade-mismatched one is still compensated to the target grade there.
 isWhole = pa_needs_read_all(sFilesRaw);
+fsRaw   = arrayfun(@(f) pa_sfreq(f.FileName), sFilesRaw);
+[fsTarget, notchList] = preventad_rate(fsRaw);
+fprintf('PA_RATE target %.0f Hz (recordings at %s Hz); notch %s Hz\n', ...
+    fsTarget, mat2str(round(fsRaw)), mat2str(notchList));
 cOut = cell(1, numel(sFilesRaw));
 for k = 1:numel(sFilesRaw)
-    if abs(pa_sfreq(sFilesRaw(k).FileName) - 1200) < 0.05
-        fprintf('PA_RESAMPLE_SKIP %s: already at 1200 Hz, passed through\n', sFilesRaw(k).FileName);
+    if abs(fsRaw(k) - fsTarget) < 0.05
+        fprintf('PA_RESAMPLE_SKIP %s: already at %.0f Hz, passed through\n', sFilesRaw(k).FileName, fsTarget);
         cOut{k} = sFilesRaw(k);
         continue;
     end
     sOut = bst_process('CallProcess', 'process_resample', sFilesRaw(k), [], ...
-        'freq', 1200, 'read_all', double(isWhole(k)));
+        'freq', fsTarget, 'read_all', double(isWhole(k)));
     if isempty(sOut)
         error('Resample dropped %s (read_all=%d); see the Brainstorm report.', ...
             sFilesRaw(k).FileName, isWhole(k));
@@ -348,11 +355,17 @@ end
 sFilesResample = [cOut{:}];
 pa_dump('resample', sFilesResample);
 sFilesNotch = bst_process('CallProcess', 'process_notch', sFilesResample, [], ...
-    'freqlist', [60 120 180 240 300], 'sensortypes', 'MEG, EEG', 'read_all', 1);
+    'freqlist', notchList, 'sensortypes', 'MEG, EEG', 'read_all', 1);
+if numel(sFilesNotch) ~= numel(sFilesResample)
+    error('Notch returned %d of %d recordings; see the Brainstorm report.', numel(sFilesNotch), numel(sFilesResample));
+end
 sFilesBand  = bst_process('CallProcess', 'process_bandpass', sFilesNotch, [], ...
     'sensortypes', 'MEG, EEG', 'highpass', 0.3, 'lowpass', 0, ...
     'attenuation', 'strict', 'mirror', 0, 'useold', 0, 'read_all', 1);
 pa_dump('bandpass', sFilesBand);
+if numel(sFilesBand) ~= numel(sFilesNotch)
+    error('Band-pass returned %d of %d recordings; see the Brainstorm report.', numel(sFilesBand), numel(sFilesNotch));
+end
 
 % PSD (Welch) over the FULL recording, FULL spectrum (timewindow []=whole file,
 % Freqs []=all bins). Sensor-level QC of the cleaned band-pass data.
