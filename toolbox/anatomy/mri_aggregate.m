@@ -90,10 +90,26 @@ switch lower(Method)
         sMri.Cube = sMri.Cube(:,:,:,end);
 end
 
-sMri.Header.dim.dim(1) = 3;       % Number of dimensions is now 3
-sMri.Header.dim.dim(5) = 1;       % Set time/frame dimension to 1
-sMri.Header.dim.pixdim(5) = 0;    % Time resolution no longer applicable
-sMri.Header.descrip = [sMri.Header.hist.descrip Method ' of 4D volume across time'];  % Add if used downstream
+% Update the NIfTI header to reflect the collapsed (3D) volume. Be defensive: a
+% resliced volume inherits the reference's Header, which may lack some optional NIfTI
+% subfields (e.g. a FreeSurfer T1 has no .hist), so guard every field access.
+if isfield(sMri, 'Header') && isfield(sMri.Header, 'dim')
+    if isfield(sMri.Header.dim, 'dim') && (numel(sMri.Header.dim.dim) >= 5)
+        sMri.Header.dim.dim(1) = 3;       % Number of dimensions is now 3
+        sMri.Header.dim.dim(5) = 1;       % Set time/frame dimension to 1
+    end
+    if isfield(sMri.Header.dim, 'pixdim') && (numel(sMri.Header.dim.pixdim) >= 5)
+        sMri.Header.dim.pixdim(5) = 0;    % Time resolution no longer applicable
+    end
+end
+if isfield(sMri, 'Header')
+    if isfield(sMri.Header, 'hist') && isfield(sMri.Header.hist, 'descrip')
+        oldDescrip = sMri.Header.hist.descrip;
+    else
+        oldDescrip = '';
+    end
+    sMri.Header.descrip = [oldDescrip Method ' of 4D volume across time'];  % Add if used downstream
+end
 
 % ===== UPDATE HISTORY ========
 fileTag = ['_' Method]; % Output file tag
