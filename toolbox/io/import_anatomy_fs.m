@@ -1,7 +1,10 @@
-function errorMsg = import_anatomy_fs(iSubject, FsDir, nVertices, isInteractive, sFid, isExtraMaps, isVolumeAtlas, isKeepMri)
+function errorMsg = import_anatomy_fs(iSubject, FsDir, nVertices, isInteractive, sFid, isExtraMaps, isVolumeAtlas, isKeepMri, Method)
 % IMPORT_ANATOMY_FS: Import a full FreeSurfer folder as the subject's anatomy, obtained with either 'recon-all' or 'recon-all-clinical'
 %
-% USAGE:  errorMsg = import_anatomy_fs(iSubject, FsDir=[ask], nVertices=[ask], isInteractive=1, sFid=[], isExtraMaps=0, isVolumeAtlas=1, isKeepMri=0)
+% USAGE:  errorMsg = import_anatomy_fs(iSubject, FsDir=[ask], nVertices=[ask], isInteractive=1, sFid=[], isExtraMaps=0, isVolumeAtlas=1, isKeepMri=0, Method=[ask])
+%
+%    - Method        : Cortex downsampling method, 'reducepatch' (default) or 'icosphere'
+%                      (icosphere = FreeSurfer/MNE-style uniform per-hemisphere resampling)
 %
 % INPUT:
 %    - iSubject      : Indice of the subject where to import the MRI
@@ -41,6 +44,10 @@ function errorMsg = import_anatomy_fs(iSubject, FsDir, nVertices, isInteractive,
 % Authors: Francois Tadel, 2012-2022
 
 %% ===== PARSE INPUTS =====
+% Cortex downsampling method ('reducepatch' or 'icosphere'); [] => ask if interactive
+if (nargin < 9) || isempty(Method)
+    Method = [];
+end
 % Keep MRI
 if (nargin < 8) || isempty(isKeepMri)
     isKeepMri = 0;
@@ -112,16 +119,57 @@ if (~isempty(sSubject.Anatomy) && (isKeepMri == 0)) || (~isempty(sSubject.Surfac
 end
 
 
-%% ===== ASK NB VERTICES =====
-if isempty(nVertices)
-    nVertices = java_dialog('input', 'Number of vertices on the cortex surface:', 'Import FreeSurfer folder', [], '15000');
-    if isempty(nVertices)
+%% ===== ASK NB VERTICES / METHOD =====
+% Ask the per-hemisphere downsampling method (interactive only; default reducepatch)
+if isInteractive && isempty(Method)
+    iMethod = java_dialog('radio', 'Cortex downsampling method:', 'Import FreeSurfer folder', [], ...
+        {'<HTML><B>reducepatch</B>: Matlab decimation to ~N vertices (default)', ...
+         '<HTML><B>icosphere</B>: FreeSurfer/MNE-style uniform grid, fixed resolution per hemisphere'}, 1);
+    if isempty(iMethod)
         return
     end
-    nVertices = str2double(nVertices);
+    if (iMethod == 2)
+        Method = 'icosphere';
+    else
+        Method = 'reducepatch';
+    end
 end
-% Number for each hemisphere
-nVertHemi = round(nVertices / 2);
+if isempty(Method)
+    Method = 'reducepatch';
+end
+% Determine the per-hemisphere target vertex count
+if strcmpi(Method, 'icosphere')
+    icoCounts = [642, 2562, 10242, 40962];   % ico3..ico6, per hemisphere
+    if isInteractive && isempty(nVertices)
+        iLevel = java_dialog('radio', 'Icosphere resolution (per hemisphere):', 'Import FreeSurfer folder', [], ...
+            {'ico3  -    642 vertices / hemisphere', ...
+             'ico4  -   2562 vertices / hemisphere', ...
+             'ico5  -  10242 vertices / hemisphere', ...
+             'ico6  -  40962 vertices / hemisphere'}, 3);
+        if isempty(iLevel)
+            return
+        end
+        nVertHemi = icoCounts(iLevel);
+    elseif ~isempty(nVertices)
+        nVertHemi = round(nVertices / 2);   % tess_downsize snaps to the nearest ico count
+    else
+        nVertHemi = 10242;                  % non-interactive default: ico5
+    end
+else
+    % reducepatch (or any other method): ask the total vertex count
+    if isempty(nVertices)
+        nVertices = java_dialog('input', 'Number of vertices on the cortex surface:', 'Import FreeSurfer folder', [], '15000');
+        if isempty(nVertices)
+            return
+        end
+        nVertices = str2double(nVertices);
+    end
+    if isempty(nVertices) || isnan(nVertices)
+        error('Invalid vertices number');
+    end
+    % Number for each hemisphere
+    nVertHemi = round(nVertices / 2);
+end
 
 
 %% ===== PARSE FREESURFER FOLDER =====
@@ -319,7 +367,7 @@ if ~isempty(TessLhFile)
 
     % Downsample
     bst_progress('start', 'Import FreeSurfer folder', 'Downsampling: left pial...');
-    [BstTessLhLowFile, iLhLow, xLhLow] = tess_downsize(BstTessLhFile, nVertHemi, 'reducepatch');
+    [BstTessLhLowFile, iLhLow, xLhLow] = tess_downsize(BstTessLhFile, nVertHemi, Method);
 end
 % Right pial
 if ~isempty(TessRhFile)
@@ -356,7 +404,7 @@ if ~isempty(TessRhFile)
 
     % Downsample
     bst_progress('start', 'Import FreeSurfer folder', 'Downsampling: right pial...');
-    [BstTessRhLowFile, iRhLow, xRhLow] = tess_downsize(BstTessRhFile, nVertHemi, 'reducepatch');
+    [BstTessRhLowFile, iRhLow, xRhLow] = tess_downsize(BstTessRhFile, nVertHemi, Method);
 end
 % Left white matter
 if ~isempty(TessLwFile)
@@ -389,7 +437,7 @@ if ~isempty(TessLwFile)
 
     % Downsample
     bst_progress('start', 'Import FreeSurfer folder', 'Downsampling: left white...');
-    [BstTessLwLowFile, iLwLow, xLwLow] = tess_downsize(BstTessLwFile, nVertHemi, 'reducepatch');
+    [BstTessLwLowFile, iLwLow, xLwLow] = tess_downsize(BstTessLwFile, nVertHemi, Method);
 end
 % Right white matter
 if ~isempty(TessRwFile)
@@ -425,7 +473,7 @@ if ~isempty(TessRwFile)
 
     % Downsample
     bst_progress('start', 'Import FreeSurfer folder', 'Downsampling: right white...');
-    [BstTessRwLowFile, iRwLow, xRwLow] = tess_downsize(BstTessRwFile, nVertHemi, 'reducepatch');
+    [BstTessRwLowFile, iRwLow, xRwLow] = tess_downsize(BstTessRwFile, nVertHemi, Method);
 end
 % Process error messages
 if ~isempty(errorMsg)
@@ -459,8 +507,8 @@ if isVolumeAtlas && ~isempty(TessLhFile) && ~isempty(TessRhFile) && ~isempty(Tes
     % If computed: downsample the surfaces
     if ~isempty(BstTessLmFile) && ~isempty(BstTessRmFile)
         bst_progress('start', 'Import FreeSurfer folder', 'Downsampling: mid-surface...');
-        [BstTessLmLowFile, iLmLow, xLmLow] = tess_downsize(BstTessLmFile, nVertHemi, 'reducepatch');
-        [BstTessRmLowFile, iRmLow, xRmLow] = tess_downsize(BstTessRmFile, nVertHemi, 'reducepatch');
+        [BstTessLmLowFile, iLmLow, xLmLow] = tess_downsize(BstTessLmFile, nVertHemi, Method);
+        [BstTessRmLowFile, iRmLow, xRmLow] = tess_downsize(BstTessRmFile, nVertHemi, Method);
     else
         errorMsg = [errorMsg 10 'Could not compute mid-surfaces: ' 10 errMsgL 10 errMsgR];
         if isInteractive

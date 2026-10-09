@@ -6,7 +6,7 @@ function [NewTessFile, iSurface, I, J] = tess_downsize( TessFile, newNbVertices,
 % INPUT: 
 %    - TessFile      : Full path to surface file to decimate
 %    - newNbVertices : Desired number of vertices
-%    - Method        : {'reducepatch', 'reducepatch_subdiv', 'iso2mesh', 'iso2mesh_project'}
+%    - Method        : {'reducepatch', 'reducepatch_subdiv', 'iso2mesh', 'icosphere', 'iso2mesh_project'}
 % OUTPUT:
 %    - NewTessFile : Filename of the newly created file
 %    - iSurface    : Index of the new surface file
@@ -94,7 +94,11 @@ if isempty(Method)
                    ['<HTML><B>iso2mesh/CGAL library:</B><BR>' ...
                     '&nbsp;&nbsp;&nbsp;| - Homogeneous mesh: all the faces have similar sizes<BR>' ...
                     '&nbsp;&nbsp;&nbsp;| - <U>Deletes</U> the atlases and the subject co-registration<BR>' ...
-                    '&nbsp;&nbsp;&nbsp;| - If the downsample looks dark, right-click > Swap faces']};
+                    '&nbsp;&nbsp;&nbsp;| - If the downsample looks dark, right-click > Swap faces'], ...
+                   ['<HTML><B>Icosphere resampling (FreeSurfer/MNE-style):</B><BR>' ...
+                    '&nbsp;&nbsp;&nbsp;| - Uniform sampling onto a regular icosahedral grid (ico3..6)<BR>' ...
+                    '&nbsp;&nbsp;&nbsp;| - Clean closed manifold mesh; keeps original vertices &amp; atlases<BR>' ...
+                    '&nbsp;&nbsp;&nbsp;| - Requires FreeSurfer sphere registration (?h.sphere.reg)']};
         %          ['<HTML><B>iso2mesh/CGAL + project on the original surface:</B><BR>' ...
         %           '&nbsp;&nbsp;&nbsp;| - Homogeneous mesh but possible <U>topological problems</U><BR>' ...
         %           '&nbsp;&nbsp;&nbsp;| - <U>Damages</U> the atlases and the subject co-registration']},
@@ -114,7 +118,8 @@ if isempty(Method)
         case 1,  Method = 'reducepatch';
         case 2,  Method = 'reducepatch_subdiv';
         case 3,  Method = 'iso2mesh';
-        case 4,  Method = 'iso2mesh_project';
+        case 4,  Method = 'icosphere';
+        case 5,  Method = 'iso2mesh_project';
     end
 end
 
@@ -365,8 +370,97 @@ switch (Method)
         J = [];
         
         
+    % ===== ICOSPHERE (FreeSurfer/MNE-STYLE) =====
+    % Resample onto a regular icosahedral grid using the FreeSurfer sphere registration.
+    % Produces a clean, closed, 2-manifold mesh with uniform vertex spacing.
+    case 'icosphere'
+        % --- Require FreeSurfer sphere registration ---
+        if ~isfield(TessMat, 'Reg') || ~isfield(TessMat.Reg, 'Sphere') || ...
+           ~isfield(TessMat.Reg.Sphere, 'Vertices') || isempty(TessMat.Reg.Sphere.Vertices) || ...
+           (size(TessMat.Reg.Sphere.Vertices, 1) ~= size(TessMat.Vertices, 1))
+            bst_progress('stop');
+            bst_error(['Surface has no FreeSurfer sphere registration (?h.sphere.reg).' 10 ...
+                       'Load it with tess_addsphere before icosphere downsampling.'], 'Resample surface', 0);
+            return;
+        end
+
+        % --- Guard: icosphere resamples a SINGLE closed surface (one hemisphere). ---
+        % A merged left+right cortex carries two overlapping registered spheres and would
+        % fuse the hemispheres into one blob. Refuse unless the mesh is a single component.
+        nComp = max(conncomp(graph(tess_vertconn(TessMat.Vertices, TessMat.Faces))));
+        if (nComp > 1)
+            bst_progress('stop');
+            bst_error(sprintf(['Icosphere resampling operates on a single hemisphere (one closed surface),' 10 ...
+                'but this surface has %d disconnected components (e.g. a merged left+right cortex).' 10 10 ...
+                'Use icosphere via the FreeSurfer import, which resamples each hemisphere separately.'], nComp), ...
+                'Resample surface', 0);
+            return;
+        end
+
+        % --- Registered sphere, normalized to the unit sphere ---
+        SphVert = TessMat.Reg.Sphere.Vertices;
+        SphVert = bst_bsxfun(@rdivide, SphVert, sqrt(sum(SphVert.^2, 2)));
+
+        % --- Regular icosahedral grid at the target order (snaps to 642/2562/10242/40962) ---
+        [IcoVert, IcoFaces] = tess_sphere(newNbVertices);
+        IcoVert = bst_bsxfun(@rdivide, IcoVert, sqrt(sum(IcoVert.^2, 2)));
+        nIco = size(IcoVert, 1);
+
+        % --- Snap each ico node to the nearest subject vertex (max dot product), chunked ---
+        bst_progress('text', 'Mapping icosphere nodes to subject vertices...');
+        sel = zeros(nIco, 1);
+        chunkSize = 500;
+        for iStart = 1:chunkSize:nIco
+            iEnd = min(iStart + chunkSize - 1, nIco);
+            dotProd = IcoVert(iStart:iEnd, :) * SphVert';
+            [~, sel(iStart:iEnd)] = max(dotProd, [], 2);
+        end
+
+        % --- Resolve collisions so the mapping is injective (keeps IcoFaces valid) ---
+        sel = resolve_ico_collisions(sel, IcoVert, SphVert);
+
+        % --- Build the new surface: anatomical coords at sel, faces from the ico grid ---
+        NewTessMat.Vertices = TessMat.Vertices(sel, :);
+        NewTessMat.Faces    = IcoFaces;
+
+        % --- Match the source surface's face winding (Brainstorm convention) ---
+        % The ico grid winding (from convhulln/tess_sphere) is arbitrary. The source
+        % surface is already in Brainstorm orientation (needed for forward modeling,
+        % normals and rendering), so flip the ico faces to match its winding SIGN
+        % rather than forcing an absolute "outward" rule. Both are closed surfaces, so
+        % the sign of sum(v1 . (v2 x v3)) is a valid winding indicator.
+        srcF = TessMat.Faces;
+        srcVol = sum(sum(TessMat.Vertices(srcF(:,1),:) .* cross(TessMat.Vertices(srcF(:,2),:), TessMat.Vertices(srcF(:,3),:), 2)));
+        icoF = NewTessMat.Faces;
+        icoVol = sum(sum(NewTessMat.Vertices(icoF(:,1),:) .* cross(NewTessMat.Vertices(icoF(:,2),:), NewTessMat.Vertices(icoF(:,3),:), 2)));
+        if (sign(icoVol) ~= sign(srcVol))
+            NewTessMat.Faces = NewTessMat.Faces(:, [2 1 3]);
+        end
+
+        % --- Carry over vertex colors if present ---
+        if ~isempty(TessMat.Color) && (size(TessMat.Color, 1) >= size(TessMat.Vertices, 1))
+            NewTessMat.Color = TessMat.Color(sel, :);
+        end
+
+        % --- I / J for downstream remapping; sort to match the reducepatch convention ---
+        [I, iSort] = sort(sel);                 % I = kept subject-vertex indices, ascending
+        NewTessMat.Vertices = TessMat.Vertices(I, :);
+        if isfield(NewTessMat, 'Color') && ~isempty(NewTessMat.Color)
+            NewTessMat.Color = NewTessMat.Color(iSort, :);
+        end
+        invSort(iSort) = 1:nIco;                % ico-order -> sorted position
+        NewTessMat.Faces = invSort(NewTessMat.Faces);
+        J = (1:nIco)';                          % new indices 1..nNew
+
+        MethodTag = '_ico';
+        disp(sprintf('BST> Icosphere resampling: requested %d, snapped to ico grid of %d vertices.', ...
+                     newNbVertices, nIco));
+        % Override newNbVertices so filename/comment reflect the actual count
+        newNbVertices = nIco;
+
+
     % ===== ISO2MESH + PROJECT =====
-    % Using iso2mesh toolbox: good surfaces with equal triangle sizes, but no 
+    % Using iso2mesh toolbox: good surfaces with equal triangle sizes, but no
     % correspondence of vertices in the original surface, and impossible to reconstruct the info
     case 'iso2mesh_project'
         % Reduce number of vertices
@@ -627,6 +721,56 @@ end
 %         NewTessMat = iso2mesh_resample(TessMat, dsFactor, nCall + 1);
 %     end
 % end
+
+
+%% ===== RESOLVE ICO COLLISIONS =====
+% Ensure injective mapping from ico nodes to subject vertices.
+% When two ico nodes snap to the same subject vertex, keep the closer one
+% and reassign the other to its next-nearest UNUSED subject vertex.
+function sel = resolve_ico_collisions(sel, IcoVert, SphVert)
+    nIco = length(sel);
+    % Find duplicates
+    [~, iFirstOccurrence, ~] = unique(sel, 'first');
+    isDuplicate = true(nIco, 1);
+    isDuplicate(iFirstOccurrence) = false;
+    iDups = find(isDuplicate);
+    if isempty(iDups)
+        return;
+    end
+    disp(sprintf('BST> Icosphere: resolving %d collision(s)...', length(iDups)));
+
+    % For each duplicated subject vertex, keep the ico node with highest dot product
+    usedSubjVerts = false(size(SphVert, 1), 1);
+    % Build a map: subject vertex -> list of ico nodes that map to it
+    dupSubjVerts = unique(sel(iDups));
+    for k = 1:length(dupSubjVerts)
+        sv = dupSubjVerts(k);
+        iConflict = find(sel == sv);
+        % Compute dot products for each conflicting ico node with this subject vertex
+        dots = IcoVert(iConflict, :) * SphVert(sv, :)';
+        [~, iBest] = max(dots);
+        % Mark all except the best as needing reassignment
+        iReassign = iConflict;
+        iReassign(iBest) = [];
+        sel(iReassign) = 0;  % Mark for reassignment
+    end
+
+    % Mark all successfully assigned subject vertices as used
+    usedSubjVerts(sel(sel > 0)) = true;
+
+    % Reassign each unassigned ico node to its nearest unused subject vertex
+    iUnassigned = find(sel == 0);
+    for k = 1:length(iUnassigned)
+        iIco = iUnassigned(k);
+        % Dot product with all subject vertices
+        dots = IcoVert(iIco, :) * SphVert';
+        % Mask out already-used vertices
+        dots(usedSubjVerts) = -Inf;
+        [~, iBest] = max(dots);
+        sel(iIco) = iBest;
+        usedSubjVerts(iBest) = true;
+    end
+end
 
 
 
