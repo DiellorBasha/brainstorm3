@@ -188,6 +188,20 @@ else
     sMri = bst_history('add', sMri, 'import', ['Import from: ' MriFile]);
 end
 
+% PET: capture tracer / timing / scanner metadata into the data model
+% (BIDS JSON sidecar if available, NIfTI header as fallback). This makes the
+% metadata a first-class, inspectable part of the PET volume that all downstream
+% PET steps (windowing, SUVR, surface projection) read from.
+if isPet && ~iscell(MriFile)
+    sMri.PET = pet_helper('ReadMetadata', MriFile, sMri);
+    % Resolve the scanner resolution now, while the scanner metadata is at hand, and store it
+    % with the volume (PET.PsfFwhm). Falls back to 6 mm when the scanner is not identified.
+    [sMri.PET.PsfFwhm, sMri.PET.PsfSource] = pet_helper('ScannerFwhm', sMri.PET);
+    sMri.PET.SmoothFwhm = [];   % Gaussian smoothing applied after import (see pet_helper('PsfFwhm'))
+    sMri = bst_history('add', sMri, 'import', ['PET scanner resolution (PSF FWHM): ' sMri.PET.PsfSource]);
+    disp(['BST> PET scanner resolution (PSF FWHM): ' sMri.PET.PsfSource]);
+end
+
 
 %% ===== DELETE TEMPORARY FILES =====
 if ~isempty(TmpDir)
